@@ -667,7 +667,7 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
                 break;
             default: {
                 char m[64];
-                std::snprintf(m, sizeof m, "%s: COMING SOON", kButtons[h - H_BUTTON]);
+                std::snprintf(m, sizeof m, "PLST: LOAD SAMPLES IN DISK OP. (SAMPLES FILTER)");
                 setStatus(m);
                 break;
             }

@@ -8,6 +8,7 @@
 #include "audio/engine.h"
 #include "formats/formats.h"
 #include "formats/sample_io.h"
+#include "ui/cursor.h"
 #include "ui/font.h"
 #include "ui/gfx.h"
 #include "ui/play_screen.h"
@@ -21,6 +22,8 @@ Gfx g_gfx;
 Text g_text;
 Font g_font;
 Engine* g_engine = nullptr;
+AmigaCursors g_cursors;
+bool g_busy = false;
 PlayScreen g_screen;
 HWND g_hwnd = nullptr;
 bool g_dirty = true;
@@ -112,8 +115,11 @@ void confirmDiscard(HWND hwnd, std::function<void()> then);
 bool saveAsDialog(HWND hwnd);
 
 bool saveTo(const std::wstring& path, SaveKind kind) {
-    SetCursor(LoadCursorW(nullptr, IDC_WAIT));
+    g_busy = true;
+    SetCursor(g_cursors.busy());
     SaveResult r = saveSong(*g_engine, path, kind);
+    g_busy = false;
+    SetCursor(g_cursors.arrow());
     g_screen.setStatus(r.message);
     if (r.ok && kind == SaveKind::Xm) {
         g_path = path;
@@ -232,7 +238,14 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_gfx.resize(LOWORD(lp), HIWORD(lp));
             g_dirty = true;
             return 0;
+        case WM_SETCURSOR:
+            if (LOWORD(lp) == HTCLIENT) {
+                SetCursor(g_busy ? g_cursors.busy() : g_cursors.arrow());
+                return TRUE;
+            }
+            break;
         case WM_DPICHANGED: {
+            g_cursors.build(HIWORD(wp));
             const RECT* r = (const RECT*)lp;
             SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
@@ -336,6 +349,10 @@ int screenshotMode() {
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     int result = -1;
+    if (argv && argc >= 3 && lstrcmpW(argv[1], L"--cursor") == 0) {  // dev: cursor artwork preview
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        result = AmigaCursors::savePng(argv[2], 64) ? 0 : 1;
+    }
     if (argv && argc >= 3 && lstrcmpW(argv[1], L"--shot") == 0) {
         uint32_t w = argc >= 5 ? (uint32_t)_wtoi(argv[3]) : 1920;
         uint32_t h = argc >= 5 ? (uint32_t)_wtoi(argv[4]) : 1080;
@@ -411,7 +428,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     wc.style = CS_DBLCLKS;
     wc.lpfnWndProc = wndProc;
     wc.hInstance = inst;
-    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hCursor = nullptr;  // Amiga cursor set in WM_SETCURSOR
     wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(1));
     wc.lpszClassName = L"FatTrackerWnd";
     RegisterClassExW(&wc);
@@ -425,6 +442,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
                                 CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top, nullptr, nullptr,
                                 inst, nullptr);
     g_hwnd = hwnd;
+    if (hwnd) g_cursors.build(GetDpiForWindow(hwnd));
     if (!hwnd || !g_gfx.init(hwnd)) {
         MessageBoxW(nullptr, L"Direct2D initialization failed.", L"FatTracker", MB_ICONERROR);
         return 1;
