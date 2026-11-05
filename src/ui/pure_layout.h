@@ -32,6 +32,8 @@ enum Id : int {
     kTrack = 80,       // + 0..3 (pattern area columns)
     kRowNumbers = 90,
     kExit = 91,        // EXIT PURE button in the line under the scopes
+    kSongName = 92,    // click: edit the song name
+    kSampleName = 93,  // click: edit the sample name
 };
 
 Box counterLabel(int row);

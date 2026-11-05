@@ -169,3 +169,10 @@ TEST(pixel_font_counter_arrows_are_five_wide) {
         CHECK_EQ(glyphWidth('\x02', f), 5);
     }
 }
+
+TEST(pure_layout_name_rows_are_clickable) {
+    using namespace pure;
+    CHECK_EQ(hitTest(150, songRow().y + 4), kSongName);
+    CHECK_EQ(hitTest(150, sampleRow().y + 4), kSampleName);
+    CHECK_EQ(hitTest(loadButton().x + 4, loadButton().y + 4), kLoad);  // LOAD keeps working
+}

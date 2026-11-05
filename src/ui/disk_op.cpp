@@ -8,11 +8,11 @@
 namespace {
 enum {
     D_MODULES, D_SAMPLES, D_ALL, D_PARENT, D_HOME, D_DRIVES,
-    D_LOAD, D_SAVEXM, D_EXPMOD, D_EXPWAV, D_SAVESMP, D_DELETE, D_EXIT, D_COUNT
+    D_LOAD, D_SAVEXM, D_EXPMOD, D_EXPWAV, D_SAVESMP, D_RENAME, D_DELETE, D_EXIT, D_COUNT
 };
 const char* const kDiskButtons[D_COUNT] = {"MODULES", "SAMPLES", "ALL FILES", "PARENT",     "HOME",
                                           "DRIVES",  "LOAD",    "SAVE XM",   "EXPORT MOD", "EXPORT WAV",
-                                          "SAVE SAMPLE", "DELETE", "EXIT"};
+                                          "SAVE SAMPLE", "RENAME", "DELETE", "EXIT"};
 constexpr float kRowH = 26.f;
 
 bool hasExt(const std::wstring& n, std::initializer_list<const wchar_t*> exts) {
@@ -227,6 +227,29 @@ UiAction PlayScreen::diskMouse(float x, float y, bool, Engine& e) {
             case D_SAVESMP:
                 actionPath_ = target(L".wav");
                 return UiAction::SaveSamplePath;
+            case D_RENAME: {  // the selected file gets the name typed in the NAME field
+                if (diskSel_ >= (int)entries_.size() || entries_[diskSel_].dir || dir_ == L"::drives")
+                    return setStatus("SELECT A FILE FIRST"), UiAction::Redraw;
+                std::wstring to = fileName_;
+                if (to.empty()) return setStatus("TYPE THE NEW NAME IN THE NAME FIELD"), UiAction::Redraw;
+                const std::wstring& from = entries_[diskSel_].name;
+                const size_t dot = from.find_last_of(L'.');
+                if (to.find(L'.') == std::wstring::npos && dot != std::wstring::npos) to += from.substr(dot);
+                const std::wstring src = dir_ + L"\\" + from, dst = dir_ + L"\\" + to;
+                auto doRename = [this, src, dst](bool replace) {
+                    const bool ok = MoveFileExW(src.c_str(), dst.c_str(), replace ? MOVEFILE_REPLACE_EXISTING : 0) != 0;
+                    setStatus(ok ? "FILE RENAMED" : "ERROR: CANNOT RENAME FILE");
+                    diskRefresh();
+                };
+                if (GetFileAttributesW(dst.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    ask("A FILE WITH THIS NAME EXISTS. REPLACE IT?", {"REPLACE", "CANCEL"}, [doRename](int a) {
+                        if (a == 0) doRename(true);
+                    });
+                } else {
+                    doRename(false);
+                }
+                return UiAction::Redraw;
+            }
             case D_DELETE: {
                 if (diskSel_ >= (int)entries_.size() || entries_[diskSel_].dir) return UiAction::None;
                 const std::wstring path = dir_ + L"\\" + entries_[diskSel_].name;
@@ -289,6 +312,10 @@ UiAction PlayScreen::diskKey(unsigned vk, bool, Engine& e) {
 }
 
 UiAction PlayScreen::onChar(wchar_t c, Engine&) {
+    if (nameEdit_) {  // song / sample name being typed
+        if (c >= 32 && c < 127) line_.insert((char)c);
+        return UiAction::Redraw;
+    }
     if (panel_ != Panel::DiskOp || dialog_.open) return UiAction::None;
     const wchar_t* bad = L"\\/:*?\"<>|";
     if (c < 32 || wcschr(bad, c) || fileName_.size() >= 60) return UiAction::None;

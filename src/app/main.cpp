@@ -672,6 +672,16 @@ int screenshotMode() {
                     else break;
                     tok += 2;
                 }
+                if (!wcsncmp(tok, L"NAME:", 5)) {  // start editing the song (1) or sample (2) name
+                    g_screen.startNameEdit(_wtoi(tok + 5), *g_engine);
+                    drawFrame();
+                    continue;
+                }
+                if (!wcsncmp(tok, L"TXT:", 4)) {  // type characters ('_' = space)
+                    for (const wchar_t* p = tok + 4; *p; ++p) g_screen.onChar(*p == L'_' ? L' ' : *p, *g_engine);
+                    drawFrame();
+                    continue;
+                }
                 if (!wcsncmp(tok, L"FXT:", 4)) {  // logo box demo time in seconds
                     g_screen.setDemoTime(_wtof(tok + 4));
                     drawFrame();

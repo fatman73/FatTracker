@@ -47,7 +47,8 @@ int hitTest(int x, int y) {
         if (scope(i).contains(x, y)) return kScope + i;
     if (loadButton().contains(x, y)) return kLoad;
     if (exitButton().contains(x, y)) return kExit;
-    if (exitButton().contains(x, y)) return kExit;
+    if (songRow().contains(x, y)) return kSongName;
+    if (sampleRow().contains(x, y)) return kSampleName;
     for (int d = 0; d < 2; ++d)
         if (tempoArrow(d).contains(x, y)) return d ? kTempoDown : kTempoUp;
     for (int i = 0; i < 4; ++i)
