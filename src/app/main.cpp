@@ -9,6 +9,8 @@
 #include "formats/writers.h"
 #include "audio/engine.h"
 #include "formats/formats.h"
+#include "audio/capture.h"
+#include "core/sample_edit.h"
 #include "core/tfmx_player.h"
 #include "formats/sample_io.h"
 #include "ui/cursor.h"
@@ -25,6 +27,7 @@ Gfx g_gfx;
 Text g_text;
 Font g_font;
 Engine* g_engine = nullptr;
+AudioCapture g_capture;  // sampler SAMPLE button: recording from the audio input
 AmigaCursors g_cursors;
 bool g_busy = false;
 PlayScreen g_screen;
@@ -189,6 +192,32 @@ bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smp
     g_screen.setCurrentPath(mdatPath);
     updateTitle();
     return true;
+}
+
+// The sampler's SAMPLE button: first press records, second press puts the recording in the slot.
+void finishRecording() {
+    const uint32_t rate = g_capture.rate();
+    std::vector<float> rec = g_capture.take();
+    g_screen.setRecording(false);
+    if (rec.size() < rate / 50) {
+        g_screen.setStatus("NOTHING RECORDED");
+        return;
+    }
+    const double secs = (double)rec.size() / rate;
+    g_screen.sampleLoaded(*g_engine, sampleFromRecording(rec.data(), rec.size(), rate), L"RECORDING");
+    static char msg[48];
+    wsprintfA(msg, "RECORDED %d.%d S", (int)secs, (int)(secs * 10) % 10);
+    g_screen.setStatus(msg);
+}
+
+void toggleRecording() {
+    if (g_capture.running()) return finishRecording();
+    if (!g_capture.start()) {
+        g_screen.setStatus("NO AUDIO INPUT TO RECORD FROM");
+        return;
+    }
+    g_screen.setRecording(true);
+    g_screen.setStatus("RECORDING... PRESS SAMPLE TO STOP");
 }
 
 bool loadModuleFile(const wchar_t* path) {
@@ -436,6 +465,7 @@ void handle(UiAction a, HWND hwnd) {
         else g_screen.ask("FILE EXISTS. OVERWRITE?", {"OVERWRITE", "CANCEL"}, [save](int r) { if (r == 0) save(); });
     }
     if (g_screen.takeDirRead()) g_engine->floppyDir();
+    if (g_screen.takeRecordRequest()) toggleRecording();
     if (a != UiAction::None) {
         g_dirty = true;
         updateTitle();
@@ -555,6 +585,18 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_TIMER:
             if (wp == kTimerFloppy) finishPendingLoad();
+            if (g_screen.recording()) {  // recording: show time and level, stop at the limit
+                if (!g_capture.running()) {
+                    finishRecording();
+                } else {
+                    static char recMsg[64];
+                    const int lvl = (int)(g_capture.level() * 20);
+                    char bar[21] = {};
+                    for (int i = 0; i < 20; ++i) bar[i] = i < lvl ? '#' : '.';
+                    wsprintfA(recMsg, "RECORDING %d S  %s", (int)g_capture.seconds(), bar);
+                    g_screen.setStatus(recMsg);
+                }
+            }
             if (wp == kTimerAudio) {
                 g_engine->pollAudio();
                 if (const char* st = g_engine->audioStatus())
@@ -580,6 +622,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             confirmDiscard(hwnd, [hwnd]() { DestroyWindow(hwnd); });
             return 0;
         case WM_DESTROY:
+            g_capture.stop();
             g_screen.saveSettings(iniPath().c_str());
             PostQuitMessage(0);
             return 0;

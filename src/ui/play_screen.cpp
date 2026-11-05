@@ -1,4 +1,5 @@
 #include "ui/play_screen.h"
+#include "core/sample_edit.h"
 #include "ui/pure_layout.h"
 
 #include <algorithm>
@@ -585,6 +586,15 @@ bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
         const uint32_t pos = xToSample(x);
         if (drag_ == 1) {
             selB_ = pos;
+        } else if (drag_ == 4 && e.song() && curSampleIndex(*e.song()) >= 0) {  // pencil stroke
+            const int idx = curSampleIndex(*e.song());
+            const int v = yToValue(y, e.song()->samples[idx].is16);
+            const uint32_t x0 = drawLastX_;
+            const int v0 = drawLastV_;
+            e.edit([&](Song& song) { sampleDraw(song.samples[idx], x0, v0, pos, v); });
+            drawLastX_ = pos;
+            drawLastV_ = v;
+            editor_.markDirty();
         } else if (e.song() && curSampleIndex(*e.song()) >= 0) {
             const int idx = curSampleIndex(*e.song());
             const int which = drag_;

@@ -181,6 +181,12 @@ private:
     RectF samplerWave() const;
     RectF samplerButton(int i) const;
     uint32_t xToSample(float x) const;
+    int yToValue(float y, bool is16) const;  // pencil height -> sample value
+    bool drawMode_ = false;                  // DRAW: dragging in the wave draws
+    uint32_t drawLastX_ = 0;
+    int drawLastV_ = 0;
+    bool recordRequested_ = false;           // SAMPLE pressed: the app starts / stops recording
+    bool sampling_ = false;                  // recording from the audio input
     float sampleToX(uint32_t i) const;
     // EDIT OP.
     int quantize_ = 1;
@@ -213,6 +219,9 @@ public:
     int defaultChannels() const { return defaultChannels_; }
     void setPure(int mode, Engine& e);  // switches the classic theme too
     void setDemoEffect(int fx) { demo_.setEffect(fx); }  // logo box effect (dev screenshots)
-    void setDemoTime(double s) { demoTime_ = s; }       // fixed demo time (dev screenshots), < 0 = clock
+    void setDemoTime(double s) { demoTime_ = s; }
+    bool takeRecordRequest() { const bool r = recordRequested_; recordRequested_ = false; return r; }
+    void setRecording(bool on) { sampling_ = on; }
+    bool recording() const { return sampling_; }       // fixed demo time (dev screenshots), < 0 = clock
     bool takeDirRead() { const bool r = dirRead_; dirRead_ = false; return r; }  // DISK OP. listed a folder
 };

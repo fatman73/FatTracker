@@ -11,24 +11,34 @@
 namespace {
 enum {
     S_PLAY, S_PLAYSEL, S_STOP, S_CUT, S_COPY, S_PASTE, S_CROP, S_SILENCE, S_REVERSE, S_NORMALIZE,
-    S_FADEIN, S_FADEOUT, S_VOLDN, S_VOLUP, S_BITS, S_LOOP, S_SHOWALL, S_ZOOMSEL, S_UNDO, S_EXIT, S_COUNT
+    S_FADEIN, S_FADEOUT, S_VOLDN, S_VOLUP, S_BITS, S_LOOP, S_SHOWALL, S_ZOOMSEL, S_UNDO, S_EXIT,
+    S_RESAMPLE, S_TUNE, S_MIX, S_LOWPASS, S_HIGHPASS, S_ECHO, S_BOOST, S_DRAW, S_RECORD, S_NEW, S_COUNT
 };
 const char* const kSamplerButtons[S_COUNT] = {"PLAY",   "PLAY SEL", "STOP",     "CUT",     "COPY",
                                              "PASTE",  "CROP",     "SILENCE",  "REVERSE", "NORMALIZE",
                                              "FADE IN", "FADE OUT", "VOL -",   "VOL +",   "8/16 BIT",
-                                             "LOOP",   "SHOW ALL", "ZOOM SEL", "UNDO",    "EXIT"};
+                                             "LOOP",   "SHOW ALL", "ZOOM SEL", "UNDO",    "EXIT",
+                                             "RESAMPLE", "TUNE C", "MIX",      "LOW PASS", "HIGH PASS",
+                                             "ECHO",   "BOOST",    "DRAW",     "SAMPLE",  "NEW"};
 constexpr int kHitSampler = 700;
 }  // namespace
 
 RectF PlayScreen::samplerWave() const {
     const RectF a = bottomArea();
-    return {a.x + 8, a.y + 44, a.w - 16, a.h - 44 - 2 * 46 - 12};
+    return {a.x + 8, a.y + 44, a.w - 16, a.h - 44 - 3 * 46 - 12};
 }
 
 RectF PlayScreen::samplerButton(int i) const {
     const RectF a = bottomArea();
     const float w = (a.w - 16 - 9 * 6) / 10;
-    return {a.x + 8 + (i % 10) * (w + 6), a.y + a.h - 2 * 46 - 4 + (i / 10) * 46, w, 40};
+    return {a.x + 8 + (i % 10) * (w + 6), a.y + a.h - 3 * 46 - 4 + (i / 10) * 46, w, 40};
+}
+
+int PlayScreen::yToValue(float y, bool is16) const {
+    const RectF w = samplerWave();
+    const float mid = w.y + w.h / 2, half = w.h / 2 - 4;
+    const float v = std::clamp((mid - y) / half, -1.f, 1.f);
+    return (int)std::lround(v * (is16 ? 32767 : 127));
 }
 
 float PlayScreen::sampleToX(uint32_t i) const {
@@ -120,12 +130,31 @@ void PlayScreen::samplerDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     g.popClip();
     for (int i = 0; i < S_COUNT; ++i) {
         Gfx::PanelState st = hover_ == kHitSampler + i ? Gfx::PanelState::Hover : Gfx::PanelState::Normal;
+        if ((i == S_DRAW && drawMode_) || (i == S_RECORD && sampling_)) st = Gfx::PanelState::Active;
         drawButton(u, samplerButton(i), kSamplerButtons[i], st, 14.f);
     }
 }
 
 void PlayScreen::samplerOp(int op, Engine& e) {
     const Song* s = e.song();
+    if (op == S_NEW) {  // a 64 byte looped sine tuned to C: a start for drawing chip sounds
+        Sample n;
+        n.length = 64;
+        n.data8.resize(64);
+        for (int i = 0; i < 64; ++i) n.data8[i] = (int8_t)std::lround(100 * std::sin(i * 6.283185307 / 64));
+        n.loop = LoopType::Forward;
+        n.loopLength = 64;
+        sampleSetRate(n, 261.6256 * 64);
+        sampleLoaded(e, static_cast<Sample&&>(n), L"NEW SINE");
+        viewStart_ = viewEnd_ = selA_ = selB_ = 0;
+        drawMode_ = true;
+        setStatus("NEW SAMPLE - DRAW MODE ON");
+        return;
+    }
+    if (op == S_RECORD) {
+        recordRequested_ = true;  // the app shell starts / stops the audio input
+        return;
+    }
     const int idx = s ? curSampleIndex(*s) : -1;
     if (idx < 0) return;
     const uint32_t len = s->samples[idx].length;
@@ -230,6 +259,47 @@ void PlayScreen::samplerOp(int op, Engine& e) {
         case S_EXIT:
             panel_ = Panel::Main;
             break;
+        case S_RESAMPLE:
+            ask("RESAMPLE THE SAMPLE (PITCH STAYS)", {"HALF", "DOUBLE", "CANCEL"}, [this, &e, idx](int k) {
+                if (k == 2) return;
+                const Song* song = e.song();
+                if (!song || idx >= (int)song->samples.size()) return;
+                e.editStructure([&](Song& sg) {
+                    sampleUndo_ = sg.samples[idx];
+                    sampleUndoIndex_ = idx;
+                    sampleResample(sg.samples[idx], k == 0 ? 0.5 : 2.0);
+                });
+                editor_.markDirty();
+                viewStart_ = viewEnd_ = selA_ = selB_ = 0;
+                setStatus(k == 0 ? "RESAMPLED: HALF LENGTH" : "RESAMPLED: DOUBLE LENGTH");
+            });
+            break;
+        case S_TUNE: {
+            bool ok = false;
+            modify([&](Sample& sm) { ok = sampleTuneToC(sm); }, "TUNED: C-4 PLAYS C");
+            if (!ok) setStatus("NO CLEAR PITCH FOUND");
+            break;
+        }
+        case S_MIX:
+            if (!sampleClip_.length) return setStatus("COPY SOMETHING TO MIX FIRST");
+            modify([&](Sample& sm) { sampleMix(sm, hasSel ? a : 0, sampleClip_); }, "MIXED");
+            break;
+        case S_LOWPASS:
+            modify([&](Sample& sm) { sampleLowPass(sm, a, b); }, "LOW PASS");
+            break;
+        case S_HIGHPASS:
+            modify([&](Sample& sm) { sampleHighPass(sm, a, b); }, "HIGH PASS");
+            break;
+        case S_ECHO:
+            modify([&](Sample& sm) { sampleEcho(sm, a, b); }, "ECHO");
+            break;
+        case S_BOOST:
+            modify([&](Sample& sm) { sampleBoost(sm, a, b); }, "BOOST");
+            break;
+        case S_DRAW:
+            drawMode_ = !drawMode_;
+            setStatus(drawMode_ ? "DRAW MODE: DRAG IN THE WAVE" : "DRAW MODE OFF");
+            break;
     }
 }
 
@@ -252,6 +322,18 @@ UiAction PlayScreen::samplerMouse(float x, float y, bool right, Engine& e) {
     }
     if (right) {  // right click: play from here
         e.previewNote(si, 49, xToSample(x));
+        return UiAction::Redraw;
+    }
+    if (drawMode_) {  // pencil: the undo copy is taken when the stroke starts
+        sampleUndo_ = sm;
+        sampleUndoIndex_ = si;
+        drag_ = 4;
+        drawLastX_ = xToSample(x);
+        drawLastV_ = yToValue(y, sm.is16);
+        const uint32_t px = drawLastX_;
+        const int pv = drawLastV_;
+        e.edit([&](Song& song) { sampleDraw(song.samples[si], px, pv, px, pv); });
+        editor_.markDirty();
         return UiAction::Redraw;
     }
     drag_ = 1;
