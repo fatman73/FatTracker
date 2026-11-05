@@ -356,8 +356,12 @@ void DemoFx::plasmaText(double t) {
     if (phase > 6.0) return;
     static const char* const kText = "FATTRACKER";
     const int n = (int)std::strlen(kText);
-    const double fade = std::min(1.0, std::min(phase, 6.0 - phase) / 0.8);
-    const double scale = (0.85 + 0.12 * std::sin(t * 2.4)) * (0.4 + 0.6 * fade);
+    // smooth in and out: the logo grows from nothing and shrinks back, colours fading with it
+    const double lin = std::min(1.0, std::min(phase, 6.0 - phase) / 1.2);
+    const double fade = lin * lin * (3 - 2 * lin);  // smoothstep
+    if (fade <= 0.01) return;
+    const int alpha = (int)(fade * 256);
+    const double scale = (0.85 + 0.12 * std::sin(t * 2.4)) * fade;
     const double sxs = scale * 3.6, sys = scale * 6.0;
     const double w = n * 8 * sxs, h = 7 * sys;
     const double ox = (W - w) / 2, oy = (H - h) / 2 + std::sin(t * 1.3) * 3;
@@ -374,10 +378,10 @@ void DemoFx::plasmaText(double t) {
         for (int x = 0; x < W; ++x) {
             uint32_t& d = px_[(size_t)y * W + x];
             if (mask[(size_t)y * W + x]) {
-                d = 0xFF000000u | (~d & 0xFFFFFF);  // inverted plasma inside the letters
+                blend(x, y, 0xFF000000u | (~d & 0xFFFFFF), alpha);  // inverted plasma inside the letters
             } else if ((x > 0 && mask[(size_t)y * W + x - 1]) || (x + 1 < W && mask[(size_t)y * W + x + 1]) ||
                        (y > 0 && mask[(size_t)(y - 1) * W + x]) || (y + 1 < H && mask[(size_t)(y + 1) * W + x])) {
-                d = rgbOf(0, 0, 0);  // dark rim around the letters
+                blend(x, y, rgbOf(0, 0, 0), alpha);  // dark rim around the letters
             }
         }
 }
