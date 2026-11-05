@@ -17,6 +17,10 @@ Engine::Engine() : srw_(nullptr), mixer_(new Mixer(48000)), player_(new Player(*
 }
 
 Engine::~Engine() {
+    if (watchEnum_) {
+        watchEnum_->UnregisterEndpointNotificationCallback(&watcher_);
+        watchEnum_->Release();
+    }
     audio_.close();
     delete player_;
     delete mixer_;
@@ -24,14 +28,25 @@ Engine::~Engine() {
 
 bool Engine::startAudio() {
     audioWanted_ = true;
-    return audio_.open(&Engine::audioCallback, this);
+    if (!watchEnum_ &&
+        SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                   __uuidof(IMMDeviceEnumerator), (void**)&watchEnum_)) &&
+        FAILED(watchEnum_->RegisterEndpointNotificationCallback(&watcher_))) {
+        watchEnum_->Release();
+        watchEnum_ = nullptr;
+    }
+    const bool ok = audio_.open(&Engine::audioCallback, this);
+    if (ok) ++openCount_;
+    return ok;
 }
 
 void Engine::pollAudio() {
     if (!audioWanted_) return;
-    if (!audio_.isOpen() || audio_.lost()) {
+    const bool changed = watcher_.takeChange() || reopenRequested_;
+    reopenRequested_ = false;
+    if (changed || !audio_.isOpen() || audio_.lost()) {
         audio_.close();
-        audio_.open(&Engine::audioCallback, this);
+        if (audio_.open(&Engine::audioCallback, this)) ++openCount_;
     }
 }
 

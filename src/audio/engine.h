@@ -33,7 +33,9 @@ public:
     Engine& operator=(const Engine&) = delete;
 
     bool startAudio();
-    void pollAudio();               // UI timer: reopen device if lost / not open
+    void pollAudio();               // UI timer: reopen if lost, not open, or the default device changed
+    void requestAudioReopen() { reopenRequested_ = true; }
+    uint32_t audioOpenCount() const { return openCount_; }
     const char* audioStatus() const;  // nullptr when OK
 
     void setSong(std::unique_ptr<Song> s);
@@ -58,7 +60,11 @@ private:
     Mixer* mixer_;
     Player* player_;
     AudioOut audio_;
+    DeviceWatcher watcher_;
+    IMMDeviceEnumerator* watchEnum_ = nullptr;  // keeps the watcher registered
     bool audioWanted_ = false;
+    bool reopenRequested_ = false;
+    uint32_t openCount_ = 0;
     uint64_t playFrames_ = 0;
     mutable std::atomic<uint32_t> seq_{0};
     Telemetry tel_{};

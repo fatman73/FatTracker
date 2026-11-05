@@ -1,10 +1,7 @@
 #include "audio/audio_out.h"
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
 #include <audioclient.h>
 #include <avrt.h>
-#include <mmdeviceapi.h>
 
 #include <vector>
 
@@ -17,6 +14,15 @@ void release(T*& p) {
     }
 }
 }  // namespace
+
+HRESULT STDMETHODCALLTYPE DeviceWatcher::QueryInterface(REFIID riid, void** out) {
+    if (riid == __uuidof(IUnknown) || riid == __uuidof(IMMNotificationClient)) {
+        *out = static_cast<IMMNotificationClient*>(this);
+        return S_OK;
+    }
+    *out = nullptr;
+    return E_NOINTERFACE;
+}
 
 bool AudioOut::open(RenderFn fn, void* user) {
     close();

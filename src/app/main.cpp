@@ -44,11 +44,13 @@ void toggleFullscreen(HWND hwnd) {
     g_dirty = true;
 }
 
-void drawFrame() {
+// Returns false when nothing could be drawn (minimized window, lost device).
+bool drawFrame() {
     const Theme& t = themeHybrid();
-    if (!g_gfx.beginFrame(t.background)) return;
+    if (!g_gfx.beginFrame(t.background)) return false;
     g_screen.draw(g_gfx, g_font, t, *g_engine);
     g_gfx.endFrame();
+    return true;
 }
 
 // Reads a whole file (max 256 MB). Returns an error string or nullptr.
@@ -253,7 +255,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
         }
         if (g_dirty || g_screen.animating()) {
             g_dirty = false;
-            drawFrame();  // Present() waits for vsync, pacing the loop
+            // Present() waits for vsync and paces the loop. When nothing can be drawn
+            // (minimized, device lost) there is no vsync, so sleep instead of spinning.
+            if (IsIconic(hwnd) || !drawFrame())
+                MsgWaitForMultipleObjects(0, nullptr, FALSE, 100, QS_ALLINPUT);
         } else {
             WaitMessage();
         }
