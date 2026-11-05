@@ -15,3 +15,17 @@ void sampleNormalize(Sample& s, uint32_t a, uint32_t b);
 void sampleTo16(Sample& s);
 void sampleTo8(Sample& s);
 void sampleFixLoop(Sample& s);  // clamps the loop to the sample
+
+// ---- sample editor tools (the selection [a, b) or the whole sample when a == b)
+double sampleRateHz(const Sample& s);         // playback rate at C-4 (from relative note + finetune)
+void sampleSetRate(Sample& s, double hz);     // relative note + finetune for a C-4 rate
+void sampleResample(Sample& s, double factor);  // length x factor (linear), pitch and loop kept
+double sampleDetectPitch(const Sample& s, uint32_t a, uint32_t b);  // cycles per sample, 0 = none
+bool sampleTuneToC(Sample& s);                // C-4 plays the detected fundamental as C (261.63 Hz)
+void sampleMix(Sample& s, uint32_t at, const Sample& clip);  // adds clip at `at`, grows the sample
+void sampleLowPass(Sample& s, uint32_t a, uint32_t b);
+void sampleHighPass(Sample& s, uint32_t a, uint32_t b);
+void sampleEcho(Sample& s, uint32_t a, uint32_t b);   // 1/8 s delay, 40 % feedback
+void sampleBoost(Sample& s, uint32_t a, uint32_t b);  // +6 dB with a soft knee
+void sampleDraw(Sample& s, uint32_t x0, int v0, uint32_t x1, int v1);  // pencil line, sample units
+Sample sampleFromRecording(const float* mono, size_t frames, uint32_t rate);  // 16-bit, tuned to the rate
