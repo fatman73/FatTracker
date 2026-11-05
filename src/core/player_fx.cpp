@@ -200,6 +200,9 @@ void Player::rowEffects(int c) {
             else
                 bpm_ = p;
             break;
+        default:
+            if (ft2) ft2RowEffects(c);
+            break;
     }
 }
 
@@ -269,7 +272,165 @@ void Player::tickEffects(int c) {
             }
             break;
         }
+        default:
+            if (ft2) ft2TickEffects(c);
+            break;
     }
 }
 
-void Player::volumeColumn(int, bool) {}
+void Player::volumeColumn(int c, bool tick0) {
+    ChannelState& ch = ch_[c];
+    const uint8_t v = ch.cell.vol, hi = v >> 4, lo = v & 15;
+    if (v < 0x10) return;
+    if (tick0) {
+        if (v >= 0x10 && v <= 0x50) {
+            ch.volume = (uint8_t)(v - 0x10);
+            return;
+        }
+        switch (hi) {
+            case 0x8:
+                ch.volume = clampVol(ch.volume - lo);
+                break;
+            case 0x9:
+                ch.volume = clampVol(ch.volume + lo);
+                break;
+            case 0xA:
+                ch.vibSpeed = lo;
+                break;
+            case 0xB:
+                if (lo) ch.vibDepth = lo;
+                break;
+            case 0xC:
+                ch.pan = (uint8_t)(lo * 17);
+                break;
+            case 0xF:
+                if (lo) ch.portaSpeed = (uint8_t)(lo * 16);
+                break;
+        }
+        return;
+    }
+    switch (hi) {
+        case 0x6:
+            ch.volume = clampVol(ch.volume - lo);
+            break;
+        case 0x7:
+            ch.volume = clampVol(ch.volume + lo);
+            break;
+        case 0xB:
+            doVibrato(c);
+            break;
+        case 0xD: {
+            int p = ch.pan - lo;
+            ch.pan = (uint8_t)(p < 0 ? 0 : p);
+            break;
+        }
+        case 0xE: {
+            int p = ch.pan + lo;
+            ch.pan = (uint8_t)(p > 255 ? 255 : p);
+            break;
+        }
+        case 0xF:
+            doTonePorta(c);
+            break;
+    }
+}
+
+void Player::ft2RowEffects(int c) {
+    ChannelState& ch = ch_[c];
+    const uint8_t fx = ch.cell.fx, p = ch.cell.param;
+    switch (fx) {
+        case kFxG:
+            globalVol_ = p > 64 ? 64 : p;
+            break;
+        case kFxH:
+            if (p) ch.memH = p;
+            break;
+        case kFxK:
+            if (p == 0) keyOff(c);
+            break;
+        case kFxL:
+            ch.volEnvTick = ch.panEnvTick = p;
+            break;
+        case kFxP:
+            if (p) ch.memP = p;
+            break;
+        case kFxR:
+            if (p) ch.memR = p;
+            break;
+        case kFxT:
+            if (p) ch.memT = p;
+            break;
+        case kFxX: {
+            const uint8_t x = p & 15;
+            if ((p >> 4) == 1) {
+                if (x) ch.memX1 = x;
+                ch.period -= ch.memX1;
+                if (ch.period < 1) ch.period = 1;
+            } else if ((p >> 4) == 2) {
+                if (x) ch.memX2 = x;
+                ch.period += ch.memX2;
+            }
+            break;
+        }
+    }
+}
+
+void Player::ft2TickEffects(int c) {
+    ChannelState& ch = ch_[c];
+    const uint8_t fx = ch.cell.fx, p = ch.cell.param;
+    switch (fx) {
+        case kFxH: {
+            int g = globalVol_;
+            if (ch.memH >> 4)
+                g += ch.memH >> 4;
+            else
+                g -= ch.memH & 15;
+            globalVol_ = (uint8_t)(g < 0 ? 0 : (g > 64 ? 64 : g));
+            break;
+        }
+        case kFxK:
+            if (tick_ == p) keyOff(c);
+            break;
+        case kFxP: {
+            int pan = ch.pan;
+            if (ch.memP >> 4)
+                pan += ch.memP >> 4;
+            else
+                pan -= ch.memP & 15;
+            ch.pan = (uint8_t)(pan < 0 ? 0 : (pan > 255 ? 255 : pan));
+            break;
+        }
+        case kFxR: {
+            const int interval = ch.memR & 15;
+            if (!interval || ch.sample < 0) break;
+            if (++ch.retrigCount < interval) break;
+            ch.retrigCount = 0;
+            int v = ch.volume;
+            switch (ch.memR >> 4) {
+                case 1: v -= 1; break;
+                case 2: v -= 2; break;
+                case 3: v -= 4; break;
+                case 4: v -= 8; break;
+                case 5: v -= 16; break;
+                case 6: v = v * 2 / 3; break;
+                case 7: v /= 2; break;
+                case 9: v += 1; break;
+                case 0xA: v += 2; break;
+                case 0xB: v += 4; break;
+                case 0xC: v += 8; break;
+                case 0xD: v += 16; break;
+                case 0xE: v = v * 3 / 2; break;
+                case 0xF: v *= 2; break;
+            }
+            ch.volume = clampVol(v);
+            mixer_.trigger(c, &song_->samples[ch.sample], 0);
+            break;
+        }
+        case kFxT: {
+            int on = (ch.memT >> 4) + 1, off = (ch.memT & 15) + 1;
+            ch.tremorMute = (ch.tremorPos % (on + off)) >= on;
+            ++ch.tremorPos;
+            break;
+        }
+    }
+}

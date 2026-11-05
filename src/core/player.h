@@ -87,6 +87,9 @@ private:
     void rowEffects(int c);   // tick 0
     void tickEffects(int c);  // ticks > 0 (and tick 0 of delayed rows)
     void volumeColumn(int c, bool tick0);
+    void ft2RowEffects(int c);
+    void ft2TickEffects(int c);
+    enum : uint8_t { kFxG = 16, kFxH = 17, kFxK = 20, kFxL = 21, kFxP = 25, kFxR = 27, kFxT = 29, kFxX = 33 };
     void doVolSlide(int c, uint8_t param);
     void doPortaUp(int c, int amount);
     void doPortaDown(int c, int amount);
