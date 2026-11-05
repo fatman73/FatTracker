@@ -108,6 +108,7 @@ private:
     uint8_t tick_ = 0, speed_ = 6, bpm_ = 125, globalVol_ = 64;
     uint8_t patDelay_ = 0;
     bool repeatingRow_ = false;
+    bool pendingStop_ = false;  // F00 seen on the current row
     bool posJump_ = false, break_ = false, loopJump_ = false;
     uint16_t jumpOrder_ = 0, breakRow_ = 0, loopTarget_ = 0;
     uint32_t visited_[8] = {};

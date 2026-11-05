@@ -1,4 +1,4 @@
-// FastTracker 2 XM loader (version 0x0104).
+﻿// FastTracker 2 XM loader (version 0x0104).
 #include <cstring>
 
 #include "core/reader.h"
@@ -75,7 +75,6 @@ Result<Song> xmLoad(const uint8_t* data, size_t size) {
         uint16_t packed = r.u16le();
         if (rows == 0 || rows > 256) rows = 64;
         Pattern pat = makePattern(rows, channels);
-        allocated += pat.cells.size() * sizeof(Cell);
         r.seek(start + (phLen < 9 ? 9 : phLen));
         size_t dataEnd = r.pos() + packed;
         if (packed) {
@@ -179,8 +178,10 @@ Result<Song> xmLoad(const uint8_t* data, size_t size) {
             Sample& sm = s.samples[base + k];
             sm.is16 = (raw[k].type & 0x10) != 0;
             uint32_t bytes = raw[k].len;
-            if (bytes > allocCap - allocated) {
-                bytes = (uint32_t)(allocCap - allocated);
+            // sample-data budget only; patterns are bounded by the format (256 x 256 rows x 32 ch)
+            const size_t left = allocated >= allocCap ? 0 : allocCap - allocated;
+            if (bytes > left) {
+                bytes = (uint32_t)left;
                 s.loadFlags |= LOAD_TRUNCATED;
             }
             uint32_t bps = sm.is16 ? 2 : 1;

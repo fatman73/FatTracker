@@ -1,6 +1,7 @@
 // FastTracker 2 instrument processing: envelopes, fadeout, autovibrato.
+#include <cmath>
+
 #include "core/player.h"
-#include "core/tables.h"
 
 namespace {
 uint8_t envValue(const Envelope& e, uint16_t t) {
@@ -25,6 +26,17 @@ void envAdvance(const Envelope& e, uint16_t& t, bool keyOn) {
     const uint16_t last = e.pts[e.count - 1].tick;
     if (t > last) t = last;
 }
+
+// FT2 autovibrato sine: 256 entries of +-64, starting negative.
+struct SineTab {
+    int8_t v[256];
+};
+SineTab makeSine() {
+    SineTab s{};
+    for (int i = 0; i < 256; ++i) s.v[i] = (int8_t)std::lround(-64.0 * std::sin(i * 6.283185307179586 / 256.0));
+    return s;
+}
+const SineTab kAutoVibSine = makeSine();
 }  // namespace
 
 void Player::instrumentTick(int c) {
@@ -43,21 +55,22 @@ void Player::instrumentTick(int c) {
         ch.fadeVol -= in.fadeout;
         if (ch.fadeVol < 0) ch.fadeVol = 0;
     }
-    if (in.vibDepth && in.vibRate) {
-        int depth = in.vibDepth;
+    if (in.vibDepth) {
+        // amplitude in 1/256 depth units, ramped in over `sweep` ticks (ft2 autoVibrato)
+        int amp = in.vibDepth << 8;
         if (in.vibSweep && ch.avSweep < in.vibSweep) {
-            depth = depth * ch.avSweep / in.vibSweep;
+            amp = amp * ch.avSweep / in.vibSweep;
             ++ch.avSweep;
         }
+        ch.avPos = (uint8_t)(ch.avPos + in.vibRate);  // FT2 advances before sampling
         const uint8_t pos = ch.avPos;
         int v;
         switch (in.vibType & 3) {
-            case 0: v = (pos & 128) ? -kVibratoSine[(pos >> 2) & 31] : kVibratoSine[(pos >> 2) & 31]; break;
-            case 1: v = (pos & 128) ? -255 : 255; break;
-            case 2: v = 255 - pos * 2; break;
-            default: v = pos * 2 - 255; break;
+            case 1: v = pos > 127 ? 64 : -64; break;                    // square
+            case 2: v = (((pos >> 1) + 64) & 127) - 64; break;          // ramp up
+            case 3: v = (((0 - (pos >> 1)) + 64) & 127) - 64; break;    // ramp down
+            default: v = kAutoVibSine.v[pos]; break;                    // sine
         }
-        ch.avDelta = (v * depth) >> 6;
-        ch.avPos = (uint8_t)(ch.avPos + in.vibRate);
+        ch.avDelta = (v * amp) >> 14;  // peak = +-depth period units
     }
 }

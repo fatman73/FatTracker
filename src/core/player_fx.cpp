@@ -194,7 +194,7 @@ void Player::rowEffects(int c) {
         }
         case 0xF:
             if (p == 0)
-                stop();
+                pendingStop_ = true;  // applied after the whole row, see processRow
             else if (p < 0x20)
                 speed_ = p;
             else
@@ -213,7 +213,8 @@ void Player::tickEffects(int c) {
     switch (fx) {
         case 0x0:
             if (p) {
-                int t = tick_ % 3;
+                // PT counts ticks up; FT2 indexes its arpeggio table with the down-counting timer
+                int t = ft2 ? (speed_ - tick_) % 3 : tick_ % 3;
                 if (t == 0) break;
                 int semis = t == 1 ? p >> 4 : p & 15;
                 if (!ft2) {

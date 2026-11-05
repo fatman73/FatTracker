@@ -41,6 +41,7 @@ void Player::start(uint16_t order, uint16_t row, bool patternMode, uint16_t patt
     tick_ = 0;
     patDelay_ = 0;
     repeatingRow_ = false;
+    pendingStop_ = false;
     posJump_ = break_ = loopJump_ = false;
     samplesLeft_ = 0;
     tickFrac_ = 0;
@@ -167,7 +168,7 @@ void Player::noteStart(int c) {
         return;
     }
     int32_t target = notePeriod(c, cell.note);
-    if (porta && ch.period != 0 && mixer_.active(c)) {
+    if (porta && ch.period != 0) {  // PT/FT2: tone porta only slides, never (re)triggers
         ch.portaTarget = target;
         ch.note = cell.note;
         return;
@@ -239,6 +240,10 @@ void Player::processRow() {
         if (isFT2() && !ch.delayPending) volumeColumn(c, true);
         rowEffects(c);
         updateOutputs(c);
+    }
+    if (pendingStop_) {
+        pendingStop_ = false;
+        stop();
     }
 }
 
