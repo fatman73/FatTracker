@@ -26,6 +26,7 @@ struct Sample {
     int8_t finetune = 0;     // -128..127 (MOD finetune * 16)
     int8_t relativeNote = 0;
     uint8_t pan = 128;       // 0..255
+    bool hasPan = true;      // false: notes keep the channel panning (S3M, 669, IT without default pan)
 };
 
 struct EnvPoint {

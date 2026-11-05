@@ -16,6 +16,12 @@ bool digiDetect(const uint8_t* data, size_t size);
 Result<Song> digiLoad(const uint8_t* data, size_t size);
 bool symDetect(const uint8_t* data, size_t size);
 Result<Song> symLoad(const uint8_t* data, size_t size);
+bool s3mDetect(const uint8_t* data, size_t size);
+Result<Song> s3mLoad(const uint8_t* data, size_t size);
+bool mtmDetect(const uint8_t* data, size_t size);
+Result<Song> mtmLoad(const uint8_t* data, size_t size);
+bool c669Detect(const uint8_t* data, size_t size);
+Result<Song> c669Load(const uint8_t* data, size_t size);
 
 // shared helpers
 uint8_t modPeriodToNote(int period);                 // Amiga period -> XM note (mod.cpp)

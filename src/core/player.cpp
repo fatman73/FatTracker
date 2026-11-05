@@ -181,7 +181,7 @@ void Player::noteStart(int c) {
             ch.volume = sm.volume;
             ch.finetune = sm.finetune;
             ch.relNote = sm.relativeNote;
-            if (ft2) ch.pan = sm.pan;
+            if (ft2 && sm.hasPan) ch.pan = sm.pan;
         }
         if (ft2) {
             ch.keyOn = true;

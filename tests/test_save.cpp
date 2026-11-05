@@ -168,7 +168,7 @@ TEST(unsupported_formats_are_named) {
     } cases[] = {{"TFMX-SONG ", 0, "UNSUPPORTED FORMAT: TFMX"},
                  {"MMD1", 0, "BAD OCTAMED FILE"},  // OctaMED is supported now: a header of zeros is broken
                  {"SymM", 0, "BAD SYMPHONIE FILE"},  // Symphonie is supported now: a header of zeros is broken
-                 {"SCRM", 44, "UNSUPPORTED FORMAT: SCREAM TRACKER 3"},
+                 {"SCRM", 44, "BAD S3M FILE"},  // S3M is supported now
                  {"IMPM", 0, "UNSUPPORTED FORMAT: IMPULSE TRACKER"}};
     for (auto& c : cases) {
         std::vector<uint8_t> d(2048, 0);
