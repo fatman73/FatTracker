@@ -31,7 +31,7 @@ void label(PixelCanvas& c, const pure::Box& b, const char* s) {  // embossed, ce
 }
 
 void value(PixelCanvas& c, const pure::Box& b, const char* s) {  // black, right aligned
-    c.text(b.x + b.w - 3 - (int)std::strlen(s) * 8 + 1, b.y + (b.h - 6) / 2 + 1, s, kValueInk, kMedium);
+    c.text(pure::valueX(b, (int)std::strlen(s)), b.y + (b.h - 6) / 2 + 1, s, kValueInk, kMedium);
 }
 
 // VU colour k pixels above the bar: green at the bottom, yellow, orange, red at the top.

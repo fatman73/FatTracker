@@ -52,6 +52,8 @@ Box tempoArrow(int dir);             // 0 up, 1 down
 Box track(int i);                    // whole column of track i in the pattern area
 Box rowNumbers();
 const char* buttonLabel(int i);
+// x of right aligned value text (8 px per character) keeping 1 px clear of the box bevel.
+int valueX(const Box& b, int chars);
 int hitTest(int x, int y);
 // Pattern row under y, relative to the centre row (0 = centre); false outside the pattern area.
 bool rowAt(int y, int& rel);
