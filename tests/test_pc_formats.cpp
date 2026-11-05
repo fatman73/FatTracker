@@ -38,28 +38,29 @@ struct Le {
 // S3M: 4 channels (L R R L), 1 sample (unsigned 8-bit, 64 frames, 8363 Hz, loop 8..40), 1 pattern.
 // Row 0 ch 0: C-4 sample 1, volume 32, A06 (speed). Row 1 ch 1: D-5, T96 (tempo). Row 2 ch 2: note cut,
 // D04 (volume slide down). Row 3 ch 3: S8F (pan) . Row 4 ch 0: C08 break to row 8 (BCD).
-std::vector<uint8_t> tinyS3m() {
+std::vector<uint8_t> tinyS3m(const std::vector<uint8_t>& orders = {0, 0xFF}, int chan4 = 255, int numSmp = 1,
+                             uint32_t dataLen = 64) {
     Le w;
     w.str("tiny s3m", 28);
     w.u8(0x1A), w.u8(16), w.u16(0);
-    w.u16(2), w.u16(1), w.u16(1), w.u16(0), w.u16(0x1320), w.u16(2);
+    w.u16((int)orders.size()), w.u16(numSmp), w.u16(1), w.u16(0), w.u16(0x1320), w.u16(2);
     w.str("SCRM", 4);
     w.u8(64), w.u8(5), w.u8(140), w.u8(0x80 | 48), w.u8(0), w.u8(0), w.u16(0), w.u32(0), w.u16(0), w.u16(0);
     const uint8_t chans[32] = {0, 8, 9, 1, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
                                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255};
-    for (uint8_t c : chans) w.u8(c);
-    w.u8(0), w.u8(0xFF);  // orders
+    for (int i = 0; i < 32; ++i) w.u8(i == 4 ? chan4 : chans[i]);
+    for (uint8_t o : orders) w.u8(o);
     const size_t smpPtr = w.b.size();
-    w.u16(0);
+    for (int i = 0; i < numSmp; ++i) w.u16(0);
     const size_t patPtr = w.b.size();
     w.u16(0);
     w.pad16();
     const size_t smpHdr = w.b.size();
-    w.put16(smpPtr, (int)(smpHdr / 16));
+    for (int i = 0; i < numSmp; ++i) w.put16(smpPtr + 2 * i, (int)(smpHdr / 16));
     w.u8(1), w.str("bass.raw", 12);
     const size_t dataPtrAt = w.b.size();
     w.u8(0), w.u16(0);
-    w.u32(64), w.u32(8), w.u32(40), w.u8(48), w.u8(0), w.u8(0), w.u8(1), w.u32(8363), w.zeros(12);
+    w.u32(dataLen), w.u32(8), w.u32(40), w.u8(48), w.u8(0), w.u8(0), w.u8(1), w.u32(8363), w.zeros(12);
     w.str("bass", 28), w.str("SCRS", 4);
     w.pad16();
     const size_t pat = w.b.size();
@@ -70,14 +71,15 @@ std::vector<uint8_t> tinyS3m() {
     p.u8(0x20 | 0x80 | 2), p.u8(0xFE), p.u8(0), p.u8(4), p.u8(0x04), p.u8(0);                 // row 2
     p.u8(0x80 | 3), p.u8(19), p.u8(0x8F), p.u8(0);                                           // row 3
     p.u8(0x80 | 0), p.u8(3), p.u8(0x08), p.u8(0);                                            // row 4
-    for (int r = 5; r < 64; ++r) p.u8(0);
+    p.u8(0x80 | 1), p.u8(2), p.u8(0x02), p.u8(0);                                            // row 5: B02
+    for (int r = 6; r < 64; ++r) p.u8(0);
     w.u16((int)p.b.size() + 2);
     w.b.insert(w.b.end(), p.b.begin(), p.b.end());
     w.pad16();
     const size_t data = w.b.size();
     w.b[dataPtrAt + 1] = (uint8_t)((data / 16) & 0xFF);
     w.b[dataPtrAt + 2] = (uint8_t)((data / 16) >> 8);
-    for (int i = 0; i < 64; ++i) w.u8(128 + i);  // unsigned
+    for (uint32_t i = 0; i < dataLen; ++i) w.u8(128 + (int)(i & 63));  // unsigned
     return w.b;
 }
 
@@ -220,6 +222,47 @@ TEST(s3m_notes_keep_channel_panning) {
     p.play();
     p.tick();
     CHECK_EQ(p.channel(0).pan, r.value().channelPan[0]);
+}
+
+TEST(s3m_order_list_is_capped_at_256) {
+    // the player tracks visited orders in 256 bits: longer lists must be cut
+    const auto f = tinyS3m(std::vector<uint8_t>(300, 0));
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (!r.ok()) return;
+    CHECK_EQ(r.value().order.size(), 256u);
+    CHECK(r.value().loadFlags & LOAD_TRUNCATED);
+}
+
+TEST(s3m_jumps_follow_removed_markers) {
+    // "+++" markers are dropped from the order list: B02 (third entry) must now point at the second
+    const auto f = tinyS3m({0, 0xFE, 0, 0xFF});
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (!r.ok()) return;
+    CHECK_EQ(r.value().order.size(), 2u);
+    CHECK_EQ(r.value().patterns[0].at(5, 1).fx, 0xB);
+    CHECK_EQ(r.value().patterns[0].at(5, 1).param, 1);
+}
+
+TEST(s3m_counts_modplug_channels_above_16) {
+    // ModPlug wrote channel types 16..31 for PCM channels 17..32
+    const auto f = tinyS3m({0, 0xFF}, 16);
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (r.ok()) CHECK_EQ(r.value().numChannels, 5);
+}
+
+TEST(s3m_shared_sample_data_is_budgeted) {
+    // 200 sample parapointers to one header with 64 KB of data must not allocate 200 copies
+    const auto f = tinyS3m({0, 0xFF}, 255, 200, 65536);
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (!r.ok()) return;
+    size_t bytes = 0;
+    for (const auto& s : r.value().samples) bytes += s.data8.size() + 2 * s.data16.size();
+    CHECK(bytes <= 2 * f.size() + 65536);
+    CHECK(r.value().loadFlags & LOAD_TRUNCATED);
 }
 
 TEST(mtm_basic_mapping) {

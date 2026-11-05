@@ -79,20 +79,21 @@ struct Packed {
 // withInstrument: one new-format instrument, C-5 -> sample 2, the rest -> sample 1, volume envelope
 // (0,64) (10,32) (20,0) with sustain on node 1, pan envelope -32 -> +32, fadeout 8.
 // packed: sample 1 holds this compressed data instead.
-std::vector<uint8_t> tinyIt(bool withInstrument = false, const Packed* packed = nullptr) {
+std::vector<uint8_t> tinyIt(bool withInstrument = false, const Packed* packed = nullptr,
+                            const std::vector<uint8_t>& orders = {0, 255}, bool flagOnly = false) {
     Out w;
     const int numIns = withInstrument ? 1 : 0, numSmp = withInstrument ? 2 : 1;
     w.str("IMPM", 4), w.str("tiny it", 26);
     w.u16(0x1004);
-    w.u16(2), w.u16(numIns), w.u16(numSmp), w.u16(1);
+    w.u16((int)orders.size()), w.u16(numIns), w.u16(numSmp), w.u16(1);
     w.u16(0x0214), w.u16(0x0214);
-    w.u16(1 | 8 | (withInstrument ? 4 : 0));  // stereo, linear slides, instruments
+    w.u16(1 | 8 | (withInstrument || flagOnly ? 4 : 0));  // stereo, linear slides, instruments
     w.u16(0);
     w.u8(128), w.u8(48), w.u8(4), w.u8(150), w.u8(128), w.u8(0);
     w.u16(0), w.u32(0), w.u32(0);
     for (int i = 0; i < 64; ++i) w.u8(i == 0 ? 0 : (i == 1 ? 64 : 32));
     for (int i = 0; i < 64; ++i) w.u8(64);
-    w.u8(0), w.u8(255);
+    for (uint8_t o : orders) w.u8(o);
     const size_t offs = w.b.size();
     w.zeros(4 * (numIns + numSmp + 1));
     if (withInstrument) {
@@ -137,7 +138,9 @@ std::vector<uint8_t> tinyIt(bool withInstrument = false, const Packed* packed = 
                                 {2, 0, 60, 0, 65 + 3},
                                 {3, 1, -1, 0, -1, 24, 0x80},
                                 {4, 1, -1, 0, -1, 22, 0x80},
-                                {5, 0, 254}},
+                                {5, 0, 254},
+                                {6, 0, -1, 0, -1, 3, 0x70},
+                                {7, 1, -1, 0, -1, 2, 2}},
                                2);
     w.u16((int)pat.size()), w.u16(64), w.u32(0);
     w.b.insert(w.b.end(), pat.begin(), pat.end());
@@ -204,6 +207,8 @@ TEST(it_sample_mode_mapping) {
     CHECK_EQ(p.at(5, 0).note, 0);  // note cut -> EC0
     CHECK_EQ(p.at(5, 0).fx, 0xE);
     CHECK_EQ(p.at(5, 0).param, 0xC0);
+    CHECK_EQ(p.at(6, 0).fx, 0xD);
+    CHECK_EQ(p.at(6, 0).param, 0xB2);  // row 112: the player reads hi * 10 + lo
     if (s.samples.empty()) return;
     const Sample& sm = s.samples[0];
     CHECK(std::strcmp(sm.name, "first") == 0);
@@ -289,4 +294,48 @@ TEST(it_survives_truncation_and_garbage) {
         auto r = loadModule(g.data(), g.size());
         (void)r;
     }
+}
+
+TEST(it_order_list_is_capped_at_256) {
+    const auto f = tinyIt(false, nullptr, std::vector<uint8_t>(300, 0));
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (!r.ok()) return;
+    CHECK_EQ(r.value().order.size(), 256u);
+    CHECK(r.value().loadFlags & LOAD_TRUNCATED);
+}
+
+TEST(it_jumps_follow_removed_orders) {
+    // "+++" (254) is dropped: B02 (third entry) must now point at the second
+    const auto f = tinyIt(false, nullptr, {0, 254, 0, 255});
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (!r.ok()) return;
+    CHECK_EQ(r.value().order.size(), 2u);
+    CHECK_EQ(r.value().patterns[0].at(7, 1).fx, 0xB);
+    CHECK_EQ(r.value().patterns[0].at(7, 1).param, 1);
+}
+
+TEST(it_block_without_samples_ends_the_sample) {
+    // a block of nothing but width changes is garbage: stop there instead of walking the rest of the file
+    Bits junk;
+    for (int i = 0; i < 20; ++i) junk.put(0x100 | 2, 9), junk.put(4, 3), junk.put(7, 3);
+    Bits good;
+    good.put(100, 9);
+    Packed pk{junk.block(), 1, false, false};
+    const auto g = good.block();
+    pk.data.insert(pk.data.end(), g.begin(), g.end());
+    Song keep;
+    const Sample* s = loadSample0(tinyIt(false, &pk), keep);
+    if (!s || s->data8.empty()) return;
+    CHECK_EQ(s->data8[0], 0);
+    CHECK(keep.loadFlags & LOAD_TRUNCATED);
+}
+
+TEST(it_instrument_flag_without_instruments_maps_nothing) {
+    const auto f = tinyIt(false, nullptr, {0, 255}, true);
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (!r.ok() || r.value().instruments.empty()) return;
+    CHECK_EQ(r.value().instruments[0].sampleMap[48], 0xFFFF);
 }

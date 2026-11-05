@@ -1,5 +1,7 @@
 // Per-format entry points used by the registry in formats.cpp.
 #pragma once
+#include <vector>
+
 #include "formats/formats.h"
 
 bool modDetect(const uint8_t* data, size_t size);
@@ -33,3 +35,6 @@ void pcLoop(Sample& s, uint32_t start, uint32_t end);              // forward lo
 void pcEffect(Cell& c, int cmd, int param, bool it);               // S3M / IT effect letter -> XM (s3m.cpp)
 class ByteReader;
 void pcReadPcm(ByteReader& r, Sample& s, uint32_t frames, bool is16, bool isUnsigned);  // LE PCM (s3m.cpp)
+// order list from raw entries (0xFF end, 0xFE skip, max 256); returns old index -> new index for Bxx
+std::vector<int> pcOrders(Song& s, const uint8_t* list, int n);
+void pcRemapJumps(Song& s, const std::vector<int>& remap);  // rewrites Bxx through pcOrders' map

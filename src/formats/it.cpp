@@ -30,7 +30,9 @@ struct BitIn {
 };
 
 // returns false when the data ran out before all frames were decoded
-bool decompress(const uint8_t* data, size_t size, size_t pos, Sample& s, uint32_t frames, bool is16, bool it215) {
+// work: block bytes the song may still decode (samples sharing data cannot multiply the work)
+bool decompress(const uint8_t* data, size_t size, size_t pos, Sample& s, uint32_t frames, bool is16, bool it215,
+                size_t& work) {
     const int defWidth = is16 ? 17 : 9, fetchA = is16 ? 4 : 3, lowerB = is16 ? -8 : -4, upperB = is16 ? 7 : 3;
     const uint32_t blockFrames = is16 ? 0x4000 : 0x8000;
     uint32_t written = 0;
@@ -39,9 +41,12 @@ bool decompress(const uint8_t* data, size_t size, size_t pos, Sample& s, uint32_
         const size_t bytes = le16(data + pos);
         pos += 2;
         if (!bytes) continue;
+        if (bytes > work) return false;
+        work -= bytes;
         BitIn in{data + pos, pos + bytes > size ? size - pos : bytes};
         pos += bytes;
         uint32_t left = frames - written < blockFrames ? frames - written : blockFrames;
+        const uint32_t startWritten = written;
         int width = defWidth;
         uint32_t mem1 = 0, mem2 = 0;
         auto write = [&](int v, int topBit) {
@@ -79,6 +84,7 @@ bool decompress(const uint8_t* data, size_t size, size_t pos, Sample& s, uint32_
                 else write(v & ~topBit, 0);
             }
         }
+        if (written == startWritten) return false;  // a block that decodes nothing is garbage
         if (pos > size) return false;
     }
     return true;
@@ -273,11 +279,7 @@ Result<Song> itLoad(const uint8_t* data, size_t size) {
         const int p = data[64 + i] & 0x7F;
         s.channelPan[i] = !stereo || p > 64 ? 0x80 : (uint8_t)(p * 4 > 255 ? 255 : p * 4);
     }
-    for (int i = 0; i < ordNum; ++i) {
-        const int o = data[192 + i];
-        if (o == 255) break;
-        if (o < 254 && o < patNum) s.order.push_back((uint8_t)(o > 255 ? 0 : o));
-    }
+    const std::vector<int> remap = pcOrders(s, data + 192, ordNum);
 
     // patterns: channel count = the highest channel with data (4..32)
     const int pats = patNum > 256 ? 256 : patNum;
@@ -306,7 +308,7 @@ Result<Song> itLoad(const uint8_t* data, size_t size) {
     }
 
     // samples
-    size_t budget = kSampleBudget;
+    size_t budget = kSampleBudget, work = 4 * size + 65536;
     s.samples.resize(smpNum);
     for (int i = 0; i < smpNum; ++i) {
         const uint32_t off = le32(smpOff + 4 * i);
@@ -340,7 +342,7 @@ Result<Song> itLoad(const uint8_t* data, size_t size) {
             sm.length = frames;
             if (is16) sm.data16.assign(frames, 0);
             else sm.data8.assign(frames, 0);
-            if (!decompress(data, size, ptr, sm, frames, is16, (cvt & 4) != 0)) s.loadFlags |= LOAD_TRUNCATED;
+            if (!decompress(data, size, ptr, sm, frames, is16, (cvt & 4) != 0, work)) s.loadFlags |= LOAD_TRUNCATED;
         } else {
             ByteReader dr(data, size);
             dr.seek(ptr);
@@ -382,9 +384,17 @@ Result<Song> itLoad(const uint8_t* data, size_t size) {
                 loadInstrument(data + off, cmwt < 0x200, smpNum, in);
             s.instruments.push_back(in);
         }
-        if (s.instruments.empty()) s.instruments.emplace_back();
+        if (s.instruments.empty()) {
+            Instrument none;
+            for (auto& m : none.sampleMap) m = kNoSample;
+            s.instruments.push_back(none);
+        }
     }
 
+    pcRemapJumps(s, remap);
+    // orders naming missing patterns play an empty pattern (as in Impulse Tracker)
+    for (uint8_t o : s.order)
+        while (o >= s.patterns.size()) s.patterns.push_back(makePattern(64, s.numChannels));
     if (s.patterns.empty()) s.patterns.push_back(makePattern(64, s.numChannels));
     if (s.order.empty()) s.order.push_back(0);
     for (auto& o : s.order)

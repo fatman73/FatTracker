@@ -27,6 +27,34 @@ void pcLoop(Sample& s, uint32_t start, uint32_t end) {
     s.loopLength = end - start;
 }
 
+std::vector<int> pcOrders(Song& s, const uint8_t* list, int n) {
+    std::vector<int> remap((size_t)n + 1, 0);
+    bool ended = false;
+    for (int i = 0; i < n; ++i) {
+        remap[i] = (int)s.order.size();  // a dropped entry jumps to the next kept one
+        const int o = list[i];
+        if (o == 0xFF) ended = true;
+        if (ended || o == 0xFE) continue;
+        if (s.order.size() >= 256) {
+            s.loadFlags |= LOAD_TRUNCATED;
+            ended = true;
+            continue;
+        }
+        s.order.push_back((uint8_t)o);
+    }
+    remap[n] = (int)s.order.size();
+    return remap;
+}
+
+void pcRemapJumps(Song& s, const std::vector<int>& remap) {
+    for (auto& pat : s.patterns)
+        for (auto& c : pat.cells)
+            if (c.fx == 0xB) {
+                const int to = c.param < (int)remap.size() ? remap[c.param] : (int)s.order.size();
+                c.param = (uint8_t)(to > 255 ? 255 : to);
+            }
+}
+
 // Reads `frames` of 8 / 16 bit (little endian) PCM, signed or unsigned.
 void pcReadPcm(ByteReader& r, Sample& s, uint32_t frames, bool is16, bool isUnsigned) {
     const size_t bytes = (size_t)frames * (is16 ? 2 : 1);
@@ -55,7 +83,7 @@ void pcEffect(Cell& c, int cmd, int p, bool it) {
     switch (cmd) {
         case 1: if (p) setFx(c, 0xF, p > 0x1F ? 0x1F : p); break;  // A speed
         case 2: setFx(c, 0xB, p); break;                            // B jump
-        case 3: setFx(c, 0xD, it ? ((p > 63 ? 63 : p) / 10) << 4 | (p > 63 ? 63 : p) % 10 : p); break;  // C break (player: BCD)
+        case 3: setFx(c, 0xD, it ? ((p > 159 ? 159 : p) / 10) << 4 | (p > 159 ? 159 : p) % 10 : p); break;  // C break (player: BCD)
         case 4:                                                     // D volume slide (fine forms DxF / DFy)
             if (hi == 0xF && lo) setFx(c, 0xE, 0xB0 | lo);
             else if (lo == 0xF && hi) setFx(c, 0xE, 0xA0 | hi);
@@ -96,10 +124,13 @@ void pcEffect(Cell& c, int cmd, int p, bool it) {
             }
             break;
         case 20: if (p >= 0x20) setFx(c, 0xF, p); break;            // T tempo (slides dropped)
-        case 21: setFx(c, 0x4, (p & 0xF0) | (lo / 4 ? lo / 4 : 1)); break;  // U fine vibrato
+        case 21: setFx(c, 0x4, (p & 0xF0) | (lo ? (lo / 4 ? lo / 4 : 1) : 0)); break;  // U fine vibrato
         case 22: setFx(c, 16, it ? (p > 128 ? 64 : p / 2) : (p > 64 ? 64 : p)); break;  // V global volume (XM G)
         case 23: setFx(c, 17, p); break;                            // W global volume slide (XM H)
-        case 24: setFx(c, 0x8, it ? p : (p >= 0x80 ? 0xFF : p * 2)); break;  // X panning (S3M 0..80)
+        case 24: setFx(c, 0x8, it ? p : (p == 0xA4 ? 0x80 : (p >= 0x80 ? 0xFF : p * 2))); break;  // X (S3M 0..80, A4 surround)
+        case 16:  // IT P: P0x slides right, Px0 left; XM P the other way round (fine forms dropped)
+            if (it && !((hi == 0xF && lo) || (lo == 0xF && hi))) setFx(c, 25, (lo << 4) | hi);
+            break;
         default: break;                                             // Y panbrello, Z midi
     }
 }
@@ -136,11 +167,11 @@ Result<Song> s3mLoad(const uint8_t* data, size_t size) {
     s.initialSpeed = (uint8_t)(speed < 1 ? 6 : (speed > 31 ? 31 : speed));
     s.initialBpm = (uint8_t)(tempo < 32 ? 125 : tempo);
     int channels = 4;
-    for (int i = 0; i < 32; ++i)
-        if ((chan[i] & 0x7F) < 16) channels = i + 1;
+    for (int i = 0; i < 32; ++i)  // 0..15 PCM / AdLib; ModPlug wrote 16..31 for PCM channels 17..32
+        if ((chan[i] & 0x7F) < 32) channels = i + 1;
     s.numChannels = (uint8_t)channels;
     const bool stereo = (master & 0x80) != 0;
-    for (int i = 0; i < 32; ++i) s.channelPan[i] = !stereo ? 0x80 : ((chan[i] & 0x7F) < 8 ? 0x33 : 0xCC);
+    for (int i = 0; i < 32; ++i) s.channelPan[i] = !stereo ? 0x80 : ((chan[i] & 8) ? 0xCC : 0x33);
     std::vector<uint8_t> orders(ordNum);
     if (ordNum) r.bytes(orders.data(), ordNum);
     std::vector<uint16_t> smpPara(smpNum), patPara(patNum);
@@ -151,13 +182,10 @@ Result<Song> s3mLoad(const uint8_t* data, size_t size) {
             const uint8_t b = r.u8();
             if ((b & 0x20) && stereo) s.channelPan[i] = (uint8_t)((b & 0x0F) * 17);
         }
-    for (uint8_t o : orders) {
-        if (o == 0xFF) break;
-        if (o == 0xFE) continue;  // marker
-        s.order.push_back(o);
-    }
+    const std::vector<int> remap = pcOrders(s, orders.data(), ordNum);
 
-    // samples
+    // samples: headers may share data, so the total is budgeted against the file size
+    size_t budget = 2 * size + 65536;
     s.samples.resize(smpNum);
     for (int i = 0; i < smpNum; ++i) {
         const size_t off = (size_t)smpPara[i] * 16;
@@ -181,7 +209,10 @@ Result<Song> s3mLoad(const uint8_t* data, size_t size) {
         if (ptr < size) {
             ByteReader dr(data, size);
             dr.seek(ptr);
-            pcReadPcm(dr, sm, len > (1u << 26) ? (1u << 26) : len, (flags & 4) != 0, format == 2);
+            const size_t bps = (flags & 4) ? 2 : 1;
+            const uint32_t most = (uint32_t)(budget / bps);
+            pcReadPcm(dr, sm, len > most ? most : len, (flags & 4) != 0, format == 2);
+            budget -= (size_t)sm.length * bps;
             if (sm.length < len) s.loadFlags |= LOAD_TRUNCATED;
         }
         if (flags & 1) pcLoop(sm, ls, le);
@@ -213,7 +244,7 @@ Result<Song> s3mLoad(const uint8_t* data, size_t size) {
                 }
                 if (what & 0x40) {
                     const int v = pr.u8();
-                    if (v <= 64) c.vol = (uint8_t)(0x10 + v);
+                    if (v != 0xFF) c.vol = (uint8_t)(0x10 + (v > 64 ? 64 : v));
                 }
                 if (what & 0x80) {
                     const int cmd = pr.u8(), info = pr.u8();
@@ -223,6 +254,7 @@ Result<Song> s3mLoad(const uint8_t* data, size_t size) {
         }
         s.patterns.push_back(static_cast<Pattern&&>(pat));
     }
+    pcRemapJumps(s, remap);
     if (s.patterns.empty()) s.patterns.push_back(makePattern(64, channels));
     if (s.order.empty()) s.order.push_back(0);
     for (auto& o : s.order)
@@ -235,6 +267,7 @@ Result<Song> s3mLoad(const uint8_t* data, size_t size) {
 bool mtmDetect(const uint8_t* d, size_t n) { return n >= 66 && std::memcmp(d, "MTM", 3) == 0 && d[3] >= 0x10; }
 
 Result<Song> mtmLoad(const uint8_t* data, size_t size) {
+    if (size < 66) return Result<Song>::fail("BAD MTM FILE");
     ByteReader r(data, size);
     Song s;
     s.quirks = Quirks::PT23;
@@ -270,8 +303,7 @@ Result<Song> mtmLoad(const uint8_t* data, size_t size) {
     }
     uint8_t orders[128];
     r.bytes(orders, 128);
-    for (int i = 0; i <= lastOrder; ++i)
-        if (orders[i] < 0xFE) s.order.push_back(orders[i]);
+    const std::vector<int> remap = pcOrders(s, orders, lastOrder + 1);
     const size_t tracks = r.pos();
     r.skip((size_t)numTracks * 192);
     for (int p = 0; p <= lastPattern; ++p) {
@@ -316,6 +348,7 @@ Result<Song> mtmLoad(const uint8_t* data, size_t size) {
         if (is16) ls /= 2, le /= 2;
         if (le > 2 && ls + 4 < le) pcLoop(sm, ls, le);
     }
+    pcRemapJumps(s, remap);
     if (s.patterns.empty()) s.patterns.push_back(makePattern(64, s.numChannels));
     if (s.order.empty()) s.order.push_back(0);
     for (auto& o : s.order)
@@ -336,6 +369,7 @@ bool c669Detect(const uint8_t* d, size_t n) {
 }
 
 Result<Song> c669Load(const uint8_t* data, size_t size) {
+    if (!c669Detect(data, size)) return Result<Song>::fail("BAD 669 FILE");
     const bool extended = data[0] == 'J';
     const int numSamples = data[0x6E], numPatterns = data[0x6F];
     Song s = makeEmptySong(8);
@@ -396,7 +430,7 @@ Result<Song> c669Load(const uint8_t* data, size_t size) {
                 }
         };
         if (p < 128) {
-            place(0, 0xF, data[0xF1 + p]);
+            if (data[0xF1 + p]) place(0, 0xF, data[0xF1 + p]);  // speed 0 would stop the song
             if (data[0x171 + p] < 63) place(data[0x171 + p], 0xD, 0);
         }
         s.patterns.push_back(static_cast<Pattern&&>(pat));
@@ -409,6 +443,7 @@ Result<Song> c669Load(const uint8_t* data, size_t size) {
     }
     if (s.patterns.empty()) s.patterns.push_back(makePattern(64, 8));
     if (s.order.empty()) s.order.push_back(0);
+    if (data[0x70] < s.order.size()) s.restartPos = data[0x70];
     for (auto& o : s.order)
         if (o >= s.patterns.size()) o = 0;
     return Result<Song>::ok(static_cast<Song&&>(s));

@@ -9,8 +9,8 @@ Result<Song> loadModule(const uint8_t* data, size_t size) {
     if (xmDetect(data, size)) return xmLoad(data, size);
     if (s3mDetect(data, size)) return s3mLoad(data, size);
     if (itDetect(data, size)) return itLoad(data, size);
-    if (mtmDetect(data, size)) return mtmLoad(data, size);
     if (modDetect(data, size)) return modLoad(data, size);
+    if (mtmDetect(data, size)) return mtmLoad(data, size);
     if (c669Detect(data, size)) return c669Load(data, size);
     if (stDetect(data, size)) return stLoad(data, size);
     if (medDetect(data, size)) return medLoad(data, size);
