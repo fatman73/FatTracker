@@ -374,6 +374,65 @@ TEST(symmod_transwave_instrument_morphs_between_loops) {
     CHECK_EQ(t.relativeNote, s.samples[0].relativeNote + 12);
 }
 
+// Replay From / From Add / Sample Vib, as the Symphonie Pro source does them: offsets in 1/256 of the
+// sample, From Add in 1/16384 (signed), and the sample vibrato scaling the Replay From value down.
+namespace {
+const Song* loadInto(Result<Song>& r, const SymSpec& sp) {
+    const auto f = buildSym(sp);
+    r = loadModule(f.data(), f.size());
+    return r.ok() ? &r.value() : nullptr;
+}
+SymSpec offsetSpec() {  // one 51200-frame instrument played on row 0
+    SymSpec sp;
+    sp.ins = {normalIns("long")};
+    std::vector<int8_t> d(51200);
+    for (size_t i = 0; i < d.size(); ++i) d[i] = (int8_t)((i & 64) ? 100 : -100);
+    sp.smp = {d};
+    sp.put(0, 0, 0, 36, 0, 0);
+    return sp;
+}
+}  // namespace
+
+TEST(symmod_replay_from_is_in_256ths_of_the_sample) {
+    SymSpec sp = offsetSpec();
+    sp.put(2, 0, 5, -1, 128, 0);  // replay from 128/256: frame 25600
+    Result<Song> r = Result<Song>::fail("");
+    const Song* s = loadInto(r, sp);
+    CHECK(s);
+    if (!s) return;
+    const Cell& c = s->patterns[s->order[0]].at(2, 0);
+    CHECK_EQ(c.note, 49);
+    CHECK_EQ(c.fx, 9);
+    CHECK_EQ(c.param, 100);
+}
+
+TEST(symmod_from_add_moves_the_replay_start) {
+    SymSpec sp = offsetSpec();
+    sp.put(1, 0, 7, -1, 64, 0);    // set from add 64/256: 12800 frames
+    sp.put(2, 0, 8, -1, 0xC0, 0);  // from add -64/16384: -200 frames
+    sp.put(3, 0, 5, -1, 0, 0);     // replay from 0 -> frame 12600
+    Result<Song> r = Result<Song>::fail("");
+    const Song* s = loadInto(r, sp);
+    CHECK(s);
+    if (!s) return;
+    const Cell& c = s->patterns[s->order[0]].at(3, 0);
+    CHECK_EQ(c.fx, 9);
+    CHECK_EQ(c.param, 49);
+}
+
+TEST(symmod_sample_vibrato_scales_the_replay_offset) {
+    SymSpec sp = offsetSpec();
+    sp.put(1, 0, 14, -1, 128, 0);  // sample vib depth 128, speed 0: the LFO stays at its peak
+    sp.put(2, 0, 5, -1, 128, 0);   // 128 - (127 * 128 >> 8) = 65 -> frame 13000
+    Result<Song> r = Result<Song>::fail("");
+    const Song* s = loadInto(r, sp);
+    CHECK(s);
+    if (!s) return;
+    const Cell& c = s->patterns[s->order[0]].at(2, 0);
+    CHECK_EQ(c.fx, 9);
+    CHECK_EQ(c.param, 51);
+}
+
 TEST(real_modules_symphonie_load_and_play) {
     const int n = countPlayable(L".symmod");
     if (n < 0) std::printf("SKIP real_modules_symphonie (no modules folder)\n");

@@ -675,7 +675,7 @@ struct ChanState {
     int lastNote = 0;            // our note numbering, 0 = none
     int lastInst = 0;            // Symphonie instrument + 1
     uint8_t lastVol = 64;
-    uint8_t fromAdd = 0;
+    int32_t fromAdd = 0;  // replay start added by From Add, in 1/16384 of the sample
     bool retrigVibrato = false, retrigTremolo = false;
     uint8_t vibrato = 0, tremolo = 0, tonePortaAmt = 0;
     uint8_t sampleVibSpeed = 0, sampleVibDepth = 0;
@@ -1146,16 +1146,16 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                     patSpeed = ev.param ? ev.param : 4;
                                     x.setFx(0xF, speedParam(patSpeed));
                                     break;
-                                case EV_SET_FROM_ADD:
-                                    st.fromAdd = ev.param;
-                                    st.sampleVibSpeed = st.sampleVibDepth = 0;
+                                case EV_SET_FROM_ADD:  // param/256 of the sample
+                                    st.fromAdd = ev.param * 64;
                                     break;
-                                case EV_FROM_ADD:
-                                    st.fromAdd = (uint8_t)(st.fromAdd + ev.param);
+                                case EV_FROM_ADD:  // signed param/16384 of the sample
+                                    st.fromAdd += (int8_t)ev.param;
                                     break;
-                                case EV_SAMPLE_VIB:
+                                case EV_SAMPLE_VIB:  // an LFO on the Replay From start, not on the pitch
                                     st.sampleVibSpeed = ev.inst;
                                     st.sampleVibDepth = ev.param;
+                                    if (!ev.inst && !ev.param) st.sampleVibPhase = 0;
                                     break;
                                 case EV_FROM_AND_PITCH:
                                 case EV_REPLAY_FROM: {
@@ -1164,17 +1164,23 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                     x.note = st.lastNote;  // the sample restarts at the current note
                                     if (note >= 0 || ev.cmd == EV_FROM_AND_PITCH) x.inst = st.lastInst = mapped;
                                     if (ev.param || st.fromAdd || st.sampleVibDepth) {
-                                        double vib = 0;
-                                        if (st.sampleVibDepth)
-                                            vib = st.sampleVibDepth *
-                                                  (std::sin(st.sampleVibPhase * (6.283185307179586 / 1024.0) + 4.71238898038469) - 1.0) / 4.0;
-                                        double pct = ev.param + st.fromAdd + vib;
-                                        pct = pct < 0 ? 0 : (pct > 255 ? 255 : pct);
-                                        // percent of the sample -> 9xx (256 frames per step)
+                                        // Symphonie: start = From Add + param/256 of the sample, the sample
+                                        // vibrato scaling param down by up to depth/256
+                                        int p = ev.param;
+                                        if (st.sampleVibDepth) {
+                                            const int lfo = (int)std::lround(127.0 * std::cos(6.283185307179586 * (st.sampleVibPhase >> 1) / 512.0)) + 127;
+                                            p -= ((lfo * st.sampleVibDepth) >> 8) * p >> 8;
+                                            if (p < 0) p = 0;
+                                        }
                                         const int si = (x.inst ? x.inst : st.lastInst) - 1;
                                         if (si >= 0 && si < (int)numIns) {
-                                            const double frames = std::round(pct) * s.samples[si].length / 100.0;
-                                            const long o = std::lround(frames / 256.0);
+                                            const int64_t len = s.samples[si].length;
+                                            int64_t start = (len >> 8) * p + len * st.fromAdd / 16384;
+                                            if (start < 0) {  // like the original: From Add cancels the offset
+                                                st.fromAdd = -p * 64;
+                                                start = 0;
+                                            }
+                                            const long o = std::lround((double)start / 256.0);  // 9xx: 256 frames per step
                                             if (o > 0) x.setFx(0x9, (uint8_t)(o > 255 ? 255 : o));
                                         }
                                     }
