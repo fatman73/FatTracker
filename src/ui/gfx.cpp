@@ -184,6 +184,7 @@ void Gfx::releaseTargets() {
 void Gfx::releaseDevice() {
     releaseTargets();
     for (auto& g : grad_) rel(g.stops);
+    rel(pix_);
     rel(brush_);
     rel(dc_);
     rel(d2dDevice_);
@@ -198,6 +199,25 @@ void Gfx::resize(uint32_t w, uint32_t h) {
     if (!swap_ || w == 0 || h == 0) return;
     releaseTargets();
     if (FAILED(swap_->ResizeBuffers(0, w, h, DXGI_FORMAT_UNKNOWN, 0)) || !createTargets()) deviceLost_ = true;
+}
+
+void Gfx::drawPixels(const uint32_t* argb, uint32_t w, uint32_t h, float devX, float devY, float scale) {
+    if (!dc_) return;
+    if (pix_ && (pixW_ != w || pixH_ != h)) rel(pix_);
+    if (!pix_) {
+        const D2D1_BITMAP_PROPERTIES bp = {{DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}, 96.f, 96.f};
+        if (FAILED(dc_->CreateBitmap(D2D1::SizeU(w, h), argb, w * 4, bp, &pix_))) return;
+        pixW_ = w;
+        pixH_ = h;
+    } else {
+        pix_->CopyFromMemory(nullptr, argb, w * 4);
+    }
+    D2D1_MATRIX_3X2_F saved;
+    dc_->GetTransform(&saved);
+    dc_->SetTransform(D2D1::Matrix3x2F::Identity());
+    dc_->DrawBitmap(pix_, D2D1::RectF(devX, devY, devX + w * scale, devY + h * scale), 1.f,
+                    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, nullptr, nullptr);
+    dc_->SetTransform(saved);
 }
 
 void Gfx::applyTransform() {

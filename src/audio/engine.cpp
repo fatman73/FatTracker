@@ -223,6 +223,7 @@ void Engine::publish() {
     tel_.rate = mixer_->rate();
     tel_.numChannels = song_ ? song_->numChannels : 0;
     tel_.led = mixer_->led();
+    tel_.drive = pure_ && floppy_->busySeconds() > 0;
     for (int c = 0; c < 32; ++c) {
         tel_.ch[c].vu = mixer_->vu(c);
         tel_.ch[c].active = mixer_->active(c);

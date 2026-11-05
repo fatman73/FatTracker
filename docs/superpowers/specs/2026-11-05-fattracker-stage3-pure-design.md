@@ -65,3 +65,14 @@ Tryb włącza się jednym widocznym przyciskiem w SETUP.
 Paula: twarde pan, 8 bit, ZOH, A500 tłumi wysokie, LED tłumi mocniej, A1200 przepuszcza wysokie,
 E00/E01 w MOD przełącza LED, w XM nie. Stacja: czas odczytu wg modelu, cisza po wygaszeniu silnika,
 dźwięk użytkownika zastępuje syntezę. Ustawienia: zapis/odczyt `PureMode`, `DriveVolume`.
+
+## Zmiany po uwagach użytkownika (2026-11-05)
+- Ekran Pure to wierny ekran ProTrackera 2.3 z Amigi: płótno 320×256 pikseli w układzie PT
+  (liczniki POS…REPLEN, siatka PLAY…SAMPLER, QUADRASCOPE, SONGNAME/SAMPLENAME/LOAD, TEMPO/STATUS,
+  4 ścieżki z paskiem środkowym i zielonymi VU), własna pikselowa czcionka w stylu Amigi,
+  skalowanie całkowite bez wygładzania (×4 przy 1080p) — tu pikseloza jest zamierzona.
+  Obok ekranu: diody POWER / LED FILTER / DRIVE i przycisk EXIT PURE MODE.
+  DISK OP. i LOAD otwierają systemowe okno plików, MOD2WAV zapisuje WAV; EDIT OP., POS ED.,
+  PAT2SMP, SAMPLER pokazują „NOT IN PURE”.
+- Wczytanie pliku w Pure trwa zawsze ok. 5 s (głowica i silnik), bez kolejkowania;
+  klawisz/klik przerywa odczyt.

@@ -10,6 +10,8 @@
 #include "ui/font.h"
 #include "ui/gfx.h"
 #include "ui/pattern_view.h"
+#include "ui/pixel_canvas.h"
+#include <memory>
 #include "ui/text.h"
 
 enum class UiAction {
@@ -22,6 +24,7 @@ enum class UiAction {
     SaveModPath,
     SaveWavPath,
     SaveSamplePath,
+    ExportWav,    // MOD2WAV in Pure mode: save the song as WAV
     Quit
 };
 
@@ -89,6 +92,18 @@ private:
     void toggleMute(int ch, Engine& e);
     void solo(int ch, Engine& e);
     void counterStep(int row, int dir, bool big, Engine& e);
+    UiAction pressButton(int b, Engine& e);  // main button grid (B_PLAY ...)
+    void bpmStep(int d, Engine& e);
+    // Pure mode screen (pure_screen.cpp)
+    void pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e);
+    UiAction pureMouse(float x, float y, bool right, Engine& e);
+    void pureGeometry(float& ox, float& oy, float& scale) const;  // device pixels
+    RectF pureExitRect() const;
+    int pureFirstChannel(int numChannels);
+    std::unique_ptr<PixelCanvas> canvas_;
+    int pureFirst_ = 0;
+    float vpScale_ = 1.f;
+    static constexpr int kPureExitHover = 7000;
     void drawDialog(Gfx& g, Text& tx, const Theme& t);
     // play_edit.cpp
     UiAction editKey(unsigned vk, bool shift, bool ctrl, bool alt, bool repeat, Engine& e);

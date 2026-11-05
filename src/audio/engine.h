@@ -24,7 +24,8 @@ struct Telemetry {
     uint64_t playFrames;
     uint32_t rate;
     int numChannels;
-    bool led;  // Amiga filter LED (Pure mode)
+    bool led;    // Amiga filter LED (Pure mode)
+    bool drive;  // simulated floppy busy (Pure mode)
     ChannelTelemetry ch[32];
 };
 

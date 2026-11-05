@@ -21,7 +21,7 @@ Box songRow() { return {0, 9 * kRowH, 320, kRowH}; }
 Box sampleRow() { return {0, 10 * kRowH, 284, kRowH}; }
 Box loadButton() { return {284, 10 * kRowH, 36, kRowH}; }
 Box infoArea() { return {0, 11 * kRowH, 320, kPatternY - 11 * kRowH}; }
-Box tempoArrow(int dir) { return {dir ? 76 : 30, 130, 9, 8}; }
+Box tempoArrow(int dir) { return {dir ? 78 : 30, 130, 9, 8}; }
 Box track(int i) { return {kTrackX0 + i * kTrackPitch, kPatternY, kTrackW, 256 - kPatternY}; }
 Box rowNumbers() { return {0, kPatternY, 24, 256 - kPatternY}; }
 const char* buttonLabel(int i) { return i >= 0 && i < 12 ? kLabels[i] : ""; }

@@ -180,7 +180,7 @@ void finishPendingLoad() {
 // Runs `then` right away, or after asking to save unsaved changes.
 void confirmDiscard(HWND hwnd, std::function<void()> then);
 
-bool saveAsDialog(HWND hwnd);
+bool saveAsDialog(HWND hwnd, DWORD filter = 1);  // 1 XM, 2 MOD, 3 WAV
 
 bool saveTo(const std::wstring& path, SaveKind kind) {
     g_busy = true;
@@ -232,7 +232,7 @@ bool saveCurrent(HWND hwnd) {
     return saveAsDialog(hwnd);
 }
 
-bool saveAsDialog(HWND hwnd) {
+bool saveAsDialog(HWND hwnd, DWORD filter) {
     wchar_t file[MAX_PATH] = {};
     std::wstring def = g_path.empty() ? L"untitled.xm" : withExtension(g_path, L".xm");
     lstrcpynW(file, def.c_str(), MAX_PATH);
@@ -242,6 +242,7 @@ bool saveAsDialog(HWND hwnd) {
     ofn.lpstrFile = file;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = L"xm";
+    ofn.nFilterIndex = filter;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (!GetSaveFileNameW(&ofn)) return false;
     const SaveKind kind = ofn.nFilterIndex == 2 ? SaveKind::Mod : ofn.nFilterIndex == 3 ? SaveKind::Wav : SaveKind::Xm;
@@ -314,6 +315,7 @@ void loadAnyFile(const std::wstring& path) {
 void handle(UiAction a, HWND hwnd) {
     if (a == UiAction::OpenFile) openFileDialog(hwnd);
     if (a == UiAction::SaveFile) saveCurrent(hwnd);
+    if (a == UiAction::ExportWav) saveAsDialog(hwnd, 3);
     const std::wstring path = g_screen.actionPath();
     if (a == UiAction::LoadPath) loadAnyFile(path);
     if (a == UiAction::SaveXmPath) saveFromDiskOp(path, SaveKind::Xm);

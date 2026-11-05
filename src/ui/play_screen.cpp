@@ -208,6 +208,11 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     }
     if (s) clampView(*s);
     if (s && curCh_ >= s->numChannels) curCh_ = s->numChannels - 1;
+    vpScale_ = g.viewport().scale;
+    if (pure_) {
+        pureDraw(g, tx, t, e);
+        return;
+    }
     const PatternCtx pc = ctx(s, tel);
     char buf[128];
     if (s && pc.pattern < (int)s->patterns.size()) patternRowsCache_ = s->patterns[pc.pattern].rows;
@@ -561,6 +566,12 @@ void PlayScreen::openPanel(Panel p) {
 }
 
 bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
+    if (pure_ && !dialog_.open) {
+        const int h = pureExitRect().contains(x, y) ? kPureExitHover : -1;
+        const bool changed = h != hover_;
+        hover_ = h;
+        return changed;
+    }
     bool redraw = false;
     if (drag_ && leftDown && panel_ == Panel::Sampler) {
         const uint32_t pos = xToSample(x);
@@ -598,6 +609,10 @@ UiAction PlayScreen::onMouseUp(float, float, Engine&) {
 
 UiAction PlayScreen::onWheel(float x, float y, int delta, Engine& e) {
     const int notches = delta / 120 != 0 ? delta / 120 : (delta > 0 ? 1 : -1);
+    if (pure_) {
+        if (!last_.playing) moveCursor(-notches, 0, e);
+        return UiAction::Redraw;
+    }
     if (panel_ == Panel::Sampler && samplerWave().contains(x, y) && viewEnd_ > viewStart_) {
         const uint32_t center = xToSample(x);
         const double f = notches > 0 ? 0.7 : 1.0 / 0.7;
@@ -622,7 +637,83 @@ UiAction PlayScreen::onWheel(float x, float y, int delta, Engine& e) {
     }
     return UiAction::None;
 }
+void PlayScreen::bpmStep(int d, Engine& e) {
+    editor_.markDirty();
+    e.edit([d](Song& song) {
+        int b = song.initialBpm + d;
+        song.initialBpm = (uint8_t)(b < 32 ? 32 : (b > 255 ? 255 : b));
+    });
+}
+
+UiAction PlayScreen::pressButton(int b, Engine& e) {
+    switch (b) {
+        case B_PLAY:
+            recordMode_ = false;
+            e.play((uint16_t)viewOrder_);
+            break;
+        case B_STOP:
+            recordMode_ = false;
+            e.stop();
+            break;
+        case B_PATTERN:
+            recordMode_ = false;
+            e.playPattern((uint16_t)viewPattern_);
+            break;
+        case B_EDIT:
+            editMode_ = !editMode_;
+            setStatus(editMode_ ? "EDIT MODE" : "ALL RIGHT");
+            break;
+        case B_RECORD:
+            recordMode_ = !recordMode_;
+            if (recordMode_) {
+                editMode_ = true;
+                e.playPattern((uint16_t)viewPattern_);
+                setStatus("RECORDING");
+            } else {
+                e.stop();
+                setStatus("ALL RIGHT");
+            }
+            break;
+        case B_CLEAR:
+            ask("CLEAR WHAT?", {"SONG", "SAMPLES", "ALL", "CANCEL"}, [this, &e](int a) {
+                if (a == 3) return;
+                e.stop();
+                if (a == 0 || a == 2) e.edit([&](Song& song) { editor_.clearSong(song); });
+                if (a != 0) editor_.markDirty();
+                if (a == 1 || a == 2) e.editStructure([](Song& song) {
+                        for (Sample& sm : song.samples) sm = Sample{};
+                    });
+                viewRow_ = viewPattern_ = viewOrder_ = 0;
+                setStatus(a == 0 ? "SONG CLEARED" : a == 1 ? "SAMPLES CLEARED" : "ALL CLEARED");
+            });
+            break;
+        case B_DISKOP:
+            openPanel(Panel::DiskOp);
+            break;
+        case B_EDITOP:
+            openPanel(Panel::EditOp);
+            break;
+        case B_SETUP:
+            openPanel(Panel::Setup);
+            break;
+        case B_SAMPLER:
+            openPanel(Panel::Sampler);
+            break;
+        case B_HELP:
+            openPanel(Panel::Help);
+            break;
+        default: {
+            char m[64];
+            std::snprintf(m, sizeof m, "PLST: LOAD SAMPLES IN DISK OP. (SAMPLES FILTER)");
+            setStatus(m);
+            break;
+        }
+    }
+    return UiAction::Redraw;
+}
+
 UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
+    if (pure_ && !dialog_.open) return pureMouse(x, y, right, e);
     const int h = hitId(x, y);
     if (dialog_.open) {
         if (h >= H_DIALOG && h < H_DIALOG + dialog_.count) {
@@ -640,72 +731,7 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
         panel_ = Panel::Main;
         return UiAction::Redraw;
     }
-    if (h >= H_BUTTON && h < H_BUTTON + 12) {
-        switch (h - H_BUTTON) {
-            case B_PLAY:
-                recordMode_ = false;
-                e.play((uint16_t)viewOrder_);
-                break;
-            case B_STOP:
-                recordMode_ = false;
-                e.stop();
-                break;
-            case B_PATTERN:
-                recordMode_ = false;
-                e.playPattern((uint16_t)viewPattern_);
-                break;
-            case B_EDIT:
-                editMode_ = !editMode_;
-                setStatus(editMode_ ? "EDIT MODE" : "ALL RIGHT");
-                break;
-            case B_RECORD:
-                recordMode_ = !recordMode_;
-                if (recordMode_) {
-                    editMode_ = true;
-                    e.playPattern((uint16_t)viewPattern_);
-                    setStatus("RECORDING");
-                } else {
-                    e.stop();
-                    setStatus("ALL RIGHT");
-                }
-                break;
-            case B_CLEAR:
-                ask("CLEAR WHAT?", {"SONG", "SAMPLES", "ALL", "CANCEL"}, [this, &e](int a) {
-                    if (a == 3) return;
-                    e.stop();
-                    if (a == 0 || a == 2) e.edit([&](Song& song) { editor_.clearSong(song); });
-                    if (a != 0) editor_.markDirty();
-                    if (a == 1 || a == 2) e.editStructure([](Song& song) {
-                            for (Sample& sm : song.samples) sm = Sample{};
-                        });
-                    viewRow_ = viewPattern_ = viewOrder_ = 0;
-                    setStatus(a == 0 ? "SONG CLEARED" : a == 1 ? "SAMPLES CLEARED" : "ALL CLEARED");
-                });
-                break;
-            case B_DISKOP:
-                openPanel(Panel::DiskOp);
-                break;
-            case B_EDITOP:
-                openPanel(Panel::EditOp);
-                break;
-            case B_SETUP:
-                openPanel(Panel::Setup);
-                break;
-            case B_SAMPLER:
-                openPanel(Panel::Sampler);
-                break;
-            case B_HELP:
-                openPanel(Panel::Help);
-                break;
-            default: {
-                char m[64];
-                std::snprintf(m, sizeof m, "PLST: LOAD SAMPLES IN DISK OP. (SAMPLES FILTER)");
-                setStatus(m);
-                break;
-            }
-        }
-        return UiAction::Redraw;
-    }
+    if (h >= H_BUTTON && h < H_BUTTON + 12) return pressButton(h - H_BUTTON, e);
     if (h >= H_ARROW && h < H_ARROW + 20) {
         const int row = (h - H_ARROW) / 2;
         if (!kCounterEditable[row]) {
@@ -733,12 +759,7 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
                 viewRow_ = 0;
             }
         } else {
-            const int d = (i == 3 ? 1 : -1) * (right ? 10 : 1);
-            editor_.markDirty();
-            e.edit([d](Song& song) {
-                int b = song.initialBpm + d;
-                song.initialBpm = (uint8_t)(b < 32 ? 32 : (b > 255 ? 255 : b));
-            });
+            bpmStep((i == 3 ? 1 : -1) * (right ? 10 : 1), e);
         }
         return UiAction::Redraw;
     }
