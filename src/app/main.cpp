@@ -1,10 +1,12 @@
 ﻿// FatTracker entry point: window, message loop, fullscreen toggle.
+#include "ui/font.h"
 #include "ui/gfx.h"
 
 #include <shellapi.h>
 
 namespace {
 Gfx g_gfx;
+Font g_font;
 bool g_dirty = true;
 bool g_fullscreen = false;
 WINDOWPLACEMENT g_placement = {sizeof(WINDOWPLACEMENT)};
@@ -33,7 +35,17 @@ void toggleFullscreen(HWND hwnd) {
 void drawFrame() {
     const Theme& t = themeHybrid();
     if (!g_gfx.beginFrame(t.background)) return;
-    g_gfx.bevel({760, 440, 400, 200}, t, false);
+    g_gfx.bevel({60, 60, 1800, 960}, t, false);
+    g_gfx.fillRect({80, 80, 1760, 920}, t.patternBg);
+    const char* sample = "FATTRACKER 0123456789 abcdefghijklmnopqrstuvwxyz \x01\x02\x03\x04\x05\x06";
+    float y = 100;
+    const float sizes[] = {8.f, 12.f, 16.f, 24.f, 32.f, 48.f};
+    for (float size : sizes) {
+        g_font.drawText(g_gfx, 100, y, size, sample, t.patternText);
+        y += size * 1.6f;
+    }
+    g_font.drawText(g_gfx, 100, y + 20, 24, "C-3 01 40 C20  ---..  F#2 1F 3F 0F2", t.patternNote);
+    g_font.drawText(g_gfx, 100, y + 60, 24, "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~", t.patternFx);
     g_gfx.endFrame();
 }
 
