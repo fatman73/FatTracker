@@ -201,6 +201,27 @@ TEST(mixer_scope_returns_last_samples) {
     for (int k = 0; k < 4; ++k) CHECK_NEAR(sc[k], d[1996 + k] / 128.0, 1e-6);
 }
 
+TEST(mixer_reset_drops_all_voices) {
+    Mixer m(48000);
+    m.setInterp(Interp::None);
+    m.setNumChannels(4);
+    m.setRamp(true);
+    Sample s = make8(std::vector<int8_t>(1000, 100));
+    m.trigger(0, &s, 0);
+    m.setFrequency(0, 48000);
+    m.setVolume(0, 1.f, 0.f);
+    float buf[200];
+    m.mix(buf, 100);
+    m.trigger(0, &s, 0);  // creates a fading ghost of the previous note
+    m.stopVoice(0);       // voice keeps ramping down
+    m.reset();            // must drop voices and ghosts immediately (song is about to be freed)
+    m.mix(buf, 100);
+    bool silent = true;
+    for (float v : buf) silent = silent && v == 0.f;
+    CHECK(silent);
+    CHECK(!m.active(0));
+}
+
 TEST(mixer_perf_32_voices_cubic) {
 #ifdef NDEBUG
     Mixer m(48000);

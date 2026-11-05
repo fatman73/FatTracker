@@ -101,6 +101,13 @@ void Mixer::stopVoice(int idx) {
     }
 }
 
+void Mixer::reset() {
+    for (int i = 0; i < kMaxVoices; ++i) {
+        voices_[i] = Voice{};
+        ghosts_[i] = Voice{};
+    }
+}
+
 void Mixer::setFrequency(int idx, double hz) {
     if (idx < 0 || idx >= kMaxVoices) return;
     double st = hz / rate_;

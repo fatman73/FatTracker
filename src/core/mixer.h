@@ -21,6 +21,7 @@ public:
 
     void trigger(int v, const Sample* s, uint32_t offset);
     void stopVoice(int v);
+    void reset();  // drops every voice and ghost at once (call before freeing samples)
     void setFrequency(int v, double hz);
     void setVolume(int v, float vol01, float pan01);  // pan 0 = left, 1 = right
     void mix(float* outStereo, uint32_t frames);      // overwrites the buffer

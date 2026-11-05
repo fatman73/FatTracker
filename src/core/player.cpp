@@ -8,7 +8,8 @@
 Player::Player(Mixer& m) : mixer_(m) {}
 
 void Player::setSong(const Song* s) {
-    stop();
+    playing_ = false;
+    mixer_.reset();  // voices may point at samples of the song being replaced
     song_ = s;
     if (s) mixer_.setNumChannels(s->numChannels);
 }
