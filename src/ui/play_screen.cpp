@@ -1,4 +1,5 @@
 #include "ui/play_screen.h"
+#include "ui/pure_layout.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -567,7 +568,9 @@ void PlayScreen::openPanel(Panel p) {
 
 bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
     if (pure_ && !dialog_.open) {
-        const int h = pureExitRect().contains(x, y) ? kPureExitHover : -1;
+        int ax, ay;
+        pureToAmiga(x, y, ax, ay);
+        const int h = pure::hitTest(ax, ay) == pure::kExit ? kPureExitHover : -1;
         const bool changed = h != hover_;
         hover_ = h;
         return changed;

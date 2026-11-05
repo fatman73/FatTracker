@@ -185,6 +185,7 @@ void Gfx::releaseDevice() {
     releaseTargets();
     for (auto& g : grad_) rel(g.stops);
     rel(pix_);
+    rel(pixUp_);
     rel(brush_);
     rel(dc_);
     rel(d2dDevice_);
@@ -201,8 +202,8 @@ void Gfx::resize(uint32_t w, uint32_t h) {
     if (FAILED(swap_->ResizeBuffers(0, w, h, DXGI_FORMAT_UNKNOWN, 0)) || !createTargets()) deviceLost_ = true;
 }
 
-void Gfx::drawPixels(const uint32_t* argb, uint32_t w, uint32_t h, float devX, float devY, float scale) {
-    if (!dc_) return;
+void Gfx::drawPixels(const uint32_t* argb, uint32_t w, uint32_t h, float devX, float devY, float devW, float devH) {
+    if (!dc_ || !w || !h) return;
     if (pix_ && (pixW_ != w || pixH_ != h)) rel(pix_);
     if (!pix_) {
         const D2D1_BITMAP_PROPERTIES bp = {{DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}, 96.f, 96.f};
@@ -215,8 +216,34 @@ void Gfx::drawPixels(const uint32_t* argb, uint32_t w, uint32_t h, float devX, f
     D2D1_MATRIX_3X2_F saved;
     dc_->GetTransform(&saved);
     dc_->SetTransform(D2D1::Matrix3x2F::Identity());
-    dc_->DrawBitmap(pix_, D2D1::RectF(devX, devY, devX + w * scale, devY + h * scale), 1.f,
-                    D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, nullptr, nullptr);
+    const D2D1_RECT_F dst = D2D1::RectF(devX, devY, devX + devW, devY + devH);
+    // whole factor that reaches the target size; the final fit then only shrinks a little
+    const float need = devW / w > devH / h ? devW / w : devH / h;
+    uint32_t k = (uint32_t)need + ((float)(uint32_t)need < need ? 1 : 0);
+    if (k < 1) k = 1;
+    if (k > 8) k = 8;
+    const bool exact = devW == (float)(w * k) && devH == (float)(h * k);
+    if (!exact && (!pixUp_ || upW_ != w * k || upH_ != h * k)) {
+        rel(pixUp_);
+        const D2D1_BITMAP_PROPERTIES1 bp1 = D2D1::BitmapProperties1(
+            D2D1_BITMAP_OPTIONS_TARGET, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        if (SUCCEEDED(dc_->CreateBitmap(D2D1::SizeU(w * k, h * k), nullptr, 0, bp1, &pixUp_))) {
+            upW_ = w * k;
+            upH_ = h * k;
+        }
+    }
+    if (exact || !pixUp_) {
+        dc_->DrawBitmap(pix_, dst, 1.f, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, nullptr, nullptr);
+    } else {
+        ID2D1Image* old = nullptr;
+        dc_->GetTarget(&old);
+        dc_->SetTarget(pixUp_);
+        dc_->DrawBitmap(pix_, D2D1::RectF(0, 0, (float)upW_, (float)upH_), 1.f,
+                        D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, nullptr, nullptr);
+        dc_->SetTarget(old);
+        if (old) old->Release();
+        dc_->DrawBitmap(pixUp_, dst, 1.f, D2D1_INTERPOLATION_MODE_LINEAR, nullptr, nullptr);
+    }
     dc_->SetTransform(saved);
 }
 

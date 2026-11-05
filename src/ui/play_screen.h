@@ -97,8 +97,8 @@ private:
     // Pure mode screen (pure_screen.cpp)
     void pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e);
     UiAction pureMouse(float x, float y, bool right, Engine& e);
-    void pureGeometry(float& ox, float& oy, float& scale) const;  // device pixels
-    RectF pureExitRect() const;
+    void pureGeometry(float& ox, float& oy, float& sx, float& sy) const;  // device pixels
+    void pureToAmiga(float lx, float ly, int& ax, int& ay) const;          // logical -> Amiga pixel
     int pureFirstChannel(int numChannels);
     std::unique_ptr<PixelCanvas> canvas_;
     int pureFirst_ = 0;

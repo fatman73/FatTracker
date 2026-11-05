@@ -16,7 +16,8 @@ Box gridButton(int i) { return {kGridX + (i % 3) * kGridW, (i / 3) * kRowH, kGri
 Box sideButton(int i) { return {kSideX, i * kRowH, 14, kRowH}; }
 Box scopeTitle() { return {kGridX, 4 * kRowH, kSideX - kGridX, kRowH}; }
 Box scope(int i) { return {kGridX + i * 47 + 8, 5 * kRowH, 39, 3 * kRowH}; }
-Box creditLine() { return {kGridX, 8 * kRowH, 320 - kGridX, kRowH}; }
+Box creditLine() { return {kGridX, 8 * kRowH, 124, kRowH}; }
+Box exitButton() { return {kGridX + 124, 8 * kRowH, 320 - kGridX - 124, kRowH}; }
 Box songRow() { return {0, 9 * kRowH, 320, kRowH}; }
 Box sampleRow() { return {0, 10 * kRowH, 284, kRowH}; }
 Box loadButton() { return {284, 10 * kRowH, 36, kRowH}; }
@@ -39,6 +40,8 @@ int hitTest(int x, int y) {
     for (int i = 0; i < 4; ++i)
         if (scope(i).contains(x, y)) return kScope + i;
     if (loadButton().contains(x, y)) return kLoad;
+    if (exitButton().contains(x, y)) return kExit;
+    if (exitButton().contains(x, y)) return kExit;
     for (int d = 0; d < 2; ++d)
         if (tempoArrow(d).contains(x, y)) return d ? kTempoDown : kTempoUp;
     for (int i = 0; i < 4; ++i)
