@@ -127,15 +127,16 @@ void Engine::previewNote(int sample, int note, uint32_t offset) {
 
 bool Engine::loadTfmx(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl, size_t smplSize, const char* name) {
     TfmxPlayer* p = new TfmxPlayer;
-    p->setRate(mixer_->rate());
     if (!p->load(mdat, mdatSize, smpl, smplSize)) {
         delete p;
         return false;
     }
     auto song = std::make_unique<Song>(makeEmptySong(4));
+    p->buildDisplay(*song);  // the TFMX tracks as patterns for the screen (playback only)
     for (int i = 0; i < 20 && name && name[i]; ++i) song->name[i] = name[i];
-    setSong(static_cast<std::unique_ptr<Song>&&>(song));  // placeholder for the screens
+    setSong(static_cast<std::unique_ptr<Song>&&>(song));
     lock();
+    p->setRate(mixer_->rate());  // under the lock: the audio thread may have changed the rate meanwhile
     delete tfmx_;
     tfmx_ = p;
     tfmxOn_ = true;
@@ -219,6 +220,7 @@ void Engine::playPattern(uint16_t pattern) {
 void Engine::stop() {
     lock();
     tfmxPlaying_ = false;
+    tfmx_->clearMeters();  // nothing renders while stopped: let the meters fall
     player_->stop();
     publish();
     unlock();
@@ -272,9 +274,13 @@ void Engine::publish() {
     tel_.drive = pure_ && floppy_->busySeconds() > 0;
     if (tfmxOn_) {
         tel_.playing = tfmxPlaying_;
-        tel_.order = (uint16_t)tfmx_->step();
-        tel_.pattern = tel_.row = 0;
-        tel_.numChannels = tfmx_->voices() > 4 ? tfmx_->voices() : 4;
+        // the display song has one 64-row pattern per 64 ticks, in order
+        const int tick = tfmx_->tick();
+        const int pats = song_ && !song_->patterns.empty() ? (int)song_->patterns.size() : 1;
+        int pat = tick / TfmxPlayer::kDisplayRows;
+        if (pat >= pats) pat = pats - 1;
+        tel_.order = tel_.pattern = (uint16_t)pat;
+        tel_.row = (uint16_t)(tick / TfmxPlayer::kDisplayRows >= pats ? TfmxPlayer::kDisplayRows - 1 : tick % TfmxPlayer::kDisplayRows);
     }
     for (int c = 0; c < 32; ++c) {
         tel_.ch[c].vu = tfmxOn_ ? (c < TfmxPlayer::kMaxVoices ? tfmx_->vu(c) : 0.f) : mixer_->vu(c);

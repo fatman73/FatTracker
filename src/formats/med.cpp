@@ -9,6 +9,9 @@
 #include "formats/formats_internal.h"
 
 namespace {
+// offset + length inside the file, computed without 32-bit wrap-around
+bool fits(size_t size, uint64_t off, uint64_t len) { return off <= size && len <= size - off; }
+
 constexpr uint8_t FLAG_VOLHEX = 0x10, FLAG_8CHANNEL = 0x40;
 constexpr uint8_t FLAG2_BMASK = 0x1F, FLAG2_BPM = 0x20, FLAG2_MIX = 0x80;
 constexpr int TYPE_SYNTH = -1, TYPE_HYBRID = -2;
@@ -56,7 +59,7 @@ void convertEffect(Cell& c, int cmd, int p, const Ctx& ctx) {
         case 0x06: if (p) setFx(c, 0x6, p); else setFx(c, 0x4, 0); break;
         case 0x07: setFx(c, 0x7, p); break;
         case 0x08: break;  // hold and decay
-        case 0x09: if (p > 0 && p <= 0x20) setFx(c, 0xF, p); break;  // secondary tempo = speed
+        case 0x09: if (p > 0) setFx(c, 0xF, p < 0x20 ? p : 0x1F); break;  // secondary tempo = speed (F20+ would be BPM)
         case 0x0A: if (p) setFx(c, 0xA, p); break;
         case 0x0B: setFx(c, 0xB, p); break;
         case 0x0C:
@@ -134,7 +137,7 @@ void setLoop(Sample& s, uint32_t start, uint32_t len, bool pingpong = false) {
         s.loop = LoopType::None;
         return;
     }
-    if (start + len > s.length) len = s.length - start;
+    if (len > s.length - start) len = s.length - start;
     s.loop = len >= 2 ? (pingpong ? LoopType::PingPong : LoopType::Forward) : LoopType::None;
     s.loopStart = start;
     s.loopLength = len;
@@ -215,7 +218,7 @@ Result<Song> medLoad(const uint8_t* data, size_t size) {
     // ---- expansion data: song name, instrument names and extensions
     uint32_t extOff = 0, infoOff = 0;
     uint16_t extEntries = 0, extSize = 0, infoEntries = 0, infoSize = 0;
-    if (expOff && expOff + 80 <= size) {
+    if (expOff && fits(size, expOff, 80)) {
         r.seek(expOff);
         r.skip(4);
         extOff = r.u32be();
@@ -227,7 +230,7 @@ Result<Song> medLoad(const uint8_t* data, size_t size) {
         infoSize = r.u16be();
         r.skip(8 + 4 + 4);
         const uint32_t nameOff = r.u32be(), nameLen = r.u32be();
-        if (nameOff && nameLen && nameOff + nameLen <= size) copyName(s.name, data + nameOff, nameLen, 20);
+        if (nameOff && nameLen && fits(size, nameOff, nameLen)) copyName(s.name, data + nameOff, nameLen, 20);
     }
 
     // ---- instruments
@@ -251,7 +254,7 @@ Result<Song> medLoad(const uint8_t* data, size_t size) {
             const uint16_t numWf = r.u16be();
             r.seek(off + 6 + 272);
             const uint32_t wf0 = numWf > 0 && numWf <= 64 ? r.u32be() : 0;
-            if (wf0 > 6 + 272 && off + wf0 + 6 <= size) {
+            if (wf0 > 6 + 272 && fits(size, (uint64_t)off + wf0, 6)) {
                 r.seek(off + wf0);
                 if (type == TYPE_SYNTH) {
                     const uint32_t bytes = r.u16be() * 2u;
@@ -282,7 +285,7 @@ Result<Song> medLoad(const uint8_t* data, size_t size) {
         }
         sm.relativeNote = (int8_t)(transpose < -96 ? -96 : (transpose > 95 ? 95 : transpose));
         // instrument extension: finetune, long loops, loop / ping-pong flags
-        if (extOff && i < extEntries && extSize && extOff + (uint32_t)extSize * (i + 1) <= size) {
+        if (extOff && i < extEntries && extSize && fits(size, extOff, (uint64_t)extSize * (i + 1))) {
             const uint8_t* e = data + extOff + (size_t)extSize * i;
             if (extSize > 3) sm.finetune = (int8_t)(((int8_t)e[3]) * 16);
             if (extSize >= 18 && sm.length) {
@@ -301,13 +304,14 @@ Result<Song> medLoad(const uint8_t* data, size_t size) {
                 else if (extSize >= 18) sm.loop = LoopType::None;
             }
         }
-        if (infoOff && i < infoEntries && infoSize && infoOff + (uint32_t)infoSize * (i + 1) <= size)
+        if (infoOff && i < infoEntries && infoSize && fits(size, infoOff, (uint64_t)infoSize * (i + 1)))
             copyName(sm.name, data + infoOff + (size_t)infoSize * i, infoSize < 40 ? infoSize : 40, 22);
     }
 
     // ---- order list
     if (version < 2) {
         for (int i = 0; i < songLength && i < 256; ++i) s.order.push_back(seq[i]);
+        if (songLength > 256) s.loadFlags |= LOAD_TRUNCATED;
     } else {
         ByteReader h(data, size);
         h.seek(songArea);
@@ -315,7 +319,7 @@ Result<Song> medLoad(const uint8_t* data, size_t size) {
         h.skip(4);
         h.u16be();  // tracks
         const uint16_t numPlaySeqs = h.u16be();
-        for (int sec = 0; sec < songLength; ++sec) {
+        for (int sec = 0; sec < songLength && s.order.size() < 256; ++sec) {
             if (sectionTable + 2u * (sec + 1) > size) break;
             h.seek(sectionTable + 2u * sec);
             const uint16_t ps = h.u16be();
@@ -326,13 +330,17 @@ Result<Song> medLoad(const uint8_t* data, size_t size) {
             h.seek(psOff + 40);
             const uint16_t n = h.u16be();
             for (int k = 0; k < n && !h.overrun(); ++k) {
+                if (s.order.size() >= 256) {  // the model holds 256 positions: stop reading here
+                    s.loadFlags |= LOAD_TRUNCATED;
+                    break;
+                }
                 const uint16_t b = h.u16be();
                 if (b >= 0x8000) continue;  // play sequence commands
                 if (b > 255) {
                     s.loadFlags |= LOAD_TRUNCATED;
                     continue;
                 }
-                if (s.order.size() < 256) s.order.push_back((uint8_t)b);
+                s.order.push_back((uint8_t)b);
             }
         }
     }
@@ -378,7 +386,7 @@ Result<Song> medLoad(const uint8_t* data, size_t size) {
                 numTracks = r.u16be();
                 numRows = r.u16be() + 1;
                 const uint32_t info = r.u32be();
-                if (info && info + 36 <= size) vol7bit = data[info + 16] | data[info + 17] | data[info + 18] | data[info + 19];
+                if (info && fits(size, info, 36)) vol7bit = data[info + 16] | data[info + 17] | data[info + 18] | data[info + 19];
             }
         }
         if (numRows > 256) {

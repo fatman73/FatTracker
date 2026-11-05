@@ -181,3 +181,51 @@ TEST(real_modules_octamed_load_and_play) {
     }
     std::printf("  octamed: %d modules\n", count);
 }
+
+TEST(med_offsets_near_4gb_do_not_wrap) {
+    // expansion data whose song name / instrument info pointers sit just below 4 GB:
+    // offset + length wraps around in 32 bits and must not pass the bounds check
+    auto f = tinyMmd0();
+    const uint32_t exp = (uint32_t)f.size();
+    f.resize(f.size() + 80, 0);
+    auto put32 = [&](size_t at, uint32_t v) {
+        for (int i = 0; i < 4; ++i) f[at + i] = (uint8_t)(v >> (24 - 8 * i));
+    };
+    put32(32, exp);                    // header: expansion data
+    put32(exp + 4, 0xFFFFFFF0u);       // instrument extensions
+    f[exp + 8] = 0, f[exp + 9] = 17;   // entries
+    f[exp + 10] = 0, f[exp + 11] = 32; // entry size
+    put32(exp + 20, 0xFFFFFFF0u);      // instrument info
+    f[exp + 24] = 0, f[exp + 25] = 17;
+    f[exp + 26] = 0, f[exp + 27] = 40;
+    put32(exp + 44, 0xFFFFFFF0u);      // song name
+    put32(exp + 48, 0x20);
+    auto r = loadModule(f.data(), f.size());  // must not read 4 GB past the buffer
+    CHECK(r.ok());
+}
+
+TEST(med_mmd2_huge_order_list_is_bounded) {
+    // MMD2 with 65535 sections, each a play sequence of 65535 entries: must stay quick and capped
+    auto f = tinyMmd0();
+    f[3] = '2';
+    const size_t songArea = 52 + 63 * 8 + 4;  // MMD2 song: play sequence table, section table, ...
+    const uint32_t seqTable = (uint32_t)f.size();
+    auto put32 = [&](size_t at, uint32_t v) {
+        for (int i = 0; i < 4; ++i) f[at + i] = (uint8_t)(v >> (24 - 8 * i));
+    };
+    f.resize(f.size() + 4 + 42 + 2 * 65535 + 2 * 65535, 0);
+    put32(seqTable, seqTable + 4);                         // play sequence 0
+    f[seqTable + 4 + 40] = 0xFF, f[seqTable + 4 + 41] = 0xFF;  // 65535 entries (all block 0)
+    const uint32_t sections = seqTable + 4 + 42 + 2 * 65535;  // 65535 sections, all play sequence 0
+    put32(songArea, seqTable);
+    put32(songArea + 4, sections);
+    f[songArea + 12] = 0, f[songArea + 13] = 4;  // tracks
+    f[songArea + 14] = 0, f[songArea + 15] = 1;  // play sequences
+    f[52 + 63 * 8 + 2] = 0xFF, f[52 + 63 * 8 + 3] = 0xFF;  // song length = 65535 sections
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (r.ok()) {
+        CHECK(r.value().order.size() <= 256);
+        CHECK((r.value().loadFlags & LOAD_TRUNCATED) != 0);
+    }
+}

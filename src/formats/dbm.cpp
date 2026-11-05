@@ -21,7 +21,7 @@ void setLoop(Sample& s, uint32_t start, uint32_t len, bool pingpong) {
         s.loop = LoopType::None;
         return;
     }
-    if (start + len > s.length) len = s.length - start;
+    if (len > s.length - start) len = s.length - start;
     s.loop = pingpong ? LoopType::PingPong : LoopType::Forward;
     s.loopStart = start;
     s.loopLength = len;

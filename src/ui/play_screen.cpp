@@ -668,10 +668,18 @@ UiAction PlayScreen::pressButton(int b, Engine& e) {
             e.playPattern((uint16_t)viewPattern_);
             break;
         case B_EDIT:
+            if (e.tfmx()) {
+                setStatus("TFMX: PLAYBACK ONLY");
+                break;
+            }
             editMode_ = !editMode_;
             setStatus(editMode_ ? "EDIT MODE" : "ALL RIGHT");
             break;
         case B_RECORD:
+            if (e.tfmx()) {
+                setStatus("TFMX: PLAYBACK ONLY");
+                break;
+            }
             recordMode_ = !recordMode_;
             if (recordMode_) {
                 editMode_ = true;

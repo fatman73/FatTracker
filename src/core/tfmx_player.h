@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <memory>
 
+struct Song;
+
 class TfmxPlayer {
 public:
     static constexpr int kMaxVoices = 8;   // 4 Paula channels, 8 in TFMX 7V
@@ -22,6 +24,7 @@ public:
     bool load(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl, size_t smplSize, int song = 0);
     void restart();                                     // from the start of the song
     void setRate(uint32_t hz);
+    void clearMeters();  // VU and scopes to zero (playback stopped)
     void render(float* stereo, uint32_t frames, float gain);  // overwrites the buffer
 
     int voices() const;
@@ -32,6 +35,11 @@ public:
     int steps() const;       // number of track steps of the song
     double seconds() const;  // song length (one pass) found by the decoder
     const char* format() const;
+    // TFMX tracks unrolled into tracker patterns for the screen (1 tick = 1 row, 64 rows a pattern,
+    // one column per used track): note, macro as instrument, note volume in the volume column.
+    bool buildDisplay(Song& out);
+    int tick() const;  // display row being played (pattern = tick / 64)
+    static constexpr int kDisplayRows = 64;
 
 private:
     struct Impl;

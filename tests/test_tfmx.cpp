@@ -1,10 +1,12 @@
 // Stage 5: TFMX playback (Turrican II mdat + smpl pairs from modules/).
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
 #include <vector>
 
+#include "core/song.h"
 #include "core/tfmx_player.h"
 #include "test.h"
 
@@ -77,4 +79,50 @@ TEST(real_tfmx_turrican2_plays) {
         ++count;
     }
     std::printf("  tfmx: %d modules\n", count);
+}
+
+TEST(tfmx_display_song_shows_all_tracks) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::path(FT_SOURCE_DIR) / "modules" / "Chris Huelsbeck" / "TFMX";
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) {
+        std::printf("SKIP tfmx_display (no Turrican files)\n");
+        return;
+    }
+    const auto mdat = readAll(dir / L"mdat.turrican 2 level 0-intro"), smpl = readAll(dir / L"smpl.turrican 2 level 0-intro");
+    TfmxPlayer p;
+    CHECK(p.load(mdat.data(), mdat.size(), smpl.data(), smpl.size()));
+    Song s;
+    CHECK(p.buildDisplay(s));
+    std::printf("  intro display: %d channels, %d patterns\n", s.numChannels, (int)s.patterns.size());
+    CHECK(s.numChannels >= 7);  // the intro is TFMX 7V
+    CHECK(s.patterns.size() > 2);
+    CHECK_EQ(s.order.size(), s.patterns.size());
+    int notes = 0;
+    for (const Pattern& pat : s.patterns) {
+        CHECK_EQ(pat.rows, 64);
+        for (const Cell& c : pat.cells) notes += c.note ? 1 : 0;
+    }
+    CHECK(notes > 100);
+    // the display follows playback: after some seconds the tick has moved on
+    CHECK_EQ(p.tick(), 0);
+    peakOf(p, 3.0);
+    CHECK(p.tick() > 10);
+}
+
+TEST(tfmx_absurd_tempo_does_not_hang) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::path(FT_SOURCE_DIR) / "modules" / "Chris Huelsbeck" / "TFMX";
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) return;
+    auto mdat = readAll(dir / L"mdat.turrican 2 level 1-desert");
+    const auto smpl = readAll(dir / L"smpl.turrican 2 level 1-desert");
+    for (int song = 0; song < 32; ++song) mdat[0x180 + 2 * song] = mdat[0x181 + 2 * song] = 0xFF;  // BPM 65535
+    const auto t0 = std::chrono::steady_clock::now();
+    TfmxPlayer p;
+    p.load(mdat.data(), mdat.size(), smpl.data(), smpl.size());
+    std::vector<float> buf(2 * 4800);
+    p.render(buf.data(), 4800, 0.5f);
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    CHECK(secs < 2.0);  // loading must not spin for minutes
 }

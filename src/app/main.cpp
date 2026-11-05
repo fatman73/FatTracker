@@ -233,6 +233,11 @@ void confirmDiscard(HWND hwnd, std::function<void()> then);
 bool saveAsDialog(HWND hwnd, DWORD filter = 1);  // 1 XM, 2 MOD, 3 WAV
 
 bool saveTo(const std::wstring& path, SaveKind kind) {
+    if (g_engine->tfmx()) {  // the TFMX display song is not the music: nothing to save
+        g_screen.setStatus("TFMX: PLAYBACK ONLY - NOTHING TO SAVE");
+        g_dirty = true;
+        return false;
+    }
     g_busy = true;
     SetCursor(g_cursors.busy());
     SaveResult r = saveSong(*g_engine, path, kind);
@@ -251,6 +256,10 @@ bool saveTo(const std::wstring& path, SaveKind kind) {
 
 // MOD export first lists what the format cannot keep and asks; other kinds save directly.
 void exportChecked(const std::wstring& path, SaveKind kind) {
+    if (g_engine->tfmx()) {  // playback only: saveTo explains
+        saveTo(path, kind);
+        return;
+    }
     if (kind == SaveKind::Mod) {
         g_engine->lock();
         const ModExport m = exportMod(*g_engine->song());
@@ -283,6 +292,7 @@ bool saveCurrent(HWND hwnd) {
 }
 
 bool saveAsDialog(HWND hwnd, DWORD filter) {
+    if (g_engine->tfmx()) return saveTo(L"", SaveKind::Xm);  // says why nothing is saved
     wchar_t file[MAX_PATH] = {};
     std::wstring def = g_path.empty() ? L"untitled.xm" : withExtension(g_path, L".xm");
     lstrcpynW(file, def.c_str(), MAX_PATH);

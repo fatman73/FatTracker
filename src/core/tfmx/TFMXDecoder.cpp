@@ -427,9 +427,10 @@ bool TFMXDecoder::init(void* data, udword length, int songNumber) {
     duration = 0;
     bool loopModeBak = loopMode;
     loopMode = false;
+    long dryRuns = 0;  // FatTracker: also bounded by calls (a 0 ms tick could spin for ages)
     do {
         duration += run();
-    } while (!songEnd && (duration < 1000 * 60 * 59));
+    } while (!songEnd && (duration < 1000 * 60 * 59) && ++dryRuns < 400000);
     loopMode = loopModeBak;
 
     adjustTraitsPost();
@@ -447,7 +448,7 @@ void TFMXDecoder::restart() {
     sequencer.step.first = sequencer.step.current = readBEuword(pBuf, offsets.header + 0x100 + so);
     sequencer.step.last = readBEuword(pBuf, offsets.header + 0x140 + so);
     if ((admin.speed = readBEuword(pBuf, offsets.header + 0x180 + so)) >= 0x10) {
-        setBPM(admin.speed);
+        setBPM(admin.speed > 500 ? 500 : admin.speed);  // FatTracker: sane tick rate
         admin.speed = 0;
         if (variant.bpmSpeed5) {
             admin.speed = 5;
@@ -634,7 +635,13 @@ int TFMXDecoder::run() {
         if (--admin.count < 0) {
             admin.count = admin.speed; // reload
             patternTickCounter++;       // increment for position mapping
+            int stepGuard = 2 * TRACK_STEPS_MAX;  // FatTracker: a corrupt track table must not spin forever
             do {
+                if (--stepGuard < 0) {
+                    songEnd = true;
+                    triggerRestart = true;
+                    break;
+                }
                 sequencer.step.next = false;
                 int countInactive = 0;
                 int countInfinite = 0;

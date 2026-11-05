@@ -77,6 +77,10 @@ void PlayScreen::advance(Engine& e) {
 UiAction PlayScreen::editKey(unsigned vk, bool shift, bool ctrl, bool alt, bool repeat, Engine& e) {
     const Song* s = e.song();
     if (!s || s->patterns.empty()) return UiAction::None;
+    if (e.tfmx() && editMode_) {  // the TFMX tracks are shown, not edited
+        editMode_ = recordMode_ = false;
+        setStatus("TFMX: PLAYBACK ONLY");
+    }
     const int pat = editPattern(), row = editRow();
     auto extend = [&]() {
         if (!blockOn_) {

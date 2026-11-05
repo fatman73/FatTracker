@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 
+#include "core/song.h"
 #include "core/tfmx/PaulaVoice.h"
 #include "core/tfmx/TFMXDecoder.h"
 
@@ -110,6 +111,11 @@ void TfmxPlayer::restart() {
 
 void TfmxPlayer::setRate(uint32_t hz) { impl_->rate = hz ? hz : 48000; }
 
+void TfmxPlayer::clearMeters() {
+    std::memset(impl_->vu, 0, sizeof impl_->vu);
+    std::memset(impl_->scope, 0, sizeof impl_->scope);
+}
+
 void TfmxPlayer::render(float* out, uint32_t frames, float gain) {
     std::memset(out, 0, sizeof(float) * 2 * frames);
     Impl& m = *impl_;
@@ -162,3 +168,50 @@ int TfmxPlayer::step() const { return impl_->loaded ? impl_->dec.currentStep() -
 int TfmxPlayer::steps() const { return impl_->loaded ? impl_->dec.lastStep() - impl_->dec.firstStep() + 1 : 0; }
 double TfmxPlayer::seconds() const { return impl_->loaded ? impl_->dec.getDuration() / 1000.0 : 0.0; }
 const char* TfmxPlayer::format() const { return impl_->loaded ? impl_->dec.formatLabel().c_str() : ""; }
+
+bool TfmxPlayer::buildDisplay(Song& out) {
+    if (!impl_->loaded) return false;
+    tfmxaudiodecoder::TFMXDecoder::PatternDisplayData data;
+    if (!impl_->dec.buildPatternDisplayForCurrentSong(data)) return false;
+    int used[tfmxaudiodecoder::TFMXDecoder::PatternDisplayData::MAX_TRACKS];
+    int nUsed = 0;
+    uint32_t ticks = 0;
+    for (int t = 0; t < data.numTracks && t < tfmxaudiodecoder::TFMXDecoder::PatternDisplayData::MAX_TRACKS; ++t) {
+        bool notes = false;
+        for (const auto& r : data.tracks[t].rows) notes |= r.type == 0;
+        if (!notes) continue;
+        used[nUsed++] = t;
+        const uint32_t end = data.tracks[t].totalTicks + 1;
+        if (end > ticks) ticks = end;
+    }
+    if (!nUsed) return false;
+    int numPat = (int)((ticks + kDisplayRows - 1) / kDisplayRows);
+    if (numPat > 256) numPat = 256;
+    if (numPat < 1) numPat = 1;
+    out = makeEmptySong(nUsed < 4 ? 4 : nUsed);
+    out.patterns.clear();
+    for (int p = 0; p < numPat; ++p) out.patterns.push_back(makePattern(kDisplayRows, out.numChannels));
+    out.order.clear();
+    for (int p = 0; p < numPat; ++p) out.order.push_back((uint8_t)p);
+    for (int k = 0; k < nUsed; ++k)
+        for (const auto& r : data.tracks[used[k]].rows) {
+            if (r.type != 0) continue;  // waits, loops and jumps are not shown
+            const uint32_t p = r.tick / kDisplayRows;
+            if (p >= (uint32_t)numPat) break;
+            Cell& c = out.patterns[p].at((int)(r.tick % kDisplayRows), k);
+            if (c.note) continue;  // several notes on one tick: keep the first
+            // TFMX note 0 = period 1710 (one octave below ProTracker C-1) = XM C-1 (25)
+            const int n = (r.note & 0x3F) + 25;
+            c.note = (uint8_t)(n > 96 ? 96 : n);
+            c.instr = (uint8_t)((r.macro & 0x7F) + 1);
+            c.vol = (uint8_t)(0x10 + r.volume * 4);
+            if (r.note >= 0xC0) c.fx = 0x3;  // portamento note
+        }
+    return true;
+}
+
+int TfmxPlayer::tick() const {
+    if (!impl_->loaded) return 0;
+    const int t = (int)impl_->dec.getPatternTickCounter() - 1;
+    return t < 0 ? 0 : t;
+}
