@@ -8,3 +8,5 @@ bool stDetect(const uint8_t* data, size_t size);
 Result<Song> stLoad(const uint8_t* data, size_t size);
 bool xmDetect(const uint8_t* data, size_t size);
 Result<Song> xmLoad(const uint8_t* data, size_t size);
+bool medDetect(const uint8_t* data, size_t size);
+Result<Song> medLoad(const uint8_t* data, size_t size);

@@ -166,7 +166,7 @@ TEST(unsupported_formats_are_named) {
         size_t offset;
         const char* expect;
     } cases[] = {{"TFMX-SONG ", 0, "UNSUPPORTED FORMAT: TFMX"},
-                 {"MMD1", 0, "UNSUPPORTED FORMAT: OCTAMED"},
+                 {"MMD1", 0, "BAD OCTAMED FILE"},  // OctaMED is supported now: a header of zeros is broken
                  {"SymM", 0, "UNSUPPORTED FORMAT: SYMPHONIE"},
                  {"SCRM", 44, "UNSUPPORTED FORMAT: SCREAM TRACKER 3"},
                  {"IMPM", 0, "UNSUPPORTED FORMAT: IMPULSE TRACKER"}};
