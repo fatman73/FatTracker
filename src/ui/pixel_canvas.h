@@ -5,6 +5,9 @@
 
 constexpr uint32_t argb(uint32_t rgb) { return 0xFF000000u | rgb; }
 
+// Glyph heights: 5 px (pattern rows), 7 px (everything else), 9 px (the playing row bar).
+enum FontSize : int { kSmall = 0, kNormal = 1, kTall = 2 };
+
 class PixelCanvas {
 public:
     static constexpr int W = 320, H = 256;
@@ -17,9 +20,9 @@ public:
         if (x >= 0 && y >= 0 && x < W && y < H) px_[y * W + x] = c;
     }
     uint32_t at(int x, int y) const { return (x >= 0 && y >= 0 && x < W && y < H) ? px_[y * W + x] : 0; }
-    // Text, 8 px per character. compact = 6 px tall glyphs (pattern rows), else 7 px.
-    void text(int x, int y, const char* s, uint32_t c, bool compact = false);
-    void textShadow(int x, int y, const char* s, uint32_t c, uint32_t shadow, bool compact = false);
+    // Text, 8 px per character.
+    void text(int x, int y, const char* s, uint32_t c, FontSize size = kNormal);
+    void textShadow(int x, int y, const char* s, uint32_t c, uint32_t shadow, FontSize size = kNormal);
     void line(int x0, int y0, int x1, int y1, uint32_t c);
     const uint32_t* pixels() const { return px_; }
 
@@ -30,4 +33,4 @@ private:
 // Glyph rows (7 rows, bit 6 = leftmost of 7 columns); unknown characters are blank.
 // '\x01' / '\x02' are the up / down arrows of the counters.
 const uint8_t* amigaGlyph(char c);
-int glyphRows(bool compact);  // 7 or 6
+int glyphRows(FontSize size);  // 5, 7 or 9

@@ -69,31 +69,97 @@ const GlyphDef kGlyphs[] = {
     {'\x02', {"..###..", "..###..", "..###..", "#######", ".#####.", "..###..", "...#..."}},
 };
 
+// Hand made 5 px versions of the characters seen in pattern rows (ProTracker uses a short font there).
+const GlyphDef kSmallGlyphs[] = {
+    {'0', {".####..", "##..##.", "##..##.", "##..##.", ".####.."}},
+    {'1', {"..##...", ".###...", "..##...", "..##...", ".####.."}},
+    {'2', {".####..", "....##.", ".####..", "##.....", "######."}},
+    {'3', {"#####..", "....##.", "..###..", "....##.", "#####.."}},
+    {'4', {"##..##.", "##..##.", "######.", "....##.", "....##."}},
+    {'5', {"######.", "##.....", "#####..", "....##.", "#####.."}},
+    {'6', {".####..", "##.....", "#####..", "##..##.", ".####.."}},
+    {'7', {"######.", "....##.", "...##..", "..##...", "..##..."}},
+    {'8', {".####..", "##..##.", ".####..", "##..##.", ".####.."}},
+    {'9', {".####..", "##..##.", ".#####.", "....##.", ".####.."}},
+    {'A', {".####..", "##..##.", "######.", "##..##.", "##..##."}},
+    {'B', {"#####..", "##..##.", "#####..", "##..##.", "#####.."}},
+    {'C', {".####..", "##..##.", "##.....", "##..##.", ".####.."}},
+    {'D', {"####...", "##.##..", "##..##.", "##.##..", "####..."}},
+    {'E', {"######.", "##.....", "#####..", "##.....", "######."}},
+    {'F', {"######.", "##.....", "#####..", "##.....", "##....."}},
+    {'G', {".####..", "##.....", "##.###.", "##..##.", ".####.."}},
+    {'#', {".##.##.", "#######", ".##.##.", "#######", ".##.##."}},
+    {'-', {".......", ".......", "######.", ".......", "......."}},
+    {'=', {".......", "######.", ".......", "######.", "......."}},
+    {'H', {"##..##.", "##..##.", "######.", "##..##.", "##..##."}},
+    {'I', {"######.", "..##...", "..##...", "..##...", "######."}},
+    {'J', {"....##.", "....##.", "....##.", "##..##.", ".####.."}},
+    {'K', {"##..##.", "##.##..", "####...", "##.##..", "##..##."}},
+    {'L', {"##.....", "##.....", "##.....", "##.....", "######."}},
+    {'M', {"##...##", "###.###", "##.#.##", "##...##", "##...##"}},
+    {'N', {"##..##.", "###.##.", "##.###.", "##..##.", "##..##."}},
+    {'O', {".####..", "##..##.", "##..##.", "##..##.", ".####.."}},
+    {'P', {"#####..", "##..##.", "#####..", "##.....", "##....."}},
+    {'Q', {".####..", "##..##.", "##..##.", "##.##..", ".##.##."}},
+    {'R', {"#####..", "##..##.", "#####..", "##.##..", "##..##."}},
+    {'S', {".#####.", "##.....", ".####..", "....##.", "#####.."}},
+    {'T', {"######.", "..##...", "..##...", "..##...", "..##..."}},
+    {'U', {"##..##.", "##..##.", "##..##.", "##..##.", ".####.."}},
+    {'V', {"##..##.", "##..##.", "##..##.", ".####..", "..##..."}},
+    {'W', {"##...##", "##...##", "##.#.##", "###.###", "##...##"}},
+    {'X', {"##..##.", ".####..", "..##...", ".####..", "##..##."}},
+    {'Y', {"##..##.", "##..##.", ".####..", "..##...", "..##..."}},
+    {'Z', {"######.", "...##..", "..##...", ".##....", "######."}},
+    {':', {".......", "..##...", ".......", "..##...", "......."}},
+    {'.', {".......", ".......", ".......", ".......", "..##..."}},
+    {'', {"...#...", "..###..", ".#####.", "#######", "..###.."}},
+    {'', {"..###..", "#######", ".#####.", "..###..", "...#..."}},
+};
+
 struct FontTables {
     uint8_t full[128][7] = {};
-    uint8_t compact[128][7] = {};
+    uint8_t small[128][5] = {};
+    uint8_t tall[128][9] = {};
     FontTables() {
         for (const GlyphDef& g : kGlyphs) {
             uint8_t* r = full[(unsigned char)g.c];
             for (int y = 0; y < 7; ++y)
                 for (int x = 0; x < 7; ++x)
                     if (g.rows[y][x] == '#') r[y] |= (uint8_t)(0x40 >> x);
-            // 6-row version: drop the first repeated row (keeps the shape), else the middle one
-            int drop = 3;
-            for (int y = 1; y < 6; ++y)
-                if (r[y] == r[y + 1]) {
-                    drop = y;
-                    break;
+            // 5-row fallback: drop up to two repeated rows (keeps the shape), then middle rows
+            uint8_t tmp[7];
+            int n = 7;
+            for (int y = 0; y < 7; ++y) tmp[y] = r[y];
+            for (int y = 1; y < n - 1 && n > 5;)
+                if (tmp[y] == tmp[y + 1]) {
+                    for (int k = y; k < n - 1; ++k) tmp[k] = tmp[k + 1];
+                    --n;
+                } else {
+                    ++y;
                 }
-            uint8_t* c = compact[(unsigned char)g.c];
-            for (int y = 0, k = 0; y < 7; ++y)
-                if (y != drop) c[k++] = r[y];
-        }
-        for (int ch = 'a'; ch <= 'z'; ++ch)
-            for (int y = 0; y < 7; ++y) {  // lower case shows as upper case, like the classic trackers
-                full[ch][y] = full[ch - 32][y];
-                compact[ch][y] = compact[ch - 32][y];
+            while (n > 5) {
+                const int m = n / 2;
+                for (int k = m; k < n - 1; ++k) tmp[k] = tmp[k + 1];
+                --n;
             }
+            for (int y = 0; y < 5; ++y) small[(unsigned char)g.c][y] = tmp[y];
+            // 9-row version for the playing row: the 2nd and 6th rows are doubled
+            static const int kTallMap[9] = {0, 1, 1, 2, 3, 4, 5, 5, 6};
+            for (int y = 0; y < 9; ++y) tall[(unsigned char)g.c][y] = r[kTallMap[y]];
+        }
+        for (const GlyphDef& g : kSmallGlyphs) {
+            uint8_t* r = small[(unsigned char)g.c];
+            for (int y = 0; y < 5; ++y) {
+                r[y] = 0;
+                for (int x = 0; x < 7; ++x)
+                    if (g.rows[y][x] == '#') r[y] |= (uint8_t)(0x40 >> x);
+            }
+        }
+        for (int ch = 'a'; ch <= 'z'; ++ch) {  // lower case shows as upper case, like the classic trackers
+            for (int y = 0; y < 7; ++y) full[ch][y] = full[ch - 32][y];
+            for (int y = 0; y < 5; ++y) small[ch][y] = small[ch - 32][y];
+            for (int y = 0; y < 9; ++y) tall[ch][y] = tall[ch - 32][y];
+        }
     }
 };
 const FontTables& fonts() {
@@ -107,7 +173,7 @@ const uint8_t* amigaGlyph(char c) {
     return fonts().full[u < 128 ? u : 0];
 }
 
-int glyphRows(bool compact) { return compact ? 6 : 7; }
+int glyphRows(FontSize size) { return size == kSmall ? 5 : size == kTall ? 9 : 7; }
 
 void PixelCanvas::fill(int x, int y, int w, int h, uint32_t c) {
     const int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
@@ -132,21 +198,22 @@ void PixelCanvas::bevel(int x, int y, int w, int h, uint32_t face, uint32_t ligh
     fill(x + w - 1, y, 1, h, br);
 }
 
-void PixelCanvas::text(int x, int y, const char* s, uint32_t c, bool compact) {
+void PixelCanvas::text(int x, int y, const char* s, uint32_t c, FontSize size) {
     const FontTables& f = fonts();
-    const int rows = glyphRows(compact);
+    const int rows = glyphRows(size);
     for (; *s; ++s, x += 8) {
-        const unsigned u = (unsigned char)*s;
-        const uint8_t* g = compact ? f.compact[u < 128 ? u : 0] : f.full[u < 128 ? u : 0];
+        unsigned u = (unsigned char)*s;
+        if (u >= 128) u = 0;
+        const uint8_t* g = size == kSmall ? f.small[u] : size == kTall ? f.tall[u] : f.full[u];
         for (int r = 0; r < rows; ++r)
             for (int b = 0; b < 7; ++b)
                 if (g[r] & (0x40 >> b)) set(x + b, y + r, c);
     }
 }
 
-void PixelCanvas::textShadow(int x, int y, const char* s, uint32_t c, uint32_t shadow, bool compact) {
-    text(x + 1, y + 1, s, shadow, compact);
-    text(x, y, s, c, compact);
+void PixelCanvas::textShadow(int x, int y, const char* s, uint32_t c, uint32_t shadow, FontSize size) {
+    text(x + 1, y + 1, s, shadow, size);
+    text(x, y, s, c, size);
 }
 
 void PixelCanvas::line(int x0, int y0, int x1, int y1, uint32_t c) {
