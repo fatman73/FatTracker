@@ -62,3 +62,11 @@ TEST(pure_layout_rows_and_columns) {
     CHECK_EQ(columnAt(1, kTrackX0 + kTrackPitch + 3 + 8 * 5), 5);
     CHECK_EQ(columnAt(0, kTrackX0 - 2), -1);
 }
+
+TEST(pure_layout_exit_button_inside_screen) {
+    using namespace pure;
+    const Box b = exitButton();
+    CHECK(b.x >= 0 && b.x + b.w <= 320 && b.y >= 0 && b.y + b.h <= 256);
+    CHECK_EQ(hitTest(b.x + 2, b.y + 2), kExit);
+    CHECK_EQ(hitTest(b.x + b.w - 2, b.y + b.h - 2), kExit);
+}

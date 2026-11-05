@@ -49,20 +49,18 @@ void ptCell(const Cell& cell, bool ptOctaves, char out[9]) {
 }
 }  // namespace
 
-void PlayScreen::pureGeometry(float& ox, float& oy, float& scale) const {
-    const float dw = L_.W * vpScale_, dh = L_.H * vpScale_;
-    scale = (float)std::max(1, (int)std::min(dw / PixelCanvas::W, dh / PixelCanvas::H));
-    ox = (float)(int)((dw - PixelCanvas::W * scale) / 2);
-    oy = (float)(int)((dh - PixelCanvas::H * scale) / 2);
+// The Amiga screen covers the whole window (device pixels).
+void PlayScreen::pureGeometry(float& ox, float& oy, float& sx, float& sy) const {
+    ox = oy = 0;
+    sx = L_.W * vpScale_ / PixelCanvas::W;
+    sy = L_.H * vpScale_ / PixelCanvas::H;
 }
 
-RectF PlayScreen::pureExitRect() const {
-    float ox, oy, sc;
-    pureGeometry(ox, oy, sc);
-    const float right = (ox + PixelCanvas::W * sc) / vpScale_;  // logical x where the Amiga screen ends
-    const float w = std::min(260.f, std::max(120.f, L_.W - right - 40.f));
-    if (L_.W - right >= w + 20.f) return {right + (L_.W - right - w) / 2, L_.H - 90.f, w, 50.f};
-    return {L_.W - w - 10.f, L_.H - 60.f, w, 50.f};  // no margin: over the screen corner
+void PlayScreen::pureToAmiga(float lx, float ly, int& ax, int& ay) const {
+    float ox, oy, sx, sy;
+    pureGeometry(ox, oy, sx, sy);
+    ax = (int)((lx * vpScale_ - ox) / sx);
+    ay = (int)((ly * vpScale_ - oy) / sy);
 }
 
 int PlayScreen::pureFirstChannel(int numChannels) {
@@ -150,9 +148,17 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
             py = y;
         }
     }
-    box(c, pure::creditLine());
-    c.textShadow(pure::creditLine().x + 4, pure::creditLine().y + 2, "FATTRACKER", kInk, kInkShadow);
-    rightText(c, pure::creditLine(), pure_ == 2 ? "AMIGA 1200" : "AMIGA 500");
+    // machine line: model name and the power / drive LEDs of the A500 case, then EXIT
+    const pure::Box cl = pure::creditLine();
+    box(c, cl);
+    c.textShadow(cl.x + 4, cl.y + 2, pure_ == 2 ? "A1200" : "A500", kInk, kInkShadow);
+    const uint32_t power = tel.led ? argb(0x33FF44) : argb(0x1C7A24);  // dims with the filter, like the A500
+    const uint32_t drive = tel.drive ? argb(0xFFA020) : argb(0x5A3A10);
+    c.bevel(cl.x + 52, cl.y + 3, 14, 5, power, power, kDark, true);
+    c.bevel(cl.x + 72, cl.y + 3, 14, 5, drive, drive, kDark, true);
+    c.text(cl.x + 92, cl.y + 2, "DF0", kInkShadow, true);
+    box(c, pure::exitButton(), hover_ == kPureExitHover);
+    label(c, pure::exitButton(), "EXIT PURE");
 
     // ---- song / sample names
     box(c, pure::songRow());
@@ -242,35 +248,17 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
         for (int k = 0; k < h; ++k) c.fill(x, pure::kBarY - 1 - k, 14, 1, (k & 1) ? kVuDark : kVu);
     }
 
-    // ---- show it
-    g.fillRect({0, 0, L_.W, L_.H}, Color{0, 0, 0, 1});
-    float ox, oy, sc;
-    pureGeometry(ox, oy, sc);
-    g.drawPixels(c.pixels(), PixelCanvas::W, PixelCanvas::H, ox, oy, sc);
-
-    // ---- outside the Amiga screen: the A500 LEDs and a way back
-    Ui u{g, tx, t};
-    const RectF ex = pureExitRect();
-    const float lx = ex.x, ly = ex.y - 120;
-    auto led = [&](float y, const char* name, Color on, bool lit) {
-        g.fillRoundRect({lx, y, 46, 12}, 3.f, lit ? on : Color{on.r * 0.25f, on.g * 0.25f, on.b * 0.25f, 1});
-        tx.draw(g, {lx + 56, y - 6, 200, 24}, name, 14.f, Color{0.6f, 0.6f, 0.6f, 1}, Align::Left);
-    };
-    led(ly, "POWER", Color{0.2f, 1.f, 0.3f, 1}, true);
-    led(ly + 34, "LED FILTER", Color{0.2f, 1.f, 0.3f, 1}, tel.led);
-    led(ly + 68, "DRIVE", Color{1.f, 0.6f, 0.15f, 1}, tel.drive);
-    drawButton(u, ex, "EXIT PURE MODE", hover_ == kPureExitHover ? Gfx::PanelState::Hover : Gfx::PanelState::Normal, 16.f);
+    // ---- show it over the whole window
+    float ox, oy, sx, sy;
+    pureGeometry(ox, oy, sx, sy);
+    g.drawPixels(c.pixels(), PixelCanvas::W, PixelCanvas::H, ox, oy, PixelCanvas::W * sx, PixelCanvas::H * sy);
     drawDialog(g, tx, t);
+    animating_ = true;  // scopes, VU meters, clock and LEDs move all the time
 }
 
 UiAction PlayScreen::pureMouse(float lx, float ly, bool right, Engine& e) {
-    if (pureExitRect().contains(lx, ly)) {
-        setPure(0, e);
-        return UiAction::Redraw;
-    }
-    float ox, oy, sc;
-    pureGeometry(ox, oy, sc);
-    const int ax = (int)((lx * vpScale_ - ox) / sc), ay = (int)((ly * vpScale_ - oy) / sc);
+    int ax, ay;
+    pureToAmiga(lx, ly, ax, ay);
     const Song* s = e.song();
     const int nch = s ? s->numChannels : 4;
     const int first = pureFirstChannel(nch);
@@ -315,6 +303,10 @@ UiAction PlayScreen::pureMouse(float lx, float ly, bool right, Engine& e) {
         return UiAction::Redraw;
     }
     if (h == pure::kLoad) return UiAction::OpenFile;
+    if (h == pure::kExit) {
+        setPure(0, e);
+        return UiAction::Redraw;
+    }
     if (h == pure::kTempoUp || h == pure::kTempoDown) {
         bpmStep((h == pure::kTempoUp ? 1 : -1) * (right ? 10 : 1), e);
         return UiAction::Redraw;

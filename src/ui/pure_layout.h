@@ -30,6 +30,7 @@ enum Id : int {
     kTempoDown = 72,
     kTrack = 80,       // + 0..3 (pattern area columns)
     kRowNumbers = 90,
+    kExit = 91,        // EXIT PURE button in the line under the scopes
 };
 
 Box counterLabel(int row);
@@ -40,7 +41,8 @@ Box gridButton(int i);               // 3 columns x 4 rows
 Box sideButton(int i);               // narrow column right of the grid, 0..4
 Box scopeTitle();
 Box scope(int i);                    // black area of scope i
-Box creditLine();
+Box creditLine();                    // machine name + power / drive LEDs
+Box exitButton();
 Box songRow();
 Box sampleRow();
 Box loadButton();
