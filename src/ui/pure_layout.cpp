@@ -11,9 +11,9 @@ const char* const kLabels[12] = {"PLAY",   "STOP",     "MOD2WAV", "PATTERN", "CL
 // LENGTH, REPEAT and REPLEN show five hex digits: their value boxes are wider, the labels narrower.
 Box counterLabel(int row) {
     if (row == 0) return {0, 0, 42, kRowH};
-    return {0, row * kRowH, row >= 6 ? kLabelW - 6 : kLabelW, kRowH};
+    return {0, row * kRowH, row >= 6 ? kLabelW - 8 : kLabelW, kRowH};
 }
-Box counterValue(int row) { return row >= 6 ? Box{kValueX - 6, row * kRowH, kValueW + 6, kRowH} : Box{kValueX, row * kRowH, kValueW, kRowH}; }
+Box counterValue(int row) { return row >= 6 ? Box{kValueX - 8, row * kRowH, kValueW + 8, kRowH} : Box{kValueX, row * kRowH, kValueW, kRowH}; }
 Box counterArrow(int row, int dir) { return {kArrowX + dir * kArrowW, row * kRowH, kArrowW, kRowH}; }
 Box posButton(int i) { return {42 + i * 10, 0, i ? 11 : 10, kRowH}; }
 Box gridButton(int i) { return {kGridX + (i % 3) * kGridW, (i / 3) * kRowH, kGridW, kRowH}; }
@@ -30,6 +30,8 @@ Box tempoArrow(int dir) { return {dir ? 78 : 30, 130, 9, 8}; }
 Box track(int i) { return {kTrackX0 + i * kTrackPitch, kPatternY, kTrackW, 256 - kPatternY}; }
 Box rowNumbers() { return {kRowNumX, kPatternY, kRowNumW, 256 - kPatternY}; }
 const char* buttonLabel(int i) { return i >= 0 && i < 12 ? kLabels[i] : ""; }
+// glyphs use 6 of their 8 columns: the text ends 2 px before x + chars * 8
+int valueX(const Box& b, int chars) { return b.x + b.w - chars * 8 - 1; }
 
 int hitTest(int x, int y) {
     for (int r = 0; r < kCounterRows; ++r)

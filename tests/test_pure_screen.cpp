@@ -1,4 +1,6 @@
 // Stage 3: Pure mode screen - pixel canvas, Amiga style font, ProTracker style layout.
+#include <initializer_list>
+
 #include "test.h"
 #include "ui/pixel_canvas.h"
 #include "ui/pure_layout.h"
@@ -88,7 +90,7 @@ TEST(pure_layout_matches_protracker) {
     using namespace pure;
     CHECK_EQ(kBarH, 14);  // the playing row is taller than the others
     CHECK(kBarY + kBarH + 7 * kPatternRowH <= 256);
-    CHECK_EQ(counterValue(6).w, 41);  // LENGTH / REPEAT / REPLEN show 5 hex digits
+    CHECK_EQ(counterValue(6).w, 43);  // LENGTH / REPEAT / REPLEN: 5 hex digits + bevel + 1 px margin each side
     CHECK_EQ(counterValue(1).w, 35);
     CHECK_EQ(counterLabel(6).w + counterValue(6).w, counterLabel(1).w + counterValue(1).w);
     CHECK_EQ(track(0).x, 32);
@@ -112,4 +114,16 @@ TEST(pixel_font_medium_three_keeps_its_middle) {
     c.clear(0);
     c.text(0, 0, "3", kInk, kMedium);
     CHECK(c.at(4, 2) == kInk);  // the middle stroke of the 3 (without it the 3 reads as a J)
+}
+
+TEST(pure_values_keep_off_the_box_edges) {
+    // black counter digits must not touch the bevel of their box (ProTracker leaves a pixel)
+    using namespace pure;
+    for (int r : {1, 6}) {
+        const Box b = counterValue(r);
+        const int digits = r >= 6 ? 5 : 4;
+        const int x = valueX(b, digits);
+        CHECK(x >= b.x + 2);                      // bevel + 1 px gap on the left
+        CHECK(x + digits * 8 - 2 <= b.x + b.w - 2);  // glyphs end before the right gap + bevel
+    }
 }
