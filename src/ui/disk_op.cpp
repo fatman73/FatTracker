@@ -120,7 +120,7 @@ void PlayScreen::diskRefresh() {
                 if (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue;
                 const bool isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 if (!isDir) {
-                    const bool mod = hasExt(n, {L".mod", L".xm", L".stk", L".s3m", L".it", L".mdat", L".mmd0",
+                    const bool mod = hasExt(n, {L".mod", L".xm", L".stk", L".s3m", L".it", L".mtm", L".669", L".mdat", L".mmd0",
                                                 L".mmd1", L".mmd2", L".mmd3", L".med", L".symmod", L".dbm",
                                                 L".digi", L".tfx"}) ||
                                      !_wcsnicmp(n.c_str(), L"mdat.", 5) || !_wcsnicmp(n.c_str(), L"mod.", 4);
