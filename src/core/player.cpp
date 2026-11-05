@@ -8,6 +8,7 @@
 Player::Player(Mixer& m) : mixer_(m) {}
 
 void Player::setSong(const Song* s) {
+    mixer_.setLed(false);  // every song starts with the filter LED off
     playing_ = false;
     mixer_.reset();  // voices may point at samples of the song being replaced
     song_ = s;

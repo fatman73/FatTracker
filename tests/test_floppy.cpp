@@ -27,16 +27,77 @@ Sample constant8(int8_t v, uint32_t len) {
 }
 }  // namespace
 
-TEST(floppy_read_time_matches_model) {
+TEST(floppy_read_lasts_five_seconds) {
+    // user: loading a file plays the drive head for about 5 seconds, whatever the size
+    for (uint32_t bytes : {1000u, 11264u * 3, 880u * 1024}) {
+        Floppy f;
+        f.setRate(48000);
+        CHECK_NEAR(f.read(bytes), 5.0, 0.001);
+        CHECK_NEAR(f.busySeconds(), 5.0, 0.001);
+        runPeak(f, 1.0);
+        CHECK_NEAR(f.busySeconds(), 4.0, 0.001);
+    }
+}
+
+TEST(floppy_reads_do_not_queue) {
     Floppy f;
     f.setRate(48000);
-    // spin-up 0.5 + 40 steps to the directory (3 ms) + settle 15 ms + one revolution 0.2
-    // + step to cylinder 41 (3 + 15 ms) + 3 cylinders x 0.4 s + 2 more steps (3 + 15 ms)
-    const double expect = 0.5 + 0.12 + 0.015 + 0.2 + 0.018 + 1.2 + 2 * 0.018;
-    CHECK_NEAR(f.read(11264 * 3), expect, 0.005);
-    CHECK_NEAR(f.busySeconds(), expect, 0.005);
+    f.read(100000);
     runPeak(f, 1.0);
-    CHECK_NEAR(f.busySeconds(), expect - 1.0, 0.005);
+    CHECK_NEAR(f.read(100000), 5.0, 0.001);  // a new load restarts the access, it does not wait
+    for (int i = 0; i < 10; ++i) f.dir();     // folder reads while busy are ignored
+    CHECK_NEAR(f.busySeconds(), 5.0, 0.001);
+}
+
+TEST(floppy_cancel_stops_the_access) {
+    Floppy f;
+    f.setRate(48000);
+    f.read(100000);
+    runPeak(f, 0.7);
+    f.cancel();
+    CHECK(f.busySeconds() == 0.0);
+    runPeak(f, 3.0);
+    CHECK(!f.audible());
+}
+
+TEST(floppy_rate_change_keeps_remaining_time) {
+    Floppy f;
+    f.setRate(48000);
+    f.read(1000);
+    runPeak(f, 1.0);
+    f.setRate(44100);
+    CHECK_NEAR(f.busySeconds(), 4.0, 0.001);
+}
+
+TEST(floppy_rejects_absurd_user_sound) {
+    Floppy f;
+    f.setRate(48000);
+    Sample slow = constant8(64, 500000);
+    slow.relativeNote = -96;  // ~33 Hz: would expand 1500x
+    f.setSounds(nullptr, &slow, nullptr);
+    CHECK(f.stepFrames() < 48000);  // built-in click used instead
+    Sample longStep = constant8(64, 200000);  // 24 s at 8363 Hz: trimmed
+    f.setSounds(nullptr, &longStep, nullptr);
+    CHECK(f.stepFrames() <= 24000);
+}
+
+TEST(floppy_steps_do_not_pile_up) {
+    Floppy f;
+    f.setRate(48000);
+    Sample silence = constant8(0, 1000), step = constant8(64, 2000);  // 0.24 s, overlaps many steps
+    f.setSounds(&silence, &step, nullptr);
+    f.dir();
+    CHECK(runPeak(f, 1.5) <= 0.51f);
+}
+
+TEST(floppy_reset_silences_everything) {
+    Floppy f;
+    f.setRate(48000);
+    f.insert();
+    runPeak(f, 0.2);
+    f.reset();
+    CHECK(!f.audible());
+    CHECK(f.busySeconds() == 0.0);
 }
 
 TEST(floppy_makes_sound_then_falls_silent) {
@@ -56,12 +117,6 @@ TEST(floppy_user_step_sample_used) {
     f.setSounds(&silence, &step, nullptr);
     f.dir();
     CHECK_NEAR(runPeak(f, 1.0), 0.5, 0.01);
-}
-
-TEST(floppy_read_is_capped) {
-    Floppy f;
-    f.setRate(48000);
-    CHECK(f.read(880 * 1024) <= 12.0 + 1e-6);
 }
 
 TEST(floppy_gain_scales_output) {

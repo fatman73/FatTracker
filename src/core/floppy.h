@@ -1,6 +1,6 @@
 // Amiga 3.5" DD floppy drive sounds for Pure mode: motor, head steps, disk insert.
-// Sounds are synthesized unless the user supplies samples. Timing follows a DD drive:
-// 300 rpm, 11 264 bytes per cylinder, 3 ms per head step.
+// Sounds are synthesized unless the user supplies samples. A file load takes 5 s (user wish);
+// head moves follow a DD drive: 300 rpm, 3 ms per step, 0.4 s per cylinder.
 #pragma once
 #include <cstdint>
 #include <vector>
@@ -18,6 +18,9 @@ public:
     double write(uint32_t bytes);  // queues a file write
     double dir();                  // queues a directory read
     void insert();                 // disk inserted: clunk + recalibration
+    void cancel();                 // the user skipped the wait: stop the current access
+    void reset();                  // silence and forget everything (Pure mode off)
+    size_t stepFrames() const { return step_.size(); }
     double busySeconds() const;    // until the queued accesses finish (motor run-down excluded)
     bool audible() const;
     void mix(float* stereo, uint32_t frames, float gain);  // adds to the buffer
@@ -27,7 +30,8 @@ private:
         const std::vector<float>* snd;
         uint64_t at;
     };
-    double access(uint32_t bytes, bool file);
+    double access(double seconds);
+    void dropFuture();  // forgets sounds that have not started yet
     uint64_t begin();               // start time of a new access (spins the motor up)
     void seek(uint64_t& t, int cyl);
     void rebuild();                 // (re)creates the sound buffers at the current rate

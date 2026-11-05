@@ -85,6 +85,7 @@ std::unique_ptr<Song> g_pending;  // Pure mode: loaded song waiting for the flop
 std::wstring g_pendingPath;
 bool g_pendingTruncated = false;
 void applyLoaded(std::unique_ptr<Song> song, const std::wstring& path, bool truncated);
+void finishPendingLoad();
 
 // Size of a file on disk (0 if unknown) - drives the floppy write sound.
 uint32_t fileSize(const wchar_t* path) {
@@ -111,10 +112,12 @@ void loadFloppySounds() {
             use[i] = &snd[i];
             break;
         }
-    g_engine->setFloppySounds(use[0], use[1], use[2]);
+    g_engine->setFloppySounds(use[0], use[1], use[2]);  // copies (trimmed) what it uses
+    for (Sample& s : snd) s = Sample{};
 }
 
 bool loadModuleFile(const wchar_t* path) {
+    finishPendingLoad();  // a load in progress lands first
     std::vector<uint8_t> data;
     if (const char* err = readFileW(path, data)) {
         g_screen.setStatus(err);
@@ -131,7 +134,7 @@ bool loadModuleFile(const wchar_t* path) {
         else
             wsprintfA(msg, "ERROR: %s", r.error());
         g_screen.setStatus(msg);
-        g_engine->floppyRead((uint32_t)data.size());  // the drive still tried
+        g_engine->floppyDir();  // the drive still looked at it
         return false;
     }
     const bool truncated = (r.value().loadFlags & LOAD_TRUNCATED) != 0;
@@ -161,9 +164,12 @@ void applyLoaded(std::unique_ptr<Song> song, const std::wstring& path, bool trun
     updateTitle();
 }
 
+bool g_dropChar = false;  // the key that skipped a load must not also type
+
 void finishPendingLoad() {
     KillTimer(g_hwnd, kTimerFloppy);
     if (!g_pending) return;
+    g_engine->floppyCancel();
     g_busy = false;
     SetCursor(g_cursors.arrow());
     applyLoaded(static_cast<std::unique_ptr<Song>&&>(g_pending), g_pendingPath, g_pendingTruncated);
@@ -284,6 +290,7 @@ void openFileDialog(HWND hwnd) {
 }
 
 void loadAnyFile(const std::wstring& path) {
+    finishPendingLoad();
     std::vector<uint8_t> data;
     if (const char* err = readFileW(path.c_str(), data)) {
         g_screen.setStatus(err);
@@ -370,8 +377,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             [[fallthrough]];  // Alt+F4 copies the pattern like in ProTracker; close with the window button
         case WM_KEYDOWN: {
-            if (g_pending) {  // any key skips the simulated floppy read
+            g_dropChar = false;
+            if (g_pending) {  // any key skips the simulated floppy read (and types nothing)
                 finishPendingLoad();
+                g_dropChar = true;
                 return 0;
             }
             const bool ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0;
@@ -405,6 +414,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_MOUSEWHEEL: {
+            if (g_pending) {
+                finishPendingLoad();
+                return 0;
+            }
             POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ScreenToClient(hwnd, &pt);
             float lx, ly;
@@ -413,9 +426,17 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_CHAR:
+            if (g_dropChar) {
+                g_dropChar = false;
+                return 0;
+            }
             handle(g_screen.onChar((wchar_t)wp, *g_engine), hwnd);
             return 0;
         case WM_RBUTTONDOWN:
+            if (g_pending) {
+                finishPendingLoad();
+                return 0;
+            }
             mouse(hwnd, lp, true);
             return 0;
         case WM_MOUSEMOVE: {
@@ -453,6 +474,11 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_dirty = true;
             return 0;
         case WM_CLOSE:
+            if (g_pending) {  // closing during a simulated load: the half-read song is dropped
+                KillTimer(hwnd, kTimerFloppy);
+                g_pending.reset();
+                g_busy = false;
+            }
             confirmDiscard(hwnd, [hwnd]() { DestroyWindow(hwnd); });
             return 0;
         case WM_DESTROY:

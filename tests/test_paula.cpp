@@ -156,3 +156,13 @@ TEST(play_from_start_turns_led_off) {
     p.play();
     CHECK(!m.led());
 }
+
+TEST(new_song_turns_led_off) {
+    Mixer m(48000);
+    Player p(m);
+    Song a = testSong(4, 64), b = testSong(4, 64);
+    p.setSong(&a);
+    m.setLed(true);
+    p.setSong(&b);
+    CHECK(!m.led());
+}

@@ -119,6 +119,7 @@ void Engine::setPure(int model) {
     lock();
     const int m = model < 0 || model > 2 ? 0 : model;
     if (m && !pure_) floppy_->insert();
+    if (!m && pure_) floppy_->reset();
     pure_ = m;
     mixer_->setPaula(m == 1 ? PaulaModel::A500 : m == 2 ? PaulaModel::A1200 : PaulaModel::None);
     unlock();
@@ -148,6 +149,12 @@ double Engine::floppyWrite(uint32_t bytes) {
     const double t = pure_ ? floppy_->write(bytes) : 0.0;
     unlock();
     return t;
+}
+
+void Engine::floppyCancel() {
+    lock();
+    floppy_->cancel();
+    unlock();
 }
 
 double Engine::floppyDir() {
@@ -193,7 +200,10 @@ void Engine::render(float* out, uint32_t frames) {
     } else {
         std::memset(out, 0, sizeof(float) * 2 * frames);
     }
-    if (pure_) floppy_->mix(out, frames, driveGain_);  // mechanical noise: not through Paula's filters
+    if (pure_) {
+        floppy_->mix(out, frames, driveGain_);  // mechanical noise: not through Paula's filters
+        for (uint32_t k = 0; k < frames * 2; ++k) out[k] = out[k] > 1.f ? 1.f : (out[k] < -1.f ? -1.f : out[k]);
+    }
     publish();
     unlock();
 }

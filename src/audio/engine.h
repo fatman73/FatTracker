@@ -59,6 +59,7 @@ public:
     double floppyRead(uint32_t bytes);   // seconds until the simulated read finishes (0 when not in Pure)
     double floppyWrite(uint32_t bytes);
     double floppyDir();
+    void floppyCancel();  // the user skipped a simulated load
 
     void lock();    // exclusive, for edits from the UI
     void unlock();
