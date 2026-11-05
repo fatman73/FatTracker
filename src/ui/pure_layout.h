@@ -14,8 +14,9 @@ constexpr int kPatternY = 138;     // pattern area top
 constexpr int kPatternRowH = 7;    // pitch of the normal pattern rows
 constexpr int kRowsAbove = 7;      // rows shown above the centre bar
 constexpr int kBarY = kPatternY + kRowsAbove * kPatternRowH;  // centre row bar
-constexpr int kBarH = 11;
-constexpr int kTrackX0 = 26, kTrackPitch = 73, kTrackW = 70;
+constexpr int kBarH = 14;           // the playing row: taller, bigger font
+constexpr int kTrackX0 = 32, kTrackPitch = 72, kTrackW = 68;
+constexpr int kRowNumX = 4, kRowNumW = 24;
 
 enum Id : int {
     kNone = -1,

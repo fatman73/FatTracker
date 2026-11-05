@@ -19,14 +19,26 @@ TEST(pixel_font_draws_glyphs) {
     CHECK(c.at(2, 0) == kInk);
 }
 
-TEST(pixel_font_compact_is_six_rows) {
+TEST(pixel_font_small_is_five_rows) {
     static PixelCanvas c;
     c.clear(0);
-    c.text(0, 0, "08BEH", kInk, true);
-    bool row6 = false;
-    for (int x = 0; x < 40; ++x) row6 |= c.at(x, 6) != 0;
-    CHECK(!row6);
-    CHECK(c.at(1, 5) == kInk);  // '0' still closes at its bottom
+    c.text(0, 0, "08BEH", kInk, kSmall);
+    bool row5 = false;
+    for (int x = 0; x < 40; ++x) row5 |= c.at(x, 5) != 0;
+    CHECK(!row5);
+    CHECK(c.at(1, 4) == kInk);  // '0' still closes at its bottom
+    CHECK_EQ(glyphRows(kSmall), 5);
+}
+
+TEST(pixel_font_tall_is_nine_rows) {
+    static PixelCanvas c;
+    c.clear(0);
+    c.text(0, 0, "8", kInk, kTall);
+    CHECK(c.at(1, 8) == kInk);  // bottom of the 8
+    bool row9 = false;
+    for (int x = 0; x < 8; ++x) row9 |= c.at(x, 9) != 0;
+    CHECK(!row9);
+    CHECK_EQ(glyphRows(kTall), 9);
 }
 
 TEST(pixel_bevel_edges) {
@@ -45,7 +57,8 @@ TEST(pure_layout_hits_controls) {
     CHECK_EQ(hitTest(112, 3), kArrow + 1);    // POS down
     CHECK_EQ(hitTest(45, 3), kPosIns);
     CHECK_EQ(hitTest(300, 115), kLoad);
-    CHECK_EQ(hitTest(30, 200), kTrack + 0);
+    CHECK_EQ(hitTest(40, 200), kTrack + 0);
+    CHECK_EQ(hitTest(30, 200), kNone);  // grey frame between the row numbers and track 1
     CHECK_EQ(hitTest(310, 200), kTrack + 3);
 }
 
@@ -69,4 +82,15 @@ TEST(pure_layout_exit_button_inside_screen) {
     CHECK(b.x >= 0 && b.x + b.w <= 320 && b.y >= 0 && b.y + b.h <= 256);
     CHECK_EQ(hitTest(b.x + 2, b.y + 2), kExit);
     CHECK_EQ(hitTest(b.x + b.w - 2, b.y + b.h - 2), kExit);
+}
+
+TEST(pure_layout_matches_protracker) {
+    using namespace pure;
+    CHECK_EQ(kBarH, 14);  // the playing row is taller than the others
+    CHECK(kBarY + kBarH + 7 * kPatternRowH <= 256);
+    CHECK_EQ(counterValue(6).w, 41);  // LENGTH / REPEAT / REPLEN show 5 hex digits
+    CHECK_EQ(counterValue(1).w, 35);
+    CHECK_EQ(counterLabel(6).w + counterValue(6).w, counterLabel(1).w + counterValue(1).w);
+    CHECK_EQ(track(0).x, 32);
+    CHECK_EQ(track(3).x + track(3).w, 316);
 }

@@ -8,8 +8,12 @@ const char* const kLabels[12] = {"PLAY",   "STOP",     "MOD2WAV", "PATTERN", "CL
                                  "EDIT",   "EDIT OP.", "POS ED.", "RECORD",  "DISK OP.", "SAMPLER"};
 }  // namespace
 
-Box counterLabel(int row) { return row == 0 ? Box{0, 0, 42, kRowH} : Box{0, row * kRowH, kLabelW, kRowH}; }
-Box counterValue(int row) { return {kValueX, row * kRowH, kValueW, kRowH}; }
+// LENGTH, REPEAT and REPLEN show five hex digits: their value boxes are wider, the labels narrower.
+Box counterLabel(int row) {
+    if (row == 0) return {0, 0, 42, kRowH};
+    return {0, row * kRowH, row >= 6 ? kLabelW - 6 : kLabelW, kRowH};
+}
+Box counterValue(int row) { return row >= 6 ? Box{kValueX - 6, row * kRowH, kValueW + 6, kRowH} : Box{kValueX, row * kRowH, kValueW, kRowH}; }
 Box counterArrow(int row, int dir) { return {kArrowX + dir * kArrowW, row * kRowH, kArrowW, kRowH}; }
 Box posButton(int i) { return {42 + i * 10, 0, i ? 11 : 10, kRowH}; }
 Box gridButton(int i) { return {kGridX + (i % 3) * kGridW, (i / 3) * kRowH, kGridW, kRowH}; }
@@ -24,7 +28,7 @@ Box loadButton() { return {284, 10 * kRowH, 36, kRowH}; }
 Box infoArea() { return {0, 11 * kRowH, 320, kPatternY - 11 * kRowH}; }
 Box tempoArrow(int dir) { return {dir ? 78 : 30, 130, 9, 8}; }
 Box track(int i) { return {kTrackX0 + i * kTrackPitch, kPatternY, kTrackW, 256 - kPatternY}; }
-Box rowNumbers() { return {0, kPatternY, 24, 256 - kPatternY}; }
+Box rowNumbers() { return {kRowNumX, kPatternY, kRowNumW, 256 - kPatternY}; }
 const char* buttonLabel(int i) { return i >= 0 && i < 12 ? kLabels[i] : ""; }
 
 int hitTest(int x, int y) {
@@ -59,7 +63,7 @@ bool rowAt(int y, int& rel) {
 }
 
 int columnAt(int t, int x) {
-    const int c = (x - (kTrackX0 + t * kTrackPitch + 3)) / 8;  // 8 characters "C#201A0F"
+    const int c = (x - (kTrackX0 + t * kTrackPitch + 2)) / 8;  // 8 characters "C#201A0F"
     if (x < kTrackX0 + t * kTrackPitch || c < 0 || c > 7) return -1;
     static const int kMap[8] = {0, 0, 0, 1, 2, 5, 6, 7};
     return kMap[c];

@@ -1,5 +1,5 @@
 // Pure mode screen: a ProTracker style Amiga lowres screen (320x256), drawn pixel by pixel
-// and shown with an integer scale. Shares all editing state with the normal screen.
+// and stretched over the window with sharp pixels. Shares all editing state with the normal screen.
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -11,26 +11,44 @@
 #include "ui/widgets.h"
 
 namespace {
+// ProTracker 2.3 palette: grey panels with light / dark bevels, embossed captions, black values,
+// blue pattern text, yellow quadrascope, red-yellow-green VU meters.
 constexpr uint32_t kBlack = argb(0x000000);
-constexpr uint32_t kFace = argb(0xABABAB), kLight = argb(0xEEEEEE), kDark = argb(0x555555);
-constexpr uint32_t kInk = argb(0xEEEEEE), kInkShadow = argb(0x222222);
-constexpr uint32_t kBarFace = argb(0xBBBBBB), kBarInk = argb(0x111111);
-constexpr uint32_t kBlue = argb(0x5A78FF), kCursor = argb(0xEE2222);
-constexpr uint32_t kScopeLine = argb(0x22DD22), kVu = argb(0x22CC33), kVuDark = argb(0x118822);
-constexpr uint32_t kSep = argb(0x777777);
+constexpr uint32_t kFace = argb(0x888888), kLight = argb(0xBBBBBB), kDark = argb(0x555555);
+constexpr uint32_t kLabelInk = argb(0xCCCCCC), kLabelShadow = argb(0x333333);
+constexpr uint32_t kValueInk = argb(0x000000);
+constexpr uint32_t kBarFace = argb(0xBBBBBB), kBarLight = argb(0xEEEEEE), kBarDark = argb(0x666666);
+constexpr uint32_t kBlue = argb(0x4A66FF), kCursor = argb(0xEE2222), kScope = argb(0xFFDD00);
+constexpr int kVuMax = 48;
 constexpr int kPureButtons[12] = {0, 1, -2, 2, 3, -3, 4, -4, -5, 6, -6, -7};  // B_* of the normal screen, <0 special
 const char kHexDigits[] = "0123456789ABCDEF";
 
 void box(PixelCanvas& c, const pure::Box& b, bool sunken = false) { c.bevel(b.x, b.y, b.w, b.h, kFace, kLight, kDark, sunken); }
 
-void label(PixelCanvas& c, const pure::Box& b, const char* s, bool center = true) {
+void label(PixelCanvas& c, const pure::Box& b, const char* s) {  // embossed, centred
     const int w = (int)std::strlen(s) * 8 - 1;
-    const int x = center ? b.x + (b.w - w) / 2 : b.x + 3;
-    c.textShadow(x, b.y + (b.h - 7) / 2, s, kInk, kInkShadow);
+    c.textShadow(b.x + (b.w - w) / 2, b.y + (b.h - 7) / 2, s, kLabelInk, kLabelShadow);
 }
 
-void rightText(PixelCanvas& c, const pure::Box& b, const char* s) {
-    c.textShadow(b.x + b.w - 2 - (int)std::strlen(s) * 8, b.y + 2, s, kInk, kInkShadow);
+void value(PixelCanvas& c, const pure::Box& b, const char* s) {  // black, right aligned
+    c.text(b.x + b.w - 2 - (int)std::strlen(s) * 8 + 1, b.y + 2, s, kValueInk);
+}
+
+// VU colour k pixels above the bar: green at the bottom, yellow, orange, red at the top.
+uint32_t vuColor(int k) {
+    struct Stop {
+        float at;
+        int r, g, b;
+    };
+    static const Stop kStops[] = {{0.f, 0x10, 0xB8, 0x10}, {0.5f, 0xF0, 0xF0, 0x00}, {0.78f, 0xFF, 0x90, 0x00}, {1.f, 0xFF, 0x20, 0x00}};
+    const float f = (float)k / (kVuMax - 1);
+    int i = 0;
+    while (i < 2 && f > kStops[i + 1].at) ++i;
+    const Stop& a = kStops[i];
+    const Stop& b = kStops[i + 1];
+    const float u = (f - a.at) / (b.at - a.at);
+    auto mix = [&](int x, int y) { return (uint32_t)(x + (y - x) * u + 0.5f); };
+    return argb((mix(a.r, b.r) << 16) | (mix(a.g, b.g) << 8) | mix(a.b, b.b));
 }
 
 // 8 character ProTracker cell text: note, instrument, effect, parameter ("C#201A0F").
@@ -84,7 +102,7 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     char buf[64];
     c.clear(kBlack);
 
-    // ---- counters
+    // ---- counters: embossed labels, black values
     static const char* const kLabels[9] = {"POS", "PATTERN", "LENGTH", "FINETUNE", "SAMPLE",
                                            "VOLUME", "LENGTH", "REPEAT", "REPLEN"};
     const int pat = s && viewPattern_ < (int)s->patterns.size() ? viewPattern_ : 0;
@@ -99,15 +117,15 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
             case 3: std::snprintf(buf, sizeof buf, smp && smp->finetune / 16 ? "%+d" : "%d", smp ? smp->finetune / 16 : 0); break;
             case 4: std::snprintf(buf, sizeof buf, "%04X", sample_ + 1); break;
             case 5: std::snprintf(buf, sizeof buf, "%04X", smp ? smp->volume : 0); break;
-            case 6: std::snprintf(buf, sizeof buf, "%04X", smp ? smp->length : 0); break;
-            case 7: std::snprintf(buf, sizeof buf, "%04X", smp ? smp->loopStart : 0); break;
-            default: std::snprintf(buf, sizeof buf, "%04X", smp ? (smp->loop == LoopType::None ? 2 : smp->loopLength) : 0); break;
+            case 6: std::snprintf(buf, sizeof buf, "%05X", smp ? smp->length & 0xFFFFF : 0); break;
+            case 7: std::snprintf(buf, sizeof buf, "%05X", smp ? smp->loopStart & 0xFFFFF : 0); break;
+            default: std::snprintf(buf, sizeof buf, "%05X", smp ? (smp->loop == LoopType::None ? 2 : smp->loopLength & 0xFFFFF) : 0); break;
         }
-        rightText(c, pure::counterValue(r), buf);
+        value(c, pure::counterValue(r), buf);
         for (int d = 0; d < 2; ++d) {
             const pure::Box a = pure::counterArrow(r, d);
             box(c, a);
-            c.textShadow(a.x + 2, a.y + 2, d ? "\x02" : "\x01", kInk, kInkShadow);
+            c.textShadow(a.x + 2, a.y + 2, d ? "\x02" : "\x01", kLabelInk, kLabelShadow);
         }
     }
     for (int i = 0; i < 2; ++i) {
@@ -129,123 +147,128 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
         label(c, pure::sideButton(i), d);
     }
 
-    // ---- quadrascope
+    // ---- quadrascope: yellow dots on black
     box(c, pure::scopeTitle());
     label(c, pure::scopeTitle(), "QUADRASCOPE");
     c.bevel(120, 5 * pure::kRowH, 200, 3 * pure::kRowH, kFace, kLight, kDark);
     for (int i = 0; i < 4; ++i) {
         const pure::Box sb = pure::scope(i);
         const int ch = first + i;
-        c.text(sb.x - 7, sb.y + 2, i == 0 ? "1" : i == 1 ? "2" : i == 2 ? "3" : "4", kInkShadow, true);
+        const char num[2] = {(char)('1' + i), 0};
+        c.textShadow(sb.x - 7, sb.y + 1, num, kLabelInk, kLabelShadow, kSmall);
         c.fill(sb.x, sb.y, sb.w, sb.h, kBlack);
         if (ch >= nch || tel.ch[ch].muted) continue;
         e.scope(ch, scopeBuf_, sb.w);
         const int mid = sb.y + sb.h / 2;
-        int py = mid;
-        for (int x = 0; x < sb.w; ++x) {
-            const int y = std::clamp(mid - (int)(scopeBuf_[x] * (sb.h / 2 - 1) * 1.6f), sb.y + 1, sb.y + sb.h - 2);
-            c.line(sb.x + x - (x ? 1 : 0), x ? py : y, sb.x + x, y, kScopeLine);
-            py = y;
-        }
+        for (int x = 0; x < sb.w; ++x)
+            c.set(sb.x + x, std::clamp(mid - (int)(scopeBuf_[x] * (sb.h / 2 - 1) * 1.6f), sb.y + 1, sb.y + sb.h - 2),
+                  kScope);
     }
-    // machine line: model name and the power / drive LEDs of the A500 case, then EXIT
+    // machine line: name and the power / drive LEDs of the A500 case, then EXIT
     const pure::Box cl = pure::creditLine();
-    box(c, cl);
-    c.textShadow(cl.x + 4, cl.y + 2, pure_ == 2 ? "A1200" : "A500", kInk, kInkShadow);
+    c.bevel(cl.x, cl.y, cl.w, cl.h, kFace, kFace, kFace);
+    c.textShadow(cl.x + 4, cl.y + 2, pure_ == 2 ? "A1200" : "A500", kLabelInk, kLabelShadow);
     const uint32_t power = tel.led ? argb(0x33FF44) : argb(0x1C7A24);  // dims with the filter, like the A500
     const uint32_t drive = tel.drive ? argb(0xFFA020) : argb(0x5A3A10);
     c.bevel(cl.x + 52, cl.y + 3, 14, 5, power, power, kDark, true);
     c.bevel(cl.x + 72, cl.y + 3, 14, 5, drive, drive, kDark, true);
-    c.text(cl.x + 92, cl.y + 2, "DF0", kInkShadow, true);
+    c.textShadow(cl.x + 92, cl.y + 3, "DF0", kLabelInk, kLabelShadow, kSmall);
     box(c, pure::exitButton(), hover_ == kPureExitHover);
     label(c, pure::exitButton(), "EXIT PURE");
 
-    // ---- song / sample names
-    box(c, pure::songRow());
+    // ---- song / sample names: embossed captions, black names
+    const pure::Box sr = pure::songRow();
+    box(c, sr);
+    c.textShadow(sr.x + 18, sr.y + 2, "SONGNAME:", kLabelInk, kLabelShadow);
     char name[23];
     std::snprintf(name, sizeof name, "%-20.20s", s ? s->name : "");
     for (char& ch : name)
         if (ch == ' ') ch = '_';
+    c.text(sr.x + 106, sr.y + 2, name, kValueInk);
     const unsigned secs = tel.rate ? (unsigned)(tel.playFrames / tel.rate) : 0;
-    std::snprintf(buf, sizeof buf, "SONGNAME: %s %02u:%02u", name, (secs / 60) % 100, secs % 60);
-    label(c, pure::songRow(), buf, false);
-    box(c, pure::sampleRow());
+    std::snprintf(buf, sizeof buf, "%02u:%02u", (secs / 60) % 100, secs % 60);
+    value(c, sr, buf);
+    const pure::Box smr = pure::sampleRow();
+    box(c, smr);
+    c.textShadow(smr.x + 10, smr.y + 2, "SAMPLENAME:", kLabelInk, kLabelShadow);
     std::snprintf(name, sizeof name, "%-22.22s", smp ? smp->name : "");
     for (char& ch : name)
         if (ch == ' ') ch = '_';
-    std::snprintf(buf, sizeof buf, "SAMPLENAME: %s", name);
-    label(c, pure::sampleRow(), buf, false);
+    c.text(smr.x + 106, smr.y + 2, name, kValueInk);
     box(c, pure::loadButton());
     label(c, pure::loadButton(), "LOAD");
 
     // ---- info line: edit skip, tempo, status, tune size, timing
     const pure::Box info = pure::infoArea();
     box(c, info);
-    c.bevel(4, info.y + 3, 20, 11, kFace, kLight, kDark, true);
+    c.bevel(8, info.y + 5, 22, 11, kFace, kDark, kLight);
     std::snprintf(buf, sizeof buf, "%2d", editSkip_);
-    c.textShadow(6, info.y + 5, buf, kInk, kInkShadow);
+    c.text(11, info.y + 7, buf, kValueInk);
     std::snprintf(buf, sizeof buf, "%3d", tel.playing ? tel.bpm : (s ? s->initialBpm : 125));
-    c.textShadow(42, info.y + 1, buf, kInk, kInkShadow);
-    c.textShadow(pure::tempoArrow(0).x, pure::tempoArrow(0).y, "\x01", kInk, kInkShadow, true);
-    c.textShadow(pure::tempoArrow(0).x + 8, pure::tempoArrow(0).y, "TEMPO", kInk, kInkShadow, true);
-    c.textShadow(pure::tempoArrow(1).x, pure::tempoArrow(1).y, "\x02", kInk, kInkShadow, true);
-    char st[16];
-    std::snprintf(st, sizeof st, "%.10s", status_);
-    std::snprintf(buf, sizeof buf, "STATUS:%s", st);
-    c.textShadow(92, info.y + 5, buf, kInk, kInkShadow, true);
+    c.text(36, info.y + 1, buf, kValueInk);
+    c.textShadow(pure::tempoArrow(0).x, pure::tempoArrow(0).y + 1, "\x01", kLabelInk, kLabelShadow, kSmall);
+    c.textShadow(pure::tempoArrow(0).x + 8, pure::tempoArrow(0).y + 1, "TEMPO", kLabelInk, kLabelShadow, kSmall);
+    c.textShadow(pure::tempoArrow(1).x, pure::tempoArrow(1).y + 1, "\x02", kLabelInk, kLabelShadow, kSmall);
+    c.textShadow(90, info.y + 7, "STATUS:", kLabelInk, kLabelShadow, kSmall);
+    std::snprintf(buf, sizeof buf, "%.15s", status_);
+    c.text(148, info.y + 5, buf, kValueInk);
     size_t bytes = 0;
     if (s)
         for (const Sample& sm : s->samples) bytes += (size_t)sm.length * (sm.is16 ? 2 : 1);
-    std::snprintf(buf, sizeof buf, "TUNE %6u", (unsigned)(bytes % 1000000));
-    c.textShadow(232, info.y + 1, buf, kInk, kInkShadow, true);
-    c.textShadow(232, info.y + 9, "TIMING  CIA", kInk, kInkShadow, true);
+    c.textShadow(234, info.y + 1, "TUNE", kLabelInk, kLabelShadow);
+    std::snprintf(buf, sizeof buf, "%6u", (unsigned)(bytes % 1000000));
+    c.text(270, info.y + 1, buf, kValueInk);
+    c.textShadow(234, info.y + 9, "TIMING", kLabelInk, kLabelShadow);
+    c.text(294, info.y + 9, "CIA", kValueInk);
 
-    // ---- pattern
-    c.fill(0, pure::kPatternY, 320, 256 - pure::kPatternY, kBlack);
-    c.fill(24, pure::kPatternY, 2, 256 - pure::kPatternY, kSep);
-    for (int i = 0; i < 4; ++i) c.fill(pure::track(i).x + pure::kTrackW, pure::kPatternY, 3, 256 - pure::kPatternY, kSep);
+    // ---- pattern: grey frame, black columns, small blue text, tall black text on the playing row
+    c.fill(0, pure::kPatternY, 320, 256 - pure::kPatternY, kFace);
+    const pure::Box rn = pure::rowNumbers();
+    c.fill(rn.x, rn.y, rn.w, rn.h, kBlack);
+    for (int i = 0; i < 4; ++i) c.fill(pure::track(i).x, pure::kPatternY, pure::kTrackW, 256 - pure::kPatternY, kBlack);
     const bool ptOct = s && s->quirks == Quirks::PT23;
     const int rows = s && !s->patterns.empty() ? s->patterns[pat].rows : 64;
     const int cur = std::min(viewRow_, rows - 1);
-    for (int rel = -pure::kRowsAbove; rel <= 9; ++rel) {
+    for (int rel = -pure::kRowsAbove; rel <= pure::kRowsAbove; ++rel) {
         const int row = cur + rel;
         if (row < 0 || row >= rows) continue;
         const bool centre = rel == 0;
-        const int y = rel < 0 ? pure::kBarY + rel * pure::kPatternRowH
-                              : (centre ? pure::kBarY : pure::kBarY + pure::kBarH + (rel - 1) * pure::kPatternRowH);
-        if (y + 6 > 256) break;
+        const int y = rel < 0 ? pure::kBarY + rel * pure::kPatternRowH + 1
+                              : (centre ? pure::kBarY : pure::kBarY + pure::kBarH + (rel - 1) * pure::kPatternRowH + 1);
         std::snprintf(buf, sizeof buf, row < 100 ? "%02d" : "%3d", row);
+        const int nx = rn.x + (row < 100 ? 4 : 0);
         if (centre) {
-            c.bevel(0, y, 24, pure::kBarH, kBarFace, kLight, kDark);
-            c.text(row < 100 ? 4 : 0, y + 2, buf, kBarInk);
+            c.bevel(rn.x - 2, y, rn.w + 4, pure::kBarH, kBarFace, kBarLight, kBarDark);
+            c.text(nx, y + 3, buf, kValueInk, kTall);
         } else {
-            c.text(row < 100 ? 4 : 0, y, buf, kBlue, true);
+            c.text(nx, y, buf, kBlue, kSmall);
         }
         for (int i = 0; i < 4; ++i) {
             const int ch = first + i;
             const pure::Box tb = pure::track(i);
-            if (centre) c.bevel(tb.x, y, tb.w, pure::kBarH, kBarFace, kLight, kDark);
+            if (centre) c.bevel(tb.x - 2, y, tb.w + 4, pure::kBarH, kBarFace, kBarLight, kBarDark);
             if (!s || ch >= nch || s->patterns.empty()) continue;
             char cell[9];
             ptCell(s->patterns[pat].at(row, ch), ptOct, cell);
-            if (centre) c.text(tb.x + 3, y + 2, cell, kBarInk);
-            else c.text(tb.x + 3, y, cell, kBlue, true);
+            if (centre) c.text(tb.x + 2, y + 3, cell, kValueInk, kTall);
+            else c.text(tb.x + 2, y, cell, kBlue, kSmall);
         }
     }
-    // edit cursor (red frame on the centre row)
+    // edit cursor: red frame around the column on the playing row
     if (curCh_ >= first && curCh_ < first + 4 && curCol_ != kColVolHi && curCol_ != kColVolLo) {
         const pure::Box tb = pure::track(curCh_ - first);
         const int chars = curCol_ == kColNote ? 3 : 1;
         const int at = curCol_ == kColNote ? 0 : curCol_ <= kColInstrLo ? 2 + curCol_ : curCol_;
-        c.frame(tb.x + 2 + at * 8, pure::kBarY, chars * 8 + 1, pure::kBarH, editMode_ ? kCursor : argb(0x666666));
+        c.frame(tb.x + 1 + at * 8, pure::kBarY + 1, chars * 8 + 1, pure::kBarH - 2, editMode_ ? kCursor : argb(0x777777));
+        c.frame(tb.x + at * 8, pure::kBarY, chars * 8 + 3, pure::kBarH, editMode_ ? kCursor : argb(0x777777));
     }
-    // VU meters: green striped bars standing on the centre row
+    // VU meters standing on the playing row: one gradient, red at the top, yellow, green at the bottom
     for (int i = 0; i < 4; ++i) {
         const int ch = first + i;
         if (ch >= nch || tel.ch[ch].muted) continue;
-        const int h = std::min(48, (int)(tel.ch[ch].vu * 1.6f * 48));
-        const int x = pure::track(i).x + 26;
-        for (int k = 0; k < h; ++k) c.fill(x, pure::kBarY - 1 - k, 14, 1, (k & 1) ? kVuDark : kVu);
+        const int h = std::min(kVuMax, (int)(tel.ch[ch].vu * 1.6f * kVuMax));
+        const int x = pure::track(i).x + 25;
+        for (int k = 0; k < h; ++k) c.fill(x, pure::kBarY - 1 - k, 10, 1, vuColor(k));
     }
 
     // ---- show it over the whole window
