@@ -12,7 +12,8 @@ size_t renderSong(const Song& s, uint32_t rate, Interp interp, bool ramps, float
 
 // PAT2SMP: one pass through `pattern` as a mono 16-bit sample at `rate` (pitch fields left at 0).
 // An empty sample when the pattern does not exist. At most 60 seconds.
-Sample renderPatternSample(const Song& s, int pattern, uint32_t rate);
+// speed / bpm: the tempo in effect at that point of the song (0 = the song's initial tempo).
+Sample renderPatternSample(const Song& s, int pattern, uint32_t rate, int speed = 0, int bpm = 0);
 
 // Pearson correlation of two interleaved buffers over the shorter length.
 double correlation(const float* a, size_t na, const float* b, size_t nb);

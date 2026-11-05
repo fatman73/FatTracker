@@ -316,7 +316,8 @@ UiAction PlayScreen::pureMouse(float lx, float ly, bool right, Engine& e) {
     if (h >= pure::kOpItem && h < pure::kOpItem + 40) return pureOpClick(h - pure::kOpItem, right, e);
     if (h >= pure::kPosLine && h < pure::kPosLine + pure::kPosLines) {
         const int d = h - pure::kPosLine - (pure::kPosLines / 2 - 1);
-        if (d) counterStep(0, d, false, e);
+        const int to = viewOrder_ + d;
+        if (d && s && to >= 0 && to < (int)s->order.size()) counterStep(0, d, false, e);  // blank lines: nothing
         return UiAction::Redraw;
     }
     if (h == pure::kPosUp || h == pure::kPosDown) {
@@ -426,7 +427,7 @@ void arrowBox(PixelCanvas& c, const pure::Box& b, bool up) {
 // title row of EDIT OP. / POS ED.: embossed title and EXIT
 void opFrame(PixelCanvas& c, const char* title) {
     const pure::Box a = pure::opArea();
-    c.fill(a.x, a.y, a.w, a.h, kFace);
+    c.fill(a.x, a.y + pure::kRowH, a.w, a.h - pure::kRowH, kFace);  // the title row leaves "A" alone
     box(c, pure::opTitle());
     label(c, pure::opTitle(), title);
     box(c, pure::opExit());
@@ -471,6 +472,7 @@ void PlayScreen::pureOpDraw(PixelCanvas& c, Engine& e) {
 UiAction PlayScreen::pureOpClick(int item, bool right, Engine& e) {
     const pure::OpItem it = pure::opItem(editOpScreen_, item);
     if (it.action >= pure::kOpSample) {
+        syncSelection(e);
         samplerOp(it.action - pure::kOpSample, e);
         return UiAction::Redraw;
     }
@@ -529,9 +531,10 @@ void PlayScreen::purePosDraw(PixelCanvas& c, Engine& e) {
 void PlayScreen::pureSamplerDraw(PixelCanvas& c, Engine& e) {
     c.fill(0, pure::kPatternY, 320, 256 - pure::kPatternY, kFace);
     const pure::Box w = pure::samplerWave();
-    c.bevel(w.x, w.y, w.w, w.h, kFace, kDark, kLight);
-    const int x0 = w.x + 2, y0 = w.y + 2, ww = w.w - 4, wh = w.h - 4;
+    c.bevel(w.x - 2, w.y - 2, w.w + 4, w.h + 4, kFace, kDark, kLight);
+    const int x0 = w.x, y0 = w.y, ww = w.w, wh = w.h;
     c.fill(x0, y0, ww, wh, kBlack);
+    syncSelection(e);
     const Song* s = e.song();
     const int si = s ? curSampleIndex(*s) : -1;
     const Sample* sm = si >= 0 ? &s->samples[si] : nullptr;
@@ -577,7 +580,8 @@ void PlayScreen::pureSamplerDraw(PixelCanvas& c, Engine& e) {
         }
         if (sm->loop != LoopType::None)  // loop start / end: red lines with a handle on top
             for (int k = 0; k < 2; ++k) {
-                const int x = px(k ? sm->loopStart + sm->loopLength : sm->loopStart);
+                int x = px(k ? sm->loopStart + sm->loopLength : sm->loopStart);
+                if (x == x0 + ww) x = x0 + ww - 1;  // a loop ending at the view end
                 if (x < x0 || x >= x0 + ww) continue;
                 c.fill(x, y0, 1, wh, kCursor);
                 c.fill(std::max(x0, x - 2), y0, 5, 4, kCursor);
@@ -601,14 +605,19 @@ void PlayScreen::pat2smp(Engine& e) {
         const Song* cur = e.song();
         if (a == 2 || !cur) return;
         const uint32_t rate = a == 0 ? 16726 : 8363;  // an octave above C / the C rate
-        Sample sm = renderPatternSample(*cur, viewPattern_, rate);
+        const int speed = last_.speed ? last_.speed : 0, bpm = last_.bpm ? last_.bpm : 0;
+        e.stop();  // the new sample replaces one the player may be using
+        recordMode_ = false;
+        Sample sm = renderPatternSample(*cur, viewPattern_, rate, speed, bpm);
         if (!sm.length) {
             setStatus("EMPTY PATTERN");
             return;
         }
         const bool pt = cur->quirks == Quirks::PT23;
+        bool cut = false;
         if (pt) {  // ProTracker: 8 bits, 128 KB, the pitch is the note you play
-            const uint32_t n = std::min<uint32_t>(sm.length, 131070);
+            cut = sm.length > 131070;
+            const uint32_t n = std::min<uint32_t>(sm.length, 131070) & ~1u;  // MOD lengths are words
             sm.data8.resize(n);
             for (uint32_t i = 0; i < n; ++i) sm.data8[i] = (int8_t)(sm.data16[i] >> 8);
             sm.data16.clear();
@@ -622,6 +631,6 @@ void PlayScreen::pat2smp(Engine& e) {
         std::wstring wn;
         for (const char* p = nm; *p; ++p) wn += (wchar_t)*p;
         sampleLoaded(e, static_cast<Sample&&>(sm), wn);
-        setStatus(!pt ? "SAMPLED" : a == 0 ? "NOTE C-3" : "NOTE C-2");
+        setStatus(!pt ? "SAMPLED" : cut ? (a == 0 ? "128K C-3" : "128K C-2") : a == 0 ? "NOTE C-3" : "NOTE C-2");
     });
 }

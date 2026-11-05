@@ -202,6 +202,9 @@ TEST(pure_edit_op_covers_the_scopes) {
     CHECK_EQ(hitTest(opTitle().x + 5, opTitle().y + 5, kViewEditOp, 0), kOpTitle);
     CHECK_EQ(hitTest(opExit().x + 5, opExit().y + 5, kViewEditOp, 0), kOpExit);
     CHECK_EQ(hitTest(130, 5, kViewEditOp, 0), kButton + 0);  // the button grid stays usable
+    CHECK_EQ(hitTest(310, 48, kViewEditOp, 0), kSide + 4);   // so does "A" (unmute all) next to the title
+    CHECK_EQ(hitTest(310, 48, kViewPosEd, 0), kSide + 4);
+    CHECK(opExit().x + opExit().w <= sideButton(4).x);
 }
 
 TEST(pure_position_editor_lines) {
@@ -219,7 +222,7 @@ TEST(pure_position_editor_lines) {
 TEST(pure_sampler_replaces_the_pattern_area) {
     using namespace pure;
     const Box w = samplerWave();
-    CHECK_EQ(w.y, kPatternY);
+    CHECK(w.y >= kPatternY && w.y <= kPatternY + 2);
     CHECK_EQ(hitTest(160, w.y + w.h / 2, kViewSampler), kSmpWave);
     CHECK_EQ(hitTest(40, 200), kTrack + 0);
     for (int i = 0; i < kSamplerButtons; ++i) {

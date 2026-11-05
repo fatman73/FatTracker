@@ -615,7 +615,7 @@ bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
         }
         redraw = true;
     }
-    if (pure_) return redraw;
+    if (pure_ && !dialog_.open) return redraw;
     const int h = hitId(x, y);
     if (h != hover_) {
         hover_ = h;

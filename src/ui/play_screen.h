@@ -190,6 +190,8 @@ private:
     UiAction samplerKey(unsigned vk, bool shift, bool ctrl, Engine& e);
     void samplerOp(int op, Engine& e);
     UiAction samplerWaveMouse(float x, float y, bool right, Engine& e);  // selection, loop handles, pencil
+    void syncSelection(Engine& e);  // a selection belongs to one sample: forget it when the sample changes
+    int selSample_ = -1;
     // EDIT OP. actions (edit_op.cpp), shared with the Pure screen; row: skip, octave, quantize, metronome, length
     void opStep(int row, int d, bool big, Engine& e);
     void opNewPattern(bool clone, Engine& e);

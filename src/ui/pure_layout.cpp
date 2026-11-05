@@ -30,8 +30,8 @@ Box tempoArrow(int dir) { return {dir ? 78 : 30, 130, 9, 8}; }
 Box track(int i) { return {kTrackX0 + i * kTrackPitch, kPatternY, kTrackW, 256 - kPatternY}; }
 Box rowNumbers() { return {kRowNumX, kPatternY, kRowNumW, 256 - kPatternY}; }
 Box opArea() { return {kGridX, 4 * kRowH, 320 - kGridX, 5 * kRowH}; }
-Box opTitle() { return {kGridX, 4 * kRowH, 160, kRowH}; }
-Box opExit() { return {kGridX + 160, 4 * kRowH, 40, kRowH}; }
+Box opTitle() { return {kGridX, 4 * kRowH, kSideX - kGridX - 40, kRowH}; }  // "A" stays right of EXIT
+Box opExit() { return {kSideX - 40, 4 * kRowH, 40, kRowH}; }
 const char* opScreenTitle(int screen) {
     static const char* const kTitles[kOpScreens] = {"TRANSPOSE", "EDIT OPTIONS", "SAMPLE OPS"};
     return screen >= 0 && screen < kOpScreens ? kTitles[screen] : "";
@@ -101,7 +101,7 @@ OpItem opItem(int screen, int i) {
 
 Box posLine(int i) { return {kGridX, 5 * kRowH + 1 + i * 7, 178, 7}; }
 Box posScroll(int dir) { return {kGridX + 178, 5 * kRowH + dir * 22, 22, 22}; }
-Box samplerWave() { return {0, kPatternY, 320, 256 - kPatternY - 5 * kRowH}; }
+Box samplerWave() { return {2, kPatternY + 2, 316, 256 - kPatternY - 5 * kRowH - 4}; }  // inside its bevel
 Box samplerButton(int i) {
     const int c = i % 6, r = i / 6;
     return {c * 320 / 6, 256 - 5 * kRowH + r * kRowH, (c + 1) * 320 / 6 - c * 320 / 6, kRowH};
@@ -113,7 +113,7 @@ const char* buttonLabel(int i) { return i >= 0 && i < 12 ? kLabels[i] : ""; }
 int valueX(const Box& b, int chars) { return b.x + b.w - chars * 8 - 1; }
 
 int hitTest(int x, int y, View view, int opScreen) {
-    if ((view == kViewEditOp || view == kViewPosEd) && opArea().contains(x, y)) {
+    if ((view == kViewEditOp || view == kViewPosEd) && opArea().contains(x, y) && !sideButton(4).contains(x, y)) {
         if (opTitle().contains(x, y)) return kOpTitle;
         if (opExit().contains(x, y)) return kOpExit;
         if (view == kViewEditOp) {
