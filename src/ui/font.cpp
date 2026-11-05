@@ -2,10 +2,8 @@
 
 #include <cmath>
 
-#include "ui/font_data.h"
-
 namespace {
-constexpr int kCols = 16, kRows = 8, kPad = 1;
+constexpr int kCols = 16, kRows = 8, kPad = 2;
 }
 
 Font::~Font() { invalidate(); }
@@ -22,61 +20,52 @@ void Font::invalidate() {
 }
 
 bool Font::rasterize(Gfx& g, Atlas& a) {
+    if (!text_ || !text_->factory()) return false;
+    IDWriteTextFormat* fmt = nullptr;
+    if (FAILED(text_->factory()->CreateTextFormat(text_->family(FontRole::Mono), nullptr,
+                                                  text_->weight(FontRole::Mono), DWRITE_FONT_STYLE_NORMAL,
+                                                  DWRITE_FONT_STRETCH_NORMAL, (float)a.emPx, L"en-us", &fmt)))
+        return false;
+    fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
     ID2D1DeviceContext* dc = g.dc();
-    const int pitch = a.cellPx + 2 * kPad;
     D2D1_BITMAP_PROPERTIES1 bp = {};
     bp.pixelFormat = {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED};
     bp.dpiX = bp.dpiY = 96.f;
     bp.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET;
-    if (FAILED(dc->CreateBitmap({(UINT32)(pitch * kCols), (UINT32)(pitch * kRows)}, nullptr, 0, &bp, &a.bmp)))
+    HRESULT hr = dc->CreateBitmap({(UINT32)(a.cellW * kCols), (UINT32)(a.cellH * kRows)}, nullptr, 0, &bp, &a.bmp);
+    if (FAILED(hr)) {
+        fmt->Release();
         return false;
-
+    }
     ID2D1Image* oldTarget = nullptr;
     dc->GetTarget(&oldTarget);
     D2D1_MATRIX_3X2_F oldXf;
     dc->GetTransform(&oldXf);
+    const D2D1_TEXT_ANTIALIAS_MODE oldAa = dc->GetTextAntialiasMode();
     dc->SetTarget(a.bmp);
     dc->SetTransform(D2D1::Matrix3x2F::Identity());
+    dc->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     dc->Clear({0, 0, 0, 0});
     ID2D1SolidColorBrush* white = g.brush({1, 1, 1, 1});
-    const float px = a.cellPx / 8.f;
-    for (int code = 0; code < 128; ++code) {
-        const float ox = (float)((code % kCols) * pitch + kPad);
-        const float oy = (float)((code / kCols) * pitch + kPad);
-        // one rectangle per horizontal run of lit pixels, unioned via a winding-filled group
-        ID2D1Geometry* rects[64];
-        int n = 0;
-        for (int r = 0; r < 8; ++r) {
-            uint8_t bits = kGlyphs[code][r];
-            int c = 0;
-            while (c < 8) {
-                if (!(bits & (0x80 >> c))) {
-                    ++c;
-                    continue;
-                }
-                int start = c;
-                while (c < 8 && (bits & (0x80 >> c))) ++c;
-                ID2D1RectangleGeometry* rg = nullptr;
-                D2D1_RECT_F rc = {ox + start * px, oy + r * px, ox + c * px, oy + (r + 1) * px};
-                if (SUCCEEDED(g.factory()->CreateRectangleGeometry(rc, &rg))) rects[n++] = rg;
-            }
-        }
-        if (n) {
-            ID2D1GeometryGroup* group = nullptr;
-            if (SUCCEEDED(g.factory()->CreateGeometryGroup(D2D1_FILL_MODE_WINDING, rects, n, &group))) {
-                dc->FillGeometry(group, white);
-                group->Release();
-            }
-            for (int i = 0; i < n; ++i) rects[i]->Release();
-        }
+    for (int code = 1; code < 128; ++code) {
+        char s[2] = {(char)code, 0};
+        if (code == ' ' || (code > 6 && code < 32)) continue;
+        wchar_t w[2];
+        Text::widen(s, w, 2);
+        const float ox = (float)((code % kCols) * a.cellW + kPad);
+        const float oy = (float)((code / kCols) * a.cellH + kPad);
+        D2D1_RECT_F rc = {ox, oy, ox + a.cellW - kPad, oy + a.cellH - kPad};
+        dc->DrawTextW(w, 1, fmt, rc, white, D2D1_DRAW_TEXT_OPTIONS_NONE);
     }
+    dc->SetTextAntialiasMode(oldAa);
     dc->SetTarget(oldTarget);
     dc->SetTransform(oldXf);
     if (oldTarget) oldTarget->Release();
+    fmt->Release();
     return true;
 }
 
-Font::Atlas* Font::atlasFor(Gfx& g, int cellPx) {
+Font::Atlas* Font::atlasFor(Gfx& g, int emPx) {
     if (g.generation() != generation_) {
         invalidate();
         generation_ = g.generation();
@@ -84,7 +73,7 @@ Font::Atlas* Font::atlasFor(Gfx& g, int cellPx) {
     ++useCounter_;
     Atlas* victim = &atlases_[0];
     for (Atlas& a : atlases_) {
-        if (a.bmp && a.cellPx == cellPx) {
+        if (a.bmp && a.emPx == emPx) {
             a.lastUse = useCounter_;
             return &a;
         }
@@ -92,7 +81,9 @@ Font::Atlas* Font::atlasFor(Gfx& g, int cellPx) {
     }
     if (victim->bmp) victim->bmp->Release();
     *victim = Atlas{};
-    victim->cellPx = cellPx;
+    victim->emPx = emPx;
+    victim->cellW = (int)std::ceil(emPx * (text_ ? text_->monoAdvance() : 0.55f)) + 2 * kPad + 2;
+    victim->cellH = (int)std::ceil(lineHeight((float)emPx)) + 2 * kPad;
     victim->lastUse = useCounter_;
     if (!rasterize(g, *victim)) {
         if (victim->bmp) victim->bmp->Release();
@@ -102,12 +93,12 @@ Font::Atlas* Font::atlasFor(Gfx& g, int cellPx) {
     return victim;
 }
 
-void Font::drawGlyphs(Gfx& g, const Glyph* glyphs, int count, float size) {
+void Font::drawGlyphs(Gfx& g, const Glyph* glyphs, int count, float em) {
     const Viewport& vp = g.viewport();
     if (vp.scale <= 0 || count <= 0) return;
-    int cellPx = (int)std::lround(size * vp.scale);
-    if (cellPx < 4) cellPx = 4;
-    Atlas* a = atlasFor(g, cellPx);
+    int emPx = (int)std::lround(em * vp.scale);
+    if (emPx < 6) emPx = 6;
+    Atlas* a = atlasFor(g, emPx);
     if (!a) return;
     ID2D1DeviceContext* dc = g.dc();
     ID2D1DeviceContext3* dc3 = nullptr;
@@ -118,7 +109,6 @@ void Font::drawGlyphs(Gfx& g, const Glyph* glyphs, int count, float size) {
         return;
     }
     batch_->Clear();
-    const int pitch = cellPx + 2 * kPad;
     constexpr int kChunk = 512;
     D2D1_RECT_F dst[kChunk];
     D2D1_RECT_U src[kChunk];
@@ -132,12 +122,12 @@ void Font::drawGlyphs(Gfx& g, const Glyph* glyphs, int count, float size) {
     for (int i = 0; i < count; ++i) {
         const Glyph& gl = glyphs[i];
         unsigned char ch = (unsigned char)gl.ch;
-        if (ch == ' ' || ch >= 128) continue;
-        const float dx = std::floor(vp.offX + gl.x * vp.scale + 0.5f);
-        const float dy = std::floor(vp.offY + gl.y * vp.scale + 0.5f);
-        const UINT32 sx = (UINT32)((ch % kCols) * pitch), sy = (UINT32)((ch / kCols) * pitch);
-        src[n] = {sx, sy, sx + (UINT32)pitch, sy + (UINT32)pitch};
-        dst[n] = {dx - kPad, dy - kPad, dx - kPad + pitch, dy - kPad + pitch};
+        if (ch == ' ' || ch >= 128 || ch == 0) continue;
+        const float dx = std::floor(vp.offX + gl.x * vp.scale + 0.5f) - kPad;
+        const float dy = std::floor(vp.offY + gl.y * vp.scale + 0.5f) - kPad;
+        const UINT32 sx = (UINT32)((ch % kCols) * a->cellW), sy = (UINT32)((ch / kCols) * a->cellH);
+        src[n] = {sx, sy, sx + (UINT32)a->cellW, sy + (UINT32)a->cellH};
+        dst[n] = {dx, dy, dx + a->cellW, dy + a->cellH};
         col[n] = {gl.c.r, gl.c.g, gl.c.b, gl.c.a};
         if (++n == kChunk) flush();
     }
@@ -154,12 +144,4 @@ void Font::drawGlyphs(Gfx& g, const Glyph* glyphs, int count, float size) {
         dc->SetTransform(xf);
     }
     dc3->Release();
-}
-
-float Font::drawText(Gfx& g, float x, float y, float size, const char* s, Color c) {
-    Glyph buf[256];
-    int n = 0;
-    for (int i = 0; s[i] && n < 256; ++i) buf[n++] = {x + i * advance(size), y, s[i], c};
-    drawGlyphs(g, buf, n, size);
-    return x + advance(size) * (float)n;
 }

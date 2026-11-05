@@ -1,10 +1,10 @@
 #include "ui/viewport.h"
 
 Viewport computeViewport(uint32_t winW, uint32_t winH) {
-    if (winW == 0 || winH == 0) return {0.f, 0.f, 0.f};
-    float sx = winW / kCanvasW, sy = winH / kCanvasH;
-    float s = sx < sy ? sx : sy;
-    return {s, (winW - kCanvasW * s) * 0.5f, (winH - kCanvasH * s) * 0.5f};
+    if (winW == 0 || winH == 0) return {0.f, kCanvasW, kCanvasH};
+    const float sx = winW / kCanvasW, sy = winH / kCanvasH;
+    const float s = sx < sy ? sx : sy;
+    return {s, winW / s, winH / s};
 }
 
 void deviceToLogical(const Viewport& v, float dx, float dy, float& lx, float& ly) {

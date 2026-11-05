@@ -1,15 +1,18 @@
-// Reusable ProTracker-style widgets (logical coordinates).
+// Reusable ProTracker-inspired widgets with a modern finish (logical coordinates).
 #pragma once
-#include "ui/font.h"
 #include "ui/gfx.h"
+#include "ui/text.h"
 
-enum class Align { Left, Center, Right };
+struct Ui {
+    Gfx& g;
+    Text& text;
+    const Theme& t;
+};
 
-void drawPanel(Gfx& g, const Theme& t, RectF r);
-void drawText(Gfx& g, Font& f, RectF r, const char* s, float size, Color c, Align a);
-void drawButton(Gfx& g, Font& f, const Theme& t, RectF r, const char* label, bool pressed, float size = 20.f);
-// label | value | up | down  (arrow buttons are drawn, inactive in stage 1)
-void drawCounter(Gfx& g, Font& f, const Theme& t, RectF r, const char* label, const char* value);
+void drawButton(Ui& u, RectF r, const char* label, Gfx::PanelState s, float size = 19.f);
+// label | value field | up | down. `editable` = arrows active (dimmed otherwise).
+void drawCounter(Ui& u, RectF r, const char* label, const char* value, bool editable, int hoverArrow);
+RectF counterArrow(RectF r, int which);  // 0 = up, 1 = down
 void drawVu(Gfx& g, const Theme& t, RectF r, float level01, float alpha);
 void drawScopeBg(Gfx& g, const Theme& t, RectF r);
 void drawScopeLine(Gfx& g, const Theme& t, RectF r, const float* samples, int n);

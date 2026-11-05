@@ -78,13 +78,17 @@ void Engine::setSong(std::unique_ptr<Song> s) {
     unlock();
 }
 
-void Engine::play() {
+void Engine::play() { play(0); }
+
+void Engine::play(uint16_t order) {
     lock();
-    player_->play();
+    player_->play(order);
     playFrames_ = 0;
     publish();
     unlock();
 }
+
+void Engine::songEdited() { player_->songEdited(); }
 
 void Engine::playPattern(uint16_t pattern) {
     lock();

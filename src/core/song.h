@@ -77,3 +77,5 @@ struct Song {
 Pattern makePattern(int rows, int channels);
 void setDefaultPanning(Song& s);  // L-R-R-L with 75% separation (0x40 / 0xC0)
 Song makeEmptySong(int channels);
+// Changes the channel count (clamped to 4..32), keeping existing cells.
+void setChannelCount(Song& s, int channels);

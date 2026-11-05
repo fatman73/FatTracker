@@ -47,6 +47,18 @@ public:
 
     void lock();    // exclusive, for edits from the UI
     void unlock();
+    // Runs f(Song&) under the lock and lets the player adapt (channel count etc.).
+    template <class F>
+    void edit(F&& f) {
+        lock();
+        if (song_) {
+            f(*song_);
+            songEdited();
+        }
+        publish();
+        unlock();
+    }
+    void play(uint16_t order);
     void render(float* out, uint32_t frames);
     void snapshot(Telemetry& out) const;
     void scope(int ch, float* dst, int n) const;
@@ -54,6 +66,7 @@ public:
 private:
     static void audioCallback(void* user, float* out, uint32_t frames, uint32_t rate);
     void publish();
+    void songEdited();
 
     void* srw_;  // SRWLOCK storage (pointer-sized)
     std::unique_ptr<Song> song_;

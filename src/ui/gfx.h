@@ -38,6 +38,10 @@ public:
     void line(float x0, float y0, float x1, float y1, Color c, float width);
     void polyline(const float* xy, int points, Color c, float width);
     void bevel(RectF r, const Theme& t, bool pressed);
+    enum class PanelState { Normal, Hover, Pressed, Active };
+    void panel(RectF r, const Theme& t, PanelState s);       // raised, rounded, soft gradient
+    void well(RectF r, const Theme& t, Color fill);          // sunken field (values, scopes, pattern)
+    void fillRoundGradientV(RectF r, float radius, Color top, Color bottom);
     void beginGlow();
     void endGlow(float radiusLogical, float strength);
     void pushClip(RectF r);
