@@ -127,3 +127,45 @@ TEST(pure_values_keep_off_the_box_edges) {
         CHECK(x + digits * 8 - 2 <= b.x + b.w - 2);  // glyphs end before the right gap + bevel
     }
 }
+
+namespace {
+// widest row of a glyph in pixels, and whether the glyph differs from another one
+int glyphWidth(char ch, FontSize size) {
+    static PixelCanvas c;
+    c.clear(0);
+    const char s[2] = {ch, 0};
+    c.text(0, 0, s, kInk, size);
+    int widest = 0;
+    for (int y = 0; y < glyphRows(size); ++y) {
+        int l = 99, r = -1;
+        for (int x = 0; x < 8; ++x)
+            if (c.at(x, y)) {
+                l = x < l ? x : l;
+                r = x;
+            }
+        if (r >= 0 && r - l + 1 > widest) widest = r - l + 1;
+    }
+    return widest;
+}
+bool sameGlyph(char a, char b, FontSize size) {
+    static PixelCanvas c;
+    c.clear(0);
+    const char s[3] = {a, b, 0};
+    c.text(0, 0, s, kInk, size);
+    for (int y = 0; y < glyphRows(size); ++y)
+        for (int x = 0; x < 8; ++x)
+            if (c.at(x, y) != c.at(x + 8, y)) return false;
+    return true;
+}
+}  // namespace
+
+TEST(pixel_font_zero_is_slashed_not_an_o) {
+    for (FontSize f : {kSmall, kMedium, kNormal, kTall}) CHECK(!sameGlyph('0', 'O', f));
+}
+
+TEST(pixel_font_counter_arrows_are_five_wide) {
+    for (FontSize f : {kSmall, kNormal}) {
+        CHECK_EQ(glyphWidth('\x01', f), 5);
+        CHECK_EQ(glyphWidth('\x02', f), 5);
+    }
+}

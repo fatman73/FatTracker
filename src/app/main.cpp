@@ -1,4 +1,5 @@
 // FatTracker entry point: window, message loop, file loading, input routing.
+#include <algorithm>
 #include <memory>
 #include <vector>
 
@@ -593,8 +594,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     RECT r = {0, 0, cw, ch};
     UINT dpi = GetDpiForSystem();
     AdjustWindowRectExForDpi(&r, WS_OVERLAPPEDWINDOW, FALSE, WS_EX_ACCEPTFILES, dpi);
+    // keep the whole window inside the work area (the taskbar must not cover its bottom)
+    RECT wa = {0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
+    const int maxW = wa.right - wa.left, maxH = wa.bottom - wa.top;
+    const int ww = std::min((int)(r.right - r.left), maxW), wh = std::min((int)(r.bottom - r.top), maxH);
     HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, wc.lpszClassName, L"FatTracker", WS_OVERLAPPEDWINDOW,
-                                CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top, nullptr, nullptr,
+                                wa.left + (maxW - ww) / 2, wa.top + (maxH - wh) / 2, ww, wh, nullptr, nullptr,
                                 inst, nullptr);
     g_hwnd = hwnd;
     if (hwnd) g_cursors.build(GetDpiForWindow(hwnd));

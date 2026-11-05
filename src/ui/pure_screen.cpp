@@ -51,6 +51,9 @@ uint32_t vuColor(int k) {
     return argb((mix(a.r, b.r) << 16) | (mix(a.g, b.g) << 8) | mix(a.b, b.b));
 }
 
+// Character of the 8 character cell text ("C#201A0F") under the cursor column.
+int cursorChar(int col) { return col == kColNote ? 0 : col <= kColInstrLo ? 2 + col : col; }
+
 // 8 character ProTracker cell text: note, instrument, effect, parameter ("C#201A0F").
 void ptCell(const Cell& cell, bool ptOctaves, char out[9]) {
     char t[11];
@@ -125,7 +128,7 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
         for (int d = 0; d < 2; ++d) {
             const pure::Box a = pure::counterArrow(r, d);
             box(c, a);
-            c.textShadow(a.x + 2, a.y + 3, d ? "\x02" : "\x01", kLabelInk, kLabelShadow, kSmall);
+            c.textShadow(a.x + 3, a.y + 3, d ? "\x02" : "\x01", kLabelInk, kLabelShadow, kSmall);
         }
     }
     for (int i = 0; i < 2; ++i) {
@@ -224,8 +227,11 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     // ---- pattern: grey frame, black columns, small blue text, tall black text on the playing row
     c.fill(0, pure::kPatternY, 320, 256 - pure::kPatternY, kFace);
     const pure::Box rn = pure::rowNumbers();
-    c.fill(rn.x, rn.y, rn.w, rn.h, kBlack);
-    for (int i = 0; i < 4; ++i) c.fill(pure::track(i).x, pure::kPatternY, pure::kTrackW, 256 - pure::kPatternY, kBlack);
+    constexpr int kBottomFrame = 3;  // grey frame under the pattern, like ProTracker
+    c.fill(rn.x, rn.y, rn.w, rn.h - kBottomFrame, kBlack);
+    for (int i = 0; i < 4; ++i)
+        c.fill(pure::track(i).x, pure::kPatternY, pure::kTrackW, 256 - pure::kPatternY - kBottomFrame, kBlack);
+    c.fill(0, 255, 320, 1, kDark);
     const bool ptOct = s && s->quirks == Quirks::PT23;
     const int rows = s && !s->patterns.empty() ? s->patterns[pat].rows : 64;
     const int cur = std::min(viewRow_, rows - 1);
@@ -254,13 +260,11 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
             else c.text(tb.x + 2, y, cell, kBlue, kSmall);
         }
     }
-    // edit cursor: red frame around the column on the playing row
+    // cursor: a red one-character frame on the playing row, on the element that is edited
+    // (note, sample hi / lo, effect, parameter hi / lo), always red like ProTracker
     if (curCh_ >= first && curCh_ < first + 4 && curCol_ != kColVolHi && curCol_ != kColVolLo) {
         const pure::Box tb = pure::track(curCh_ - first);
-        const int chars = curCol_ == kColNote ? 3 : 1;
-        const int at = curCol_ == kColNote ? 0 : curCol_ <= kColInstrLo ? 2 + curCol_ : curCol_;
-        c.frame(tb.x + 1 + at * 8, pure::kBarY + 1, chars * 8 + 1, pure::kBarH - 2, editMode_ ? kCursor : argb(0x777777));
-        c.frame(tb.x + at * 8, pure::kBarY, chars * 8 + 3, pure::kBarH, editMode_ ? kCursor : argb(0x777777));
+        c.frame(tb.x + 1 + cursorChar(curCol_) * 8, pure::kBarY + 1, 9, pure::kBarH - 2, kCursor);
     }
     // VU meters standing on the playing row: one gradient, red at the top, yellow, green at the bottom
     for (int i = 0; i < 4; ++i) {
