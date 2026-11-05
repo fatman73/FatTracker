@@ -10,6 +10,8 @@ Result<Song> loadModule(const uint8_t* data, size_t size) {
     if (modDetect(data, size)) return modLoad(data, size);
     if (stDetect(data, size)) return stLoad(data, size);
     if (medDetect(data, size)) return medLoad(data, size);
+    if (dbmDetect(data, size)) return dbmLoad(data, size);
+    if (digiDetect(data, size)) return digiLoad(data, size);
     // recognised but not playable yet: say what it is
     auto at = [&](size_t off, const char* magic) {
         const size_t n = std::strlen(magic);
@@ -21,6 +23,5 @@ Result<Song> loadModule(const uint8_t* data, size_t size) {
     if (at(0, "SymM")) return Result<Song>::fail("UNSUPPORTED FORMAT: SYMPHONIE (COMING)");
     if (at(44, "SCRM")) return Result<Song>::fail("UNSUPPORTED FORMAT: SCREAM TRACKER 3 (COMING)");
     if (at(0, "IMPM")) return Result<Song>::fail("UNSUPPORTED FORMAT: IMPULSE TRACKER (COMING)");
-    if (at(0, "DIGI Booster")) return Result<Song>::fail("UNSUPPORTED FORMAT: DIGIBOOSTER (COMING)");
     return Result<Song>::fail("NOT A MODULE");
 }
