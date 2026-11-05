@@ -213,6 +213,167 @@ TEST(symmod_survives_truncation) {
         }
 }
 
+// ---- a more flexible builder: any instruments, samples and one pattern of events
+namespace {
+struct SymSpec {
+    std::vector<std::vector<uint8_t>> ins;  // 256-byte instrument records
+    std::vector<std::vector<int8_t>> smp;   // raw 8-bit sample per instrument (empty = empty-sample chunk)
+    std::vector<uint8_t> ev;                // kCh * kRows events (command, note, param, instrument)
+    uint32_t sampleBoost = 0;               // 0 = no chunk (Symphonie, not Pro)
+    int speed = 6;
+    SymSpec() {
+        ev.assign((size_t)kCh * kRows * 4, 0);
+        for (size_t i = 0; i < ev.size(); i += 4) ev[i + 1] = 0xFF;
+    }
+    void put(int row, int ch, int cmd, int note, int param, int inst) {
+        uint8_t* e = &ev[((size_t)row * kCh + ch) * 4];
+        e[0] = (uint8_t)cmd, e[1] = (uint8_t)note, e[2] = (uint8_t)param, e[3] = (uint8_t)inst;
+    }
+};
+
+std::vector<uint8_t> normalIns(const char* name, int type = 0, int volume = 100) {
+    Be b;
+    b.str(name, 128);
+    b.u8(type), b.zeros(5), b.u8(volume), b.zeros(121);
+    return b.b;
+}
+
+// "ViRT" header: version 0 = virtual (4-byte note events), 1 = transwave (2 points of 10 bytes)
+void virtHeader(Be& b, int version, int numEvents) {
+    b.str("ViRT", 4), b.u8(0), b.u8(0), b.u16(version), b.u16(0), b.u16(0), b.u16(0);
+    b.u16(numEvents), b.u16(20), b.u16(version ? 10 : 4);
+}
+
+struct VEv {
+    int note, inst, param;
+};
+std::vector<uint8_t> virtualIns(const std::vector<VEv>& evs, bool queue) {
+    Be b;
+    virtHeader(b, 0, (int)evs.size());
+    for (const VEv& e : evs) b.u8(0), b.u8(e.note), b.u8(e.param), b.u8(e.inst);
+    b.zeros(128 - b.b.size());
+    b.u8(0), b.zeros(5), b.u8(100), b.zeros(5);
+    b.u8(queue ? 2 : 0);  // sample flags: AsQueue
+    b.zeros(256 - b.b.size());
+    return b.b;
+}
+
+// loop start / length in 1/65536 percent of the source length
+std::vector<uint8_t> transwaveIns(int src1, uint32_t ls1, uint32_t ll1, int src2, uint32_t ls2, uint32_t ll2) {
+    Be b;
+    virtHeader(b, 1, 2);
+    b.u16(src1), b.u16(100), b.u32(ls1), b.u32(ll1), b.u32(0);
+    b.u16(src2), b.u16(100), b.u32(ls2), b.u32(ll2), b.u32(0);
+    b.zeros(128 - b.b.size());
+    b.u8(0), b.zeros(5), b.u8(100), b.zeros(121);
+    return b.b;
+}
+
+std::vector<uint8_t> buildSym(const SymSpec& sp) {
+    Be w;
+    w.str("SymM", 4), w.u32(1), w.u32(0xFFFFFFFF), w.u32(kCh);
+    w.value(-2, kRows);
+    w.value(-5, 4);
+    w.value(-6, 100);
+    if (sp.sampleBoost) w.value(10, sp.sampleBoost);
+    Be ins;
+    for (const auto& r : sp.ins) ins.b.insert(ins.b.end(), r.begin(), r.end());
+    w.block(-14, ins.b);
+    Be pos;
+    pos.zeros(4), pos.u16(1), pos.u16(0), pos.u16(0), pos.u16(0), pos.u16(kRows), pos.u16(sp.speed);
+    pos.u16(0), pos.u16(0), pos.zeros(12);
+    w.block(-10, pos.b);
+    Be seq;
+    seq.u16(0), seq.u16(1), seq.u16(1), seq.u16(0), seq.u16(0), seq.zeros(6);
+    seq.u16(0), seq.u16(0), seq.u16(0), seq.u16(0xFFFF), seq.u16(0), seq.zeros(6);
+    w.block(-15, seq.b);
+    w.block(-13, sp.ev);
+    for (const auto& s : sp.smp) {
+        if (s.empty()) {
+            w.u32((uint32_t)-12);
+            continue;
+        }
+        w.block(-11, std::vector<uint8_t>(s.begin(), s.end()));
+    }
+    return w.b;
+}
+
+std::vector<int8_t> dc(int n, int v) { return std::vector<int8_t>((size_t)n, (int8_t)v); }
+
+int at16(const Sample& s, size_t i) { return s.is16 ? s.data16[i] : s.data8[i] * 256; }
+}  // namespace
+
+TEST(symmod_virtual_instrument_mixes_its_sources) {
+    // source 0: 100 frames of +64, source 1: 50 frames of -64, both at the same note
+    SymSpec sp;
+    sp.ins = {normalIns("up"), normalIns("down"), virtualIns({{36, 0, 0}, {36, 1, 0}}, false)};
+    sp.smp = {dc(100, 64), dc(50, -64), {}};
+    sp.put(0, 0, 0, 36, 100, 2);
+    const auto f = buildSym(sp);
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (!r.ok()) return;
+    const Song& s = r.value();
+    CHECK(s.samples.size() >= 3u);
+    if (s.samples.size() < 3) return;
+    const Sample& v = s.samples[2];
+    CHECK(std::strcmp(v.name, "Virtual") == 0);
+    CHECK_EQ(v.length, 100u);  // as long as the first source
+    if (v.length != 100) return;
+    CHECK_NEAR(at16(v, 10), 0, 300);      // both sources: they cancel out
+    CHECK_NEAR(at16(v, 80), 32767, 300);  // only the first one, normalised
+}
+
+TEST(symmod_virtual_instrument_ignores_source_volume) {
+    // the sources mix before their instrument volume: a quiet "up" still cancels "down"
+    SymSpec sp;
+    sp.ins = {normalIns("up", 0, 25), normalIns("down"), virtualIns({{36, 0, 0}, {36, 1, 0}}, false)};
+    sp.smp = {dc(100, 64), dc(100, -64), {}};
+    const auto f = buildSym(sp);
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (!r.ok()) return;
+    const Sample& v = r.value().samples[2];
+    CHECK_EQ(v.length, 100u);
+    if (v.length != 100) return;
+    CHECK_NEAR(at16(v, 50), 0, 300);
+}
+
+TEST(symmod_queued_virtual_instrument_plays_sources_in_turn) {
+    SymSpec sp;
+    sp.ins = {normalIns("up"), normalIns("down"), virtualIns({{36, 0, 0}, {48, 1, 0}}, true)};
+    sp.smp = {dc(100, 64), dc(100, -64), {}};
+    const auto f = buildSym(sp);
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (!r.ok()) return;
+    const Sample& v = r.value().samples[2];
+    CHECK_EQ(v.length, 150u);  // the second source an octave up takes half the time
+    if (v.length != 150) return;
+    CHECK_NEAR(at16(v, 50), 32767, 300);
+    CHECK_NEAR(at16(v, 120), -32767, 300);
+}
+
+TEST(symmod_transwave_instrument_morphs_between_loops) {
+    SymSpec sp;
+    sp.ins = {normalIns("up"), normalIns("down"), transwaveIns(0, 0, 100u << 16, 1, 0, 100u << 16)};
+    sp.smp = {dc(100, 64), dc(100, -64), {}};
+    const auto f = buildSym(sp);
+    auto r = loadModule(f.data(), f.size());
+    CHECK(r.ok());
+    if (!r.ok()) return;
+    const Song& s = r.value();
+    const Sample& t = s.samples[2];
+    CHECK(std::strcmp(t.name, "Transwave") == 0);
+    CHECK_EQ(t.length, 100u * 4 * 80);  // 80 cycles, 4x oversampled
+    if (t.length != 32000) return;
+    CHECK_NEAR(at16(t, 0), 32767, 300);
+    CHECK_NEAR(at16(t, 16000), 0, 600);
+    CHECK_NEAR(at16(t, 31999), -32767, 300);
+    // an octave above a plain instrument with the same settings
+    CHECK_EQ(t.relativeNote, s.samples[0].relativeNote + 12);
+}
+
 TEST(real_modules_symphonie_load_and_play) {
     const int n = countPlayable(L".symmod");
     if (n < 0) std::printf("SKIP real_modules_symphonie (no modules folder)\n");

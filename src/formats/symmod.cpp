@@ -425,18 +425,29 @@ void amplify(std::vector<T>& d, int gain, int bits) {
 
 int16_t sat16(int64_t v) { return (int16_t)(v < -32768 ? -32768 : (v > 32767 ? 32767 : v)); }
 
+// Playback rate of an instrument's sample at Symphonie's base note.
+double instRate(const SymInst& in, int extraDownsample, double extraTranspose) {
+    const double octaves = -(in.downsample() + extraDownsample) + (in.transpose() + extraTranspose) / 12.0 +
+                           in.finetune() / (128.0 * 12.0);
+    return 40460.0 * std::pow(2.0, octaves);
+}
+
 // Applies the instrument's settings to its sample: loop, tuning, the sample processing Symphonie
-// does at load time and the instrument volume (baked into the data).
-void convertInstrument(const SymInst& in, Sample& s, int extraDownsample) {
+// does at load time and the instrument volume (baked into the data). `preVolume` receives the
+// processed sample before the volume is applied: what virtual and transwave instruments mix.
+void convertInstrument(const SymInst& in, Sample& s, int extraDownsample, double extraTranspose = 0,
+                       Sample* preVolume = nullptr) {
     uint32_t loopStart = 0, loopLen = 0;
     sampleLoop(in, s, loopStart, loopLen);
     s.loop = LoopType::None;
     s.loopStart = s.loopLength = 0;
     s.volume = 64;
     s.pan = 128;
-    const double octaves = -(in.downsample() + extraDownsample) + in.transpose() / 12.0 + in.finetune() / (128.0 * 12.0);
-    samplePitchFromRate(s, 40460.0 * std::pow(2.0, octaves));
-    if (!s.length) return;
+    samplePitchFromRate(s, instRate(in, extraDownsample, extraTranspose));
+    if (!s.length) {
+        if (preVolume) *preVolume = s;
+        return;
+    }
 
     if (in.sampleFlags() & SF_REVERSE) {
         if (s.is16) std::vector<int16_t>(s.data16.rbegin(), s.data16.rend()).swap(s.data16);
@@ -504,10 +515,6 @@ void convertInstrument(const SymInst& in, Sample& s, int extraDownsample) {
     if (vol > 100 && vol < 200) {
         if (s.is16) amplify(s.data16, vol, 16);
         else amplify(s.data8, vol, 8);
-    } else if (vol > 0 && vol < 100) {
-        to16(s);  // keep the resolution of quiet 8-bit instruments
-        const int gain = vol * 128 / 100;
-        for (auto& v : s.data16) v = (int16_t)(v * gain / 128);
     }
 
     if (in.type() == TYPE_LOOP && loopLen >= 2) {
@@ -533,6 +540,113 @@ void convertInstrument(const SymInst& in, Sample& s, int extraDownsample) {
             s.length = (uint32_t)newLen;
         }
     }
+
+    if (preVolume) *preVolume = s;
+    if (vol > 0 && vol < 100) {
+        to16(s);  // keep the resolution of quiet 8-bit instruments
+        const int gain = vol * 128 / 100;
+        for (auto& v : s.data16) v = (int16_t)(v * gain / 128);
+    }
+}
+
+constexpr double kMaxRendered = 16 << 20;  // frames: a virtual or transwave instrument longer than this fails
+
+double frameAt(const Sample& s, int64_t i) {  // 16-bit scale, the last frame repeats past the end
+    if (!s.length || i < 0) return 0;
+    if (i >= (int64_t)s.length) i = s.length - 1;
+    return s.is16 ? s.data16[(size_t)i] : s.data8[(size_t)i] * 256.0;
+}
+
+double lerpAt(const Sample& s, double pos) {
+    const int64_t i = (int64_t)pos;
+    const double f = pos - (double)i;
+    return frameAt(s, i) * (1.0 - f) + frameAt(s, i + 1) * f;
+}
+
+// A virtual instrument: up to 20 note events mixing other instruments at load time, all at once or
+// one after another ("as queue"), at the pitch of each note relative to the first one.
+// `src(i)` is instrument i's processed sample and `rate(i)` its playback rate.
+template <class Src, class Rate>
+bool renderVirtual(const SymInst& in, size_t numIns, uint16_t sampleBoost, Src src, Rate rate, Sample& out) {
+    const int numEvents = be16(in.b + 14);
+    struct Ev {
+        int note, inst, param;
+    };
+    Ev evs[20];
+    for (int i = 0; i < numEvents; ++i) {
+        const uint8_t* e = in.b + 20 + i * 4;
+        evs[i] = {(int8_t)e[1], e[3], e[2]};
+    }
+    if (numEvents < 1 || (size_t)evs[0].inst >= numIns) return false;
+    const bool queue = (in.sampleFlags() & 2) != 0;
+    const double firstRate = rate(evs[0].inst) > 0 ? rate(evs[0].inst) : 1.0;
+
+    double total = 0;
+    for (int i = 0; i < (queue ? numEvents : 1); ++i) {
+        const Ev& e = evs[i];
+        if ((size_t)e.inst >= numIns || e.note < 0) continue;
+        total += std::round(src(e.inst).length * std::pow(2.0, (e.note - evs[0].note) / -12.0) * rate(e.inst) / firstRate);
+    }
+    if (total < 1 || total > kMaxRendered) return false;
+    const size_t len = (size_t)total;
+    std::vector<double> mix(len, 0.0);
+    double gain = sampleBoost / 10000.0;
+    if (!queue) gain /= numEvents;
+    double start = 0;
+    for (int i = 0; i < numEvents; ++i) {
+        const Ev& e = evs[i];
+        if ((size_t)e.inst >= numIns || e.note < 0) continue;
+        // pitch up / down commands in the event: fine tuning of 1, 2 or 4 1/96 octaves
+        int fine = 0;
+        if (e.param >= VOL_PITCH_DOWN3 && e.param <= VOL_PITCH_UP) {
+            static constexpr int8_t kFine[] = {-4, 4, -2, 2, -1, 1};
+            fine = kFine[e.param - VOL_PITCH_DOWN3];
+        }
+        const Sample& sm = src(e.inst);
+        const double inc = std::pow(2.0, (e.note - evs[0].note) / 12.0 + fine / 96.0) * rate(e.inst) / firstRate;
+        if (inc <= 0) continue;
+        const size_t from = (size_t)start;
+        const double frames = std::round(sm.length / inc);
+        if (queue) start += frames;
+        for (size_t k = 0; k < (size_t)frames && from + k < len; ++k) mix[from + k] += lerpAt(sm, k * inc) * gain;
+    }
+    out = Sample{};
+    out.is16 = true;
+    out.length = (uint32_t)len;
+    out.data16.resize(len);
+    for (size_t k = 0; k < len; ++k) out.data16[k] = sat16(std::llround(mix[k]));
+    return true;
+}
+
+// A transwave instrument: 80 cycles of the first source's loop (4x oversampled) morphing into the
+// second source's loop. Loop points are 1/65536 percent of each source.
+bool renderTranswave(const SymInst& in, const Sample& a, const Sample& b, Sample& out) {
+    auto loop = [](const Sample& s, const uint8_t* p, double& start, double& len) {
+        const double scale = (double)s.length / (100 << 16);
+        const uint32_t ls = be32(p + 4), ll = be32(p + 8), cap = 100u << 16;
+        const uint32_t st = (uint32_t)(scale * (ls < cap ? ls : cap));
+        const uint32_t ln = (uint32_t)(scale * (ll < cap ? ll : cap));
+        start = st;
+        len = ln < s.length - st ? ln : s.length - st;
+    };
+    double s1, l1, s2, l2;
+    loop(a, in.b + 20, s1, l1);
+    loop(b, in.b + 36, s2, l2);
+    if (l1 < 1 || l1 * 4 * 80 > kMaxRendered) return false;
+    const size_t cycle = (size_t)l1 * 4, len = cycle * 80;
+    const double f1 = l1 / (double)cycle, f2 = l2 / (double)cycle;
+    out = Sample{};
+    out.is16 = true;
+    out.length = (uint32_t)len;
+    out.data16.resize(len);
+    for (size_t i = 0; i < cycle; ++i) {
+        const double v1 = a.length ? lerpAt(a, s1 + i * f1) : 0, v2 = b.length ? lerpAt(b, s2 + i * f2) : 0;
+        for (size_t at = i; at < len; at += cycle) {
+            const double amp = (double)at / (double)len;
+            out.data16[at] = sat16(std::llround(v1 * (1.0 - amp) + v2 * amp));
+        }
+    }
+    return true;
 }
 
 // Instrument name without the Amiga path.
@@ -610,6 +724,7 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
     for (int c = 0; c < kMaxChannels; ++c) s.channelPan[c] = (c & 1) ? 255 : 0;  // hard stereo
 
     uint32_t trackLen = 0;
+    uint16_t sampleBoost = 2500;  // Symphonie Pro's "sample boost": the level virtual instruments mix at
     bool external = false;
     std::vector<uint8_t> posData, seqData, evData, insData;
     std::vector<Sample> slots;  // samples in file order, slot i belongs to instrument i
@@ -621,9 +736,13 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
             case CH_NUM_INSTRUMENTS:
             case CH_STEREO_DETUNE:
             case CH_STEREO_PHASE:
-            case CH_SAMPLE_BOOST:
                 r.skip(4);
                 break;
+            case CH_SAMPLE_BOOST: {
+                const uint32_t v = r.u32be();
+                if (!r.overrun()) sampleBoost = (uint16_t)(v > 10000 ? 10000 : v);
+                break;
+            }
             case CH_TRACK_LENGTH:
                 trackLen = r.u32be();
                 if (trackLen > kMaxRows) return Result<Song>::fail("BAD SYMPHONIE FILE");
@@ -717,26 +836,59 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
     }
     auto inst = [&](size_t i) { return SymInst{insData.data() + i * 256}; };
     s.samples.resize(numIns);
+    // Virtual and transwave instruments mix other instruments' processed samples (before their
+    // volume): keep those, but only for the instruments they use.
+    std::vector<Sample> pre(numIns);
+    std::vector<bool> isSource(numIns), havePre(numIns);
+    std::vector<double> rates(numIns, 40460.0);
     for (size_t i = 0; i < numIns; ++i) {
         const SymInst in = inst(i);
-        Sample& sm = s.samples[i];
         if (in.isEmpty()) continue;
         if (in.isVirtual()) {
-            const size_t src = in.firstSource();
-            if (src < slots.size()) sm = slots[src];
-            convertInstrument(in, sm, src < numIns ? inst(src).downsample() : 0);
-            setName(sm, "Virtual");
-            continue;
+            for (int k = 0; k < be16(in.b + 14); ++k)
+                if (in.b[20 + k * 4 + 3] < numIns) isSource[in.b[20 + k * 4 + 3]] = true;
+        } else if (in.isTranswave()) {
+            if (be16(in.b + 20) < numIns) isSource[be16(in.b + 20)] = true;
+            if (be16(in.b + 36) < numIns) isSource[be16(in.b + 36)] = true;
         }
-        if (in.isTranswave()) {
-            sm = Sample{};
-            setName(sm, "Transwave");
-            continue;
-        }
-        if (i < slots.size()) sm = slots[i];
-        convertInstrument(in, sm, 0);
-        instName(in, sm.name);
     }
+    const Sample noSample;
+    // an instrument not processed yet plays its raw sample, like in OpenMPT
+    auto source = [&](size_t i) -> const Sample& { return havePre[i] ? pre[i] : (i < slots.size() ? slots[i] : noSample); };
+    for (int pass = 0; pass < 2; ++pass) {  // the plain instruments first, then the ones made of them
+        for (size_t i = 0; i < numIns; ++i) {
+            const SymInst in = inst(i);
+            Sample& sm = s.samples[i];
+            if (in.isEmpty() || in.virtValid() != (pass == 1)) continue;
+            Sample* keep = isSource[i] ? &pre[i] : nullptr;
+            int extraDown = 0;
+            double extraTranspose = 0;
+            if (in.isVirtual()) {
+                const size_t src0 = in.firstSource();
+                extraDown = src0 < numIns ? inst(src0).downsample() : 0;
+                if (!renderVirtual(in, numIns, sampleBoost, source, [&](size_t k) { return rates[k]; }, sm))
+                    sm = src0 < slots.size() ? slots[src0] : Sample{};  // the first source plays with these settings
+                convertInstrument(in, sm, extraDown, 0, keep);
+                setName(sm, "Virtual");
+            } else if (in.isTranswave()) {
+                const size_t a = be16(in.b + 20), b = be16(in.b + 36);
+                if (a < numIns && renderTranswave(in, source(a), b < numIns ? source(b) : noSample, sm))
+                    extraTranspose = 12;  // an octave below the source, but 4x oversampled: an octave above
+                else
+                    sm = Sample{};
+                convertInstrument(in, sm, 0, extraTranspose, keep);
+                setName(sm, "Transwave");
+            } else {
+                if (i < slots.size()) sm = slots[i];
+                convertInstrument(in, sm, 0, 0, keep);
+                instName(in, sm.name);
+            }
+            rates[i] = instRate(in, extraDown, extraTranspose);
+            havePre[i] = keep != nullptr;
+        }
+    }
+    pre.clear();
+    pre.shrink_to_fit();
     slots.clear();
     slots.shrink_to_fit();
 
