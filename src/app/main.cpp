@@ -182,7 +182,13 @@ void openFileDialog(HWND hwnd) {
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;
         ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-        if (GetOpenFileNameW(&ofn)) loadModuleFile(file);
+        wchar_t dir[MAX_PATH];
+        GetFullPathNameW(g_screen.browseDir().c_str(), MAX_PATH, dir, nullptr);
+        if (!g_screen.browseDir().empty() && g_screen.browseDir() != L"::drives") ofn.lpstrInitialDir = dir;
+        if (GetOpenFileNameW(&ofn)) {
+            loadModuleFile(file);
+            g_screen.openPanel(Panel::Main);
+        }
         g_dirty = true;
     });
 }

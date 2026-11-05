@@ -56,6 +56,7 @@ public:
     UiAction onChar(wchar_t c, Engine& e);
     const std::wstring& actionPath() const { return actionPath_; }
     void setCurrentPath(const std::wstring& p);  // file of the song, used by DISK OP.
+    const std::wstring& browseDir() const { return dir_; }
     void sampleLoaded(Engine& e, Sample&& s, const std::wstring& fileName);
     Panel panel() const { return panel_; }
     void openPanel(Panel p);

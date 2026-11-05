@@ -15,9 +15,9 @@ constexpr float kCountersW = 560.f;
 constexpr float kButtonsW = 620.f;
 constexpr float kSideW = 260.f;
 
-enum { B_PLAY, B_STOP, B_PATTERN, B_CLEAR, B_EDIT, B_EDITOP, B_RECORD, B_DISKOP, B_LOAD, B_SETUP, B_SAMPLER, B_HELP };
+enum { B_PLAY, B_STOP, B_PATTERN, B_CLEAR, B_EDIT, B_EDITOP, B_RECORD, B_DISKOP, B_PLST, B_SETUP, B_SAMPLER, B_HELP };
 const char* const kButtons[12] = {"PLAY",   "STOP",     "PATTERN", "CLEAR", "EDIT",    "EDIT OP.",
-                                  "RECORD", "DISK OP.", "LOAD",    "SETUP", "SAMPLER", "HELP"};
+                                  "RECORD", "DISK OP.", "PLST",    "SETUP", "SAMPLER", "HELP"};
 const char* const kSideButtons[16] = {"TRACK",   "INSERT",  "DELETE", "CUT",    "COPY",   "PASTE",
                                       "CLEAR",   "OCT UP",  "OCT DN", "NOTE UP", "NOTE DN", "ROT UP",
                                       "ROT DN",  "FLIP",    "EXCHG",  "UNDO"};
@@ -665,8 +665,6 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
             case B_HELP:
                 openPanel(Panel::Help);
                 break;
-            case B_LOAD:
-                return UiAction::OpenFile;  // plain file requester
             default: {
                 char m[64];
                 std::snprintf(m, sizeof m, "PLST: LOAD SAMPLES IN DISK OP. (SAMPLES FILTER)");

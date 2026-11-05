@@ -210,8 +210,8 @@ UiAction PlayScreen::diskMouse(float x, float y, bool, Engine& e) {
                 dir_ = L"::drives";
                 diskRefresh();
                 return UiAction::Redraw;
-            case D_LOAD:
-                return diskActivate(diskSel_, e);
+            case D_LOAD:  // file requester, opened in the folder being browsed
+                return UiAction::OpenFile;
             case D_SAVEXM:
                 actionPath_ = target(L".xm");
                 return UiAction::SaveXmPath;
