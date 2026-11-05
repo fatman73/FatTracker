@@ -43,8 +43,9 @@ void PlayScreen::ensureCursorVisible(const Song& s) {
     if (curCh_ >= s.numChannels) curCh_ = s.numChannels - 1;
     if (curCh_ < 0) curCh_ = 0;
     if (curCh_ < firstChannel_) firstChannel_ = curCh_;
-    if (curCh_ >= firstChannel_ + viewMode_) firstChannel_ = curCh_ - viewMode_ + 1;
-    firstChannel_ = computePatternLayout(viewMode_, s.numChannels, firstChannel_, 1.f).firstChannel;
+    const int visible = viewCount(s.numChannels);
+    if (curCh_ >= firstChannel_ + visible) firstChannel_ = curCh_ - visible + 1;
+    firstChannel_ = computePatternLayout(visible, s.numChannels, firstChannel_, 1.f).firstChannel;
 }
 
 void PlayScreen::moveCursor(int rows, int cols, Engine& e) {

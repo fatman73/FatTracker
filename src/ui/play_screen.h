@@ -10,6 +10,7 @@
 #include "ui/font.h"
 #include "ui/gfx.h"
 #include "ui/pattern_view.h"
+#include "ui/demo_fx.h"
 #include "ui/pixel_canvas.h"
 #include <memory>
 #include "ui/text.h"
@@ -69,7 +70,8 @@ public:
     void applyMetronome(Engine& e);
     bool animating() const { return animating_; }
     void songChanged();
-    void setViewMode(int m);
+    void setViewMode(int m);  // 4, 8, 16, 32 columns or 0 = as many as the song has channels
+    int viewCount(int numChannels) const;
     // editing state shared with the app shell
     Editor& editor() { return editor_; }
     bool dirty() const { return editor_.dirty(); }
@@ -101,6 +103,7 @@ private:
     void pureToAmiga(float lx, float ly, int& ax, int& ay) const;          // logical -> Amiga pixel
     int pureFirstChannel(int numChannels);
     std::unique_ptr<PixelCanvas> canvas_;
+    DemoFx demo_;  // effects in the logo box (click = next)
     int pureFirst_ = 0;
     float vpScale_ = 1.f;
     static constexpr int kPureExitHover = 7000;
@@ -208,5 +211,6 @@ public:
     void saveSettings(const wchar_t* ini) const;
     int defaultChannels() const { return defaultChannels_; }
     void setPure(int mode, Engine& e);  // switches the classic theme too
+    void setDemoEffect(int fx) { demo_.setEffect(fx); }  // logo box effect (dev screenshots)
     bool takeDirRead() { const bool r = dirRead_; dirRead_ = false; return r; }  // DISK OP. listed a folder
 };

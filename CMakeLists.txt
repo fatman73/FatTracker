@@ -11,14 +11,17 @@ add_compile_options("$<$<CONFIG:Release>:/O1;/GL;/Gy>")
 add_link_options("$<$<CONFIG:Release>:/LTCG;/OPT:REF;/OPT:ICF>")
 
 file(GLOB FT_CORE_SOURCES CONFIGURE_DEPENDS src/core/*.cpp src/formats/*.cpp)
-add_library(ftcore STATIC ${FT_CORE_SOURCES})
+# TFMX decoder adapted from libtfmxaudiodecoder (GPL v2+), see src/core/tfmx/README.txt
+file(GLOB FT_TFMX_SOURCES CONFIGURE_DEPENDS src/core/tfmx/*.cpp)
+set_source_files_properties(${FT_TFMX_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
+add_library(ftcore STATIC ${FT_CORE_SOURCES} ${FT_TFMX_SOURCES})
 target_include_directories(ftcore PUBLIC src)
 
 # Windows-specific modules shared by the app and the test runner
 file(GLOB FT_AUDIO_SOURCES CONFIGURE_DEPENDS src/audio/*.cpp)
 # UI sources without Direct2D dependencies (testable)
 set(FT_UI_PURE_SOURCES)
-foreach(f src/ui/viewport.cpp src/ui/pattern_layout.cpp src/ui/cursor_art.cpp src/ui/pixel_canvas.cpp src/ui/pure_layout.cpp)
+foreach(f src/ui/viewport.cpp src/ui/pattern_layout.cpp src/ui/cursor_art.cpp src/ui/pixel_canvas.cpp src/ui/pure_layout.cpp src/ui/demo_fx.cpp)
   if(EXISTS ${CMAKE_SOURCE_DIR}/${f})
     list(APPEND FT_UI_PURE_SOURCES ${f})
   endif()

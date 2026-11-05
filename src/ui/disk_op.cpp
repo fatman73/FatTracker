@@ -98,7 +98,9 @@ void PlayScreen::diskRefresh() {
                 const bool isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 if (!isDir) {
                     const bool mod = hasExt(n, {L".mod", L".xm", L".stk", L".s3m", L".it", L".mdat", L".mmd0",
-                                                L".mmd1", L".mmd2", L".mmd3", L".med", L".symmod"});
+                                                L".mmd1", L".mmd2", L".mmd3", L".med", L".symmod", L".dbm",
+                                                L".digi", L".tfx"}) ||
+                                     !_wcsnicmp(n.c_str(), L"mdat.", 5) || !_wcsnicmp(n.c_str(), L"mod.", 4);
                     const bool smp = hasExt(n, {L".wav", L".iff", L".8svx", L".aiff"});
                     if (diskFilter_ == 0 && !mod) continue;
                     if (diskFilter_ == 1 && !smp) continue;

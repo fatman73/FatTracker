@@ -2,6 +2,7 @@
 #include "ui/pure_layout.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 
@@ -25,7 +26,7 @@ const char* const kSideButtons[16] = {"TRACK",   "INSERT",  "DELETE", "CUT",    
 const char* const kCounterLabels[10] = {"POS",    "PATTERN", "LENGTH", "FINETUNE", "SAMPLE",
                                         "VOLUME", "LENGTH",  "REPEAT", "REPLEN",   "CHANNELS"};
 const bool kCounterEditable[10] = {true, true, true, true, true, true, false, true, true, true};
-constexpr int kViewModes[4] = {4, 8, 16, 32};
+constexpr int kViewModes[5] = {4, 8, 16, 32, 0};  // 0 = SONG: as many columns as the song has channels
 
 // hit ids
 constexpr int H_BUTTON = 0, H_ARROW = 100, H_VIEW = 200, H_SIDE = 300, H_SIDEARROW = 400, H_DIALOG = 500;
@@ -60,7 +61,7 @@ RectF PlayScreen::buttonRect(int i) const {
 }
 
 RectF PlayScreen::viewButton(int i) const {
-    return {L_.info.x + L_.info.w - 10 - (4 - i) * 58.f, L_.info.y + 5, 52.f, 30.f};
+    return {L_.info.x + L_.info.w - 10 - (5 - i) * 58.f, L_.info.y + 5, 52.f, 30.f};
 }
 
 RectF PlayScreen::sideButton(int i) const {
@@ -109,7 +110,7 @@ int PlayScreen::hitId(float x, float y) const {
     for (int r = 0; r < 10; ++r)
         for (int k = 0; k < 2; ++k)
             if (counterArrow(counterRow(r), k).contains(x, y)) return H_ARROW + r * 2 + k;
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 5; ++i)
         if (viewButton(i).contains(x, y)) return H_VIEW + i;
     if (bottomPattern) {
         for (int i = 0; i < 16; ++i)
@@ -157,13 +158,15 @@ void PlayScreen::clampView(const Song& s) {
     if (curCh_ >= s.numChannels) curCh_ = s.numChannels - 1;
 }
 
-void PlayScreen::setViewMode(int m) { viewMode_ = (m == 4 || m == 16 || m == 32) ? m : 8; }
+void PlayScreen::setViewMode(int m) { viewMode_ = (m == 0 || m == 4 || m == 16 || m == 32) ? m : 8; }
+
+int PlayScreen::viewCount(int numChannels) const { return viewMode_ ? viewMode_ : (numChannels < 1 ? 1 : numChannels); }
 
 PatternCtx PlayScreen::ctx(const Song* s, const Telemetry& tel) const {
     PatternCtx c{};
     c.song = s;
     c.tel = &tel;
-    c.viewMode = viewMode_;
+    c.viewMode = viewCount(s ? s->numChannels : 4);
     c.firstChannel = firstChannel_;
     c.pattern = tel.playing ? tel.pattern : viewPattern_;
     c.row = tel.playing ? tel.row : viewRow_;
@@ -265,7 +268,14 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
         drawButton(u, buttonRect(i), kButtons[i], st, 19.f);
     }
     g.well(L_.logo, t, mixColor(t.panelLight, t.panel, 0.25f));
-    tx.draw(g, {L_.logo.x, L_.logo.y + 8, L_.logo.w, 64}, "FATTRACKER", 54.f, t.digits, Align::Center);
+    {  // Amiga demo effects in the logo box
+        static const auto t0 = std::chrono::steady_clock::now();
+        const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        demo_.render(secs);
+        const float s = vpScale_, inset = 5.f;
+        g.drawPixels(demo_.pixels(), DemoFx::W, DemoFx::H, (L_.logo.x + inset) * s, (L_.logo.y + inset) * s,
+                     (L_.logo.w - 2 * inset) * s, (L_.logo.h - 2 * inset) * s);
+    }
     }  // topMain
 
     // ---------- scopes ----------
@@ -311,12 +321,13 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
                   editor_.dirty() ? "  *" : "");
     tx.draw(g, {L_.info.x + 560, y1, 560, rowH}, buf, 16.f, t.label, Align::Left, FontRole::Mono);
     tx.draw(g, {viewButton(0).x - 90, y1, 84, rowH}, "VIEW", 15.f, t.label, Align::Right);
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         Gfx::PanelState vs = viewMode_ == kViewModes[i] ? Gfx::PanelState::Active
                              : hover_ == H_VIEW + i       ? Gfx::PanelState::Hover
                                                           : Gfx::PanelState::Normal;
-        std::snprintf(buf, sizeof buf, "%d", kViewModes[i]);
-        drawButton(u, viewButton(i), buf, vs, 16.f);
+        if (kViewModes[i]) std::snprintf(buf, sizeof buf, "%d", kViewModes[i]);
+        else std::snprintf(buf, sizeof buf, "SONG");
+        drawButton(u, viewButton(i), buf, vs, kViewModes[i] ? 16.f : 13.f);
     }
     char sname[23] = {};
     if (smp) std::memcpy(sname, smp->name, 22);
@@ -372,19 +383,13 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     }
     if (bottomPattern) pattern_.drawMeters(g, f, t, L_.pattern, pc);
     g.endGlow(7.f, t.glow);
-    if (topMain) {
-        const char* sub = "32 CHANNELS   \xB7   16 BIT   \xB7   V0.3";
-        if (pure_ == 1) sub = last_.led ? "PURE   \xB7   AMIGA 500   \xB7   LED ON" : "PURE   \xB7   AMIGA 500   \xB7   LED OFF";
-        if (pure_ == 2) sub = last_.led ? "PURE   \xB7   AMIGA 1200   \xB7   LED ON" : "PURE   \xB7   AMIGA 1200   \xB7   LED OFF";
-        tx.draw(g, {L_.logo.x, L_.logo.y + 72, L_.logo.w, 30}, sub, 14.f, t.panelDark, Align::Center);
-    }
 
     if (bottomPattern) pattern_.drawText(g, f, t, L_.pattern, pc);
     drawDialog(g, tx, t);
 
     bool anyVu = false;
     for (int c = 0; c < 32; ++c) anyVu = anyVu || tel.ch[c].vu > 0.002f;
-    animating_ = tel.playing || anyVu;
+    animating_ = tel.playing || anyVu || topMain;  // the demo in the logo box moves
 }
 
 void PlayScreen::toggleMute(int ch, Engine& e) { e.setMute(ch, !last_.ch[ch].muted); }
@@ -548,12 +553,12 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
         return UiAction::Redraw;
     }
     if (vk == VK_F11 && !repeat) {
-        viewMode_ = viewMode_ == 4 ? 8 : (viewMode_ == 8 ? 16 : (viewMode_ == 16 ? 32 : 4));
+        viewMode_ = viewMode_ == 4 ? 8 : (viewMode_ == 8 ? 16 : (viewMode_ == 16 ? 32 : (viewMode_ == 32 ? 0 : 4)));
         if (s) ensureCursorVisible(*s);
         return UiAction::Redraw;
     }
     if (ctrl && vk >= VK_NUMPAD1 && vk <= VK_NUMPAD9 && !repeat) {
-        int ch = computePatternLayout(viewMode_, nch, firstChannel_, 1.f).firstChannel + (int)(vk - VK_NUMPAD1);
+        int ch = computePatternLayout(viewCount(nch), nch, firstChannel_, 1.f).firstChannel + (int)(vk - VK_NUMPAD1);
         if (ch < nch) toggleMute(ch, e);
         return UiAction::Redraw;
     }
@@ -734,6 +739,10 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
         panel_ = Panel::Main;
         return UiAction::Redraw;
     }
+    if (L_.logo.contains(x, y) && panel_ != Panel::DiskOp && panel_ != Panel::EditOp && panel_ != Panel::Setup) {
+        demo_.next();  // click the demo: next effect
+        return UiAction::Redraw;
+    }
     if (h >= H_BUTTON && h < H_BUTTON + 12) return pressButton(h - H_BUTTON, e);
     if (h >= H_ARROW && h < H_ARROW + 20) {
         const int row = (h - H_ARROW) / 2;
@@ -744,7 +753,7 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
         counterStep(row, (h - H_ARROW) % 2 == 0 ? 1 : -1, right, e);
         return UiAction::Redraw;
     }
-    if (h >= H_VIEW && h < H_VIEW + 4) {
+    if (h >= H_VIEW && h < H_VIEW + 5) {
         viewMode_ = kViewModes[h - H_VIEW];
         if (e.song()) ensureCursorVisible(*e.song());
         return UiAction::Redraw;
