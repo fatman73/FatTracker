@@ -35,13 +35,23 @@ Editor::Snap Editor::capture(const Song& s, const std::vector<int>& pats) const 
 void Editor::restore(Song& s, const Snap& snap) const {
     if (!snap.idx.empty() && snap.idx[0] == kAll) {
         s.patterns = snap.pats;
+        s.numChannels = snap.numChannels;  // whole-song snapshots carry the channel count
     } else {
         if (s.patterns.size() > snap.patternCount) s.patterns.resize(snap.patternCount);
-        for (size_t i = 0; i < snap.idx.size(); ++i)
-            if (snap.idx[i] < (int)s.patterns.size()) s.patterns[snap.idx[i]] = snap.pats[i];
+        for (size_t i = 0; i < snap.idx.size(); ++i) {
+            if (snap.idx[i] >= (int)s.patterns.size()) continue;
+            Pattern p = snap.pats[i];
+            if (p.channels != s.numChannels) {  // snapshot taken at another channel count: adapt it
+                Pattern q = makePattern(p.rows, s.numChannels);
+                const int keep = p.channels < s.numChannels ? p.channels : s.numChannels;
+                for (int r = 0; r < p.rows; ++r)
+                    for (int c = 0; c < keep; ++c) q.at(r, c) = p.at(r, c);
+                p = static_cast<Pattern&&>(q);
+            }
+            s.patterns[snap.idx[i]] = static_cast<Pattern&&>(p);
+        }
     }
     s.order = snap.order;
-    s.numChannels = snap.numChannels;
 }
 
 void Editor::record(const Song& s, const std::vector<int>& pats) {
@@ -314,6 +324,11 @@ void Editor::setOrder(Song& s, int pos, uint8_t pattern) {
     if (pos < 0 || pos >= (int)s.order.size() || pattern >= s.patterns.size()) return;
     record(s, {});
     s.order[pos] = pattern;
+}
+
+void Editor::setChannels(Song& s, int channels) {
+    record(s, {kAll});
+    setChannelCount(s, channels);
 }
 
 void Editor::clearSong(Song& s) {

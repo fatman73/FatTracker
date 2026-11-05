@@ -94,8 +94,7 @@ void instrument(W& w, const Song& s, const char* name, const std::vector<int>& s
         w.u8(src ? src->vibDepth : 0);
         w.u8(src ? src->vibRate : 0);
         w.u16(src ? src->fadeout : 0);
-        w.u16(0);
-        for (int i = 0; i < 22; ++i) w.u8(0);
+        for (int i = 0; i < 22; ++i) w.u8(0);  // reserved: header size 263 like FT2
     }
     w.put32At(start, (uint32_t)(w.b.size() - start));
     for (int idx : samples) sampleHeader(w, s.samples[idx]);

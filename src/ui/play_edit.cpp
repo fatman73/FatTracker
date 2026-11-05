@@ -205,7 +205,7 @@ UiAction PlayScreen::editKey(unsigned vk, bool shift, bool ctrl, bool alt, bool 
         if (note > 0) {
             if (repeat) return UiAction::None;
             if (note != NOTE_OFF) {
-                e.previewNote(sample_, note);
+                if (e.song()) e.previewNote(curSampleIndex(*e.song(), note), note);
                 jamKey_ = vk;
             }
             if (editMode_) {

@@ -69,15 +69,34 @@ ModExport exportMod(const Song& s) {
     }
     const int songLen = s.order.size() > 128 ? 128 : (int)s.order.size();
     if (s.order.size() > 128) warn(out, "ONLY 128 SONG POSITIONS FIT IN A MOD");
+    // used patterns only, renumbered in order of first use (MOD pattern numbers must be dense)
+    int remap[256];
+    for (int& v : remap) v = -1;
+    std::vector<int> used;  // new index -> old pattern
+    for (int i = 0; i < songLen; ++i) {
+        const int o = s.order[i] < s.patterns.size() ? s.order[i] : 0;
+        if (remap[o] < 0) {
+            if (used.size() >= 100) {
+                warn(out, "ONLY 100 PATTERNS FIT IN A MOD");
+                continue;
+            }
+            remap[o] = (int)used.size();
+            used.push_back(o);
+        }
+    }
+    if (used.empty()) used.push_back(0), remap[0] = 0;
+    if (s.patterns.size() > used.size()) warn(out, "UNUSED PATTERNS ARE NOT EXPORTED");
+    if (s.restartPos) warn(out, "THE RESTART POSITION IS LOST");
+    for (const Instrument& in : s.instruments)
+        if ((in.volEnv.flags | in.panEnv.flags) & ENV_ON) warn(out, "INSTRUMENT ENVELOPES ARE LOST");
     b.push_back((uint8_t)songLen);
     b.push_back(0x7F);
-    int maxPat = 0;
     for (int i = 0; i < 128; ++i) {
-        const uint8_t o = i < songLen ? s.order[i] : 0;
-        b.push_back(o);
-        if (o > maxPat) maxPat = o;
+        const int o = i < songLen && s.order[i] < s.patterns.size() ? s.order[i] : 0;
+        b.push_back((uint8_t)(i < songLen && remap[o] >= 0 ? remap[o] : 0));
     }
     char sig[5] = "M.K.";
+    if (ch == 4 && used.size() > 64) std::memcpy(sig, "M!K!", 4);  // ProTracker's >64 patterns tag
     if (ch != 4) {
         if (ch < 10)
             sig[0] = (char)('0' + ch), sig[1] = 'C', sig[2] = 'H', sig[3] = 'N';
@@ -86,12 +105,17 @@ ModExport exportMod(const Song& s) {
     }
     b.insert(b.end(), sig, sig + 4);
 
-    for (int p = 0; p <= maxPat; ++p) {
-        const Pattern* pat = p < (int)s.patterns.size() ? &s.patterns[p] : nullptr;
-        if (pat && pat->rows != 64) warn(out, "PATTERNS ARE CUT OR PADDED TO 64 ROWS");
+    // initial tempo: MOD has no header field, so put Fxx commands on the first row
+    int tempoFx[2] = {-1, -1};  // params still to place: speed, bpm
+    if (s.initialSpeed != 6) tempoFx[0] = s.initialSpeed;
+    if (s.initialBpm != 125) tempoFx[1] = s.initialBpm;
+
+    for (size_t np = 0; np < used.size(); ++np) {
+        const Pattern* pat = &s.patterns[used[np]];
+        if (pat->rows != 64) warn(out, "PATTERNS ARE CUT OR PADDED TO 64 ROWS");
         for (int r = 0; r < 64; ++r)
             for (int c = 0; c < ch; ++c) {
-                Cell cell = (pat && r < pat->rows && c < pat->channels) ? pat->at(r, c) : Cell{};
+                Cell cell = (r < pat->rows && c < pat->channels) ? pat->at(r, c) : Cell{};
                 int sample = 0, period = 0;
                 if (cell.note >= 1 && cell.note <= 96) {
                     int n = cell.note;
@@ -128,13 +152,22 @@ ModExport exportMod(const Song& s) {
                         warn(out, "VOLUME COLUMN LOST WHERE AN EFFECT IS USED");
                     }
                 }
+                if (np == 0 && r == 0 && fx == 0 && param == 0) {
+                    for (int& t : tempoFx)
+                        if (t >= 0) {
+                            fx = 0xF;
+                            param = t;
+                            t = -1;
+                            break;
+                        }
+                }
                 b.push_back((uint8_t)((sample & 0xF0) | ((period >> 8) & 0x0F)));
                 b.push_back((uint8_t)(period & 0xFF));
                 b.push_back((uint8_t)(((sample & 0x0F) << 4) | (fx & 0x0F)));
                 b.push_back((uint8_t)param);
             }
     }
-    for (int i = 0; i < nSamples; ++i) b.insert(b.end(), (const uint8_t*)pcm[i].data(), (const uint8_t*)pcm[i].data() + pcm[i].size());
+    if (tempoFx[0] >= 0 || tempoFx[1] >= 0) warn(out, "THE INITIAL TEMPO COULD NOT BE STORED");    for (int i = 0; i < nSamples; ++i) b.insert(b.end(), (const uint8_t*)pcm[i].data(), (const uint8_t*)pcm[i].data() + pcm[i].size());
     if (s.numChannels > 32) warn(out, "TOO MANY CHANNELS");
     return out;
 }

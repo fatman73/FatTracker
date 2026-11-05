@@ -55,6 +55,7 @@ public:
     void deleteOrder(Song& s, int pos);
     void setOrder(Song& s, int pos, uint8_t pattern);
     void clearSong(Song& s);  // all patterns empty, one position
+    void setChannels(Song& s, int channels);  // undoable channel count change
     // history
     bool undo(Song& s);
     bool redo(Song& s);

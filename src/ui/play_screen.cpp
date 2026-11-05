@@ -134,6 +134,26 @@ void PlayScreen::songChanged() {
     recordMode_ = false;
     editor_.reset();
     editor_.setClean();
+    sampleUndoIndex_ = -1;
+    sampleUndo_ = Sample{};
+}
+
+int PlayScreen::curSampleIndex(const Song& s, int note) const {
+    if (!s.instruments.empty()) {
+        if (sample_ >= (int)s.instruments.size()) return -1;
+        const uint16_t g = s.instruments[sample_].sampleMap[(note < 1 || note > 96 ? 49 : note) - 1];
+        return g < s.samples.size() ? (int)g : -1;
+    }
+    return sample_ < (int)s.samples.size() ? sample_ : -1;
+}
+
+void PlayScreen::clampView(const Song& s) {
+    const int ns = s.instruments.empty() ? (int)s.samples.size() : (int)s.instruments.size();
+    if (sample_ >= ns) sample_ = 0;
+    if (viewOrder_ >= (int)s.order.size()) viewOrder_ = 0;
+    if (viewPattern_ >= (int)s.patterns.size()) viewPattern_ = 0;
+    if (!s.patterns.empty() && viewRow_ >= s.patterns[viewPattern_].rows) viewRow_ = 0;
+    if (curCh_ >= s.numChannels) curCh_ = s.numChannels - 1;
 }
 
 void PlayScreen::setViewMode(int m) { viewMode_ = (m == 4 || m == 16 || m == 32) ? m : 8; }
@@ -186,7 +206,7 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
         if (!recordMode_ || true) viewRow_ = tel.row;
         viewOrder_ = tel.order;
     }
-    if (s && sample_ >= (int)s->samples.size()) sample_ = 0;
+    if (s) clampView(*s);
     if (s && curCh_ >= s->numChannels) curCh_ = s->numChannels - 1;
     const PatternCtx pc = ctx(s, tel);
     char buf[128];
@@ -195,7 +215,8 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     const bool bottomPattern = panel_ != Panel::Sampler && panel_ != Panel::Help;
 
     // ---------- counters ----------
-    const Sample* smp = s && sample_ < (int)s->samples.size() ? &s->samples[sample_] : nullptr;
+    const int sIdx = s ? curSampleIndex(*s) : -1;
+    const Sample* smp = sIdx >= 0 ? &s->samples[sIdx] : nullptr;
     if (panel_ == Panel::DiskOp) diskDraw(g, tx, t);
     if (panel_ == Panel::EditOp) editOpDraw(g, tx, t);
     if (panel_ == Panel::Setup) setupDraw(g, tx, t);
@@ -401,13 +422,15 @@ void PlayScreen::counterStep(int row, int dir, bool big, Engine& e) {
             if (viewOrder_ >= (int)e.song()->order.size()) viewOrder_ = (int)e.song()->order.size() - 1;
             return;
         }
-        case 4:  // SAMPLE
-            if (s->samples.empty()) return;
-            sample_ = (sample_ + dir * (big ? 16 : 1) + (int)s->samples.size() * 16) % (int)s->samples.size();
+        case 4: {  // SAMPLE (instrument number in songs that use XM instruments)
+            const int n = s->instruments.empty() ? (int)s->samples.size() : (int)s->instruments.size();
+            if (n == 0) return;
+            sample_ = (sample_ + dir * (big ? 16 : 1) + n * 16) % n;
             return;
+        }
         case 9: {  // CHANNELS
             const int n = s->numChannels + dir * (big ? 4 : 1);
-            e.edit([n](Song& song) { setChannelCount(song, n); });
+            e.edit([&](Song& song) { editor_.setChannels(song, n); });
             ensureCursorVisible(*e.song());
             char m[48];
             std::snprintf(m, sizeof m, "CHANNELS: %d", e.song()->numChannels);
@@ -417,8 +440,9 @@ void PlayScreen::counterStep(int row, int dir, bool big, Engine& e) {
         default:
             break;
     }
-    if (sample_ >= (int)s->samples.size()) return;
-    const int idx = sample_;
+    const int idx = curSampleIndex(*s);
+    if (idx < 0) return;
+    editor_.markDirty();
     e.edit([row, dir, big, idx](Song& song) {
         Sample& sm = song.samples[idx];
         switch (row) {
@@ -472,13 +496,14 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
         }
         return UiAction::Redraw;
     }
-    if ((vk == VK_MENU && extended) || vk == VK_F5) {
+    const bool typing = panel_ == Panel::DiskOp;
+    if ((vk == VK_MENU && extended && !ctrl && !typing) || (vk == VK_F5 && !shift && !ctrl && !alt)) {
         if (repeat) return UiAction::None;
         recordMode_ = false;
         e.play((uint16_t)viewOrder_);
         return UiAction::Redraw;
     }
-    if (vk == VK_CONTROL && extended) {
+    if (vk == VK_CONTROL && extended && !alt && !typing) {
         if (repeat) return UiAction::None;
         recordMode_ = false;
         e.playPattern((uint16_t)viewPattern_);
@@ -491,6 +516,7 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
         if (r != UiAction::None) return r;
         if (vk != VK_SPACE) return UiAction::None;
     }
+    if (panel_ == Panel::Help && vk != VK_ESCAPE && vk != VK_SPACE) return UiAction::None;
     if (vk == VK_ESCAPE && panel_ != Panel::Main) {
         panel_ = Panel::Main;
         return UiAction::Redraw;
@@ -536,8 +562,8 @@ bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
         const uint32_t pos = xToSample(x);
         if (drag_ == 1) {
             selB_ = pos;
-        } else if (e.song() && sample_ < (int)e.song()->samples.size()) {
-            const int idx = sample_;
+        } else if (e.song() && curSampleIndex(*e.song()) >= 0) {
+            const int idx = curSampleIndex(*e.song());
             const int which = drag_;
             e.edit([&](Song& song) {
                 Sample& sm = song.samples[idx];
@@ -571,7 +597,8 @@ UiAction PlayScreen::onWheel(float x, float y, int delta, Engine& e) {
     if (panel_ == Panel::Sampler && samplerWave().contains(x, y) && viewEnd_ > viewStart_) {
         const uint32_t center = xToSample(x);
         const double f = notches > 0 ? 0.7 : 1.0 / 0.7;
-        const double len = e.song() && sample_ < (int)e.song()->samples.size() ? e.song()->samples[sample_].length : 0;
+        const int si = e.song() ? curSampleIndex(*e.song()) : -1;
+        const double len = si >= 0 ? e.song()->samples[si].length : 0;
         double a = center - (center - (double)viewStart_) * f, b = center + ((double)viewEnd_ - center) * f;
         if (b - a < 16) b = a + 16;
         a = a < 0 ? 0 : a;
@@ -643,6 +670,7 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
                     if (a == 3) return;
                     e.stop();
                     if (a == 0 || a == 2) e.edit([&](Song& song) { editor_.clearSong(song); });
+                    if (a != 0) editor_.markDirty();
                     if (a == 1 || a == 2) e.editStructure([](Song& song) {
                             for (Sample& sm : song.samples) sm = Sample{};
                         });
@@ -702,6 +730,7 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
             }
         } else {
             const int d = (i == 3 ? 1 : -1) * (right ? 10 : 1);
+            editor_.markDirty();
             e.edit([d](Song& song) {
                 int b = song.initialBpm + d;
                 song.initialBpm = (uint8_t)(b < 32 ? 32 : (b > 255 ? 255 : b));

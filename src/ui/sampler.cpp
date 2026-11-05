@@ -49,7 +49,8 @@ void PlayScreen::samplerDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     Ui u{g, tx, t};
     g.panel(a, t, Gfx::PanelState::Normal);
     const Song* s = e.song();
-    const Sample* sm = (s && sample_ < (int)s->samples.size()) ? &s->samples[sample_] : nullptr;
+    const int si = s ? curSampleIndex(*s) : -1;
+    const Sample* sm = si >= 0 ? &s->samples[si] : nullptr;
     const uint32_t len = sm ? sm->length : 0;
     if (viewEnd_ > len || viewEnd_ <= viewStart_) {
         viewStart_ = 0;
@@ -125,8 +126,8 @@ void PlayScreen::samplerDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
 
 void PlayScreen::samplerOp(int op, Engine& e) {
     const Song* s = e.song();
-    if (!s || sample_ >= (int)s->samples.size()) return;
-    const int idx = sample_;
+    const int idx = s ? curSampleIndex(*s) : -1;
+    if (idx < 0) return;
     const uint32_t len = s->samples[idx].length;
     uint32_t a = std::min(selA_, selB_), b = std::max(selA_, selB_);
     const bool hasSel = b > a;
@@ -223,6 +224,7 @@ void PlayScreen::samplerOp(int op, Engine& e) {
         case S_UNDO:
             if (sampleUndoIndex_ != idx) return setStatus("NOTHING TO UNDO");
             e.editStructure([&](Song& song) { std::swap(song.samples[idx], sampleUndo_); });
+            editor_.markDirty();
             setStatus("UNDO");
             break;
         case S_EXIT:
@@ -240,15 +242,16 @@ UiAction PlayScreen::samplerMouse(float x, float y, bool right, Engine& e) {
     const RectF w = samplerWave();
     if (!w.contains(x, y)) return UiAction::None;
     const Song* s = e.song();
-    if (!s || sample_ >= (int)s->samples.size()) return UiAction::None;
-    const Sample& sm = s->samples[sample_];
+    const int si = s ? curSampleIndex(*s) : -1;
+    if (si < 0) return UiAction::None;
+    const Sample& sm = s->samples[si];
     if (sm.loop != LoopType::None && y < w.y + 20) {
         if (std::fabs(x - sampleToX(sm.loopStart)) < 9) drag_ = 2;
         else if (std::fabs(x - sampleToX(sm.loopStart + sm.loopLength)) < 9) drag_ = 3;
         if (drag_) return UiAction::Redraw;
     }
     if (right) {  // right click: play from here
-        e.previewNote(sample_, 49, xToSample(x));
+        e.previewNote(si, 49, xToSample(x));
         return UiAction::Redraw;
     }
     drag_ = 1;
@@ -267,9 +270,9 @@ UiAction PlayScreen::samplerKey(unsigned vk, bool shift, bool ctrl, Engine& e) {
             samplerOp(op, e);
             return UiAction::Redraw;
         }
-        if (vk == 'A' && e.song() && sample_ < (int)e.song()->samples.size()) {
+        if (vk == 'A' && e.song() && curSampleIndex(*e.song()) >= 0) {
             selA_ = 0;
-            selB_ = e.song()->samples[sample_].length;
+            selB_ = e.song()->samples[curSampleIndex(*e.song())].length;
             return UiAction::Redraw;
         }
     }
@@ -280,7 +283,7 @@ UiAction PlayScreen::samplerKey(unsigned vk, bool shift, bool ctrl, Engine& e) {
     (void)shift;
     const int note = noteForKey(vk, octave_);
     if (note > 0) {
-        e.previewNote(sample_, note, 0);
+        if (e.song()) e.previewNote(curSampleIndex(*e.song(), note), note, 0);
         jamKey_ = vk;
         return UiAction::Redraw;
     }
@@ -296,9 +299,20 @@ void PlayScreen::sampleLoaded(Engine& e, Sample&& s, const std::wstring& fileNam
         s.name[n++] = (c >= 32 && c < 127) ? (char)c : '_';
     }
     s.name[n] = 0;
-    const int idx = sample_;
+    const Song* cur = e.song();
+    if (!cur) return;
+    // the slot under the SAMPLE counter; an XM instrument without a sample gets a new one mapped to all notes
+    int idx = curSampleIndex(*cur);
+    const bool inst = !cur->instruments.empty();
+    if (idx < 0) idx = inst ? (int)cur->samples.size() : sample_;
+    const int ins = sample_;
+    const bool hadOld = idx < (int)cur->samples.size();
     e.editStructure([&](Song& song) {
         if (idx >= (int)song.samples.size()) song.samples.resize(idx + 1);
+        if (inst && ins < (int)song.instruments.size() && !hadOld)
+            for (auto& m : song.instruments[ins].sampleMap) m = (uint16_t)idx;
+        sampleUndo_ = hadOld ? song.samples[idx] : Sample{};
+        sampleUndoIndex_ = idx;
         song.samples[idx] = static_cast<Sample&&>(s);
     });
     editor_.markDirty();

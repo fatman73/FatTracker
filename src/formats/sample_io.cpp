@@ -110,6 +110,7 @@ Result<Sample> loadWav(ByteReader& r) {
             s.data8[f] = (int8_t)(v > 127 ? 127 : (v < -128 ? -128 : v));
         }
     }
+    if (frames == 0) return Result<Sample>::fail("EMPTY SAMPLE FILE");
     setPitchFromRate(s, rate);
     if (haveLoop && loopEnd >= loopStart && loopEnd < frames) {
         s.loop = loopType == 1 ? LoopType::PingPong : LoopType::Forward;
@@ -153,6 +154,7 @@ Result<Sample> load8svx(ByteReader& r) {
         if (r.overrun()) break;
     }
     if (!haveHeader) return Result<Sample>::fail("BAD IFF 8SVX FILE");
+    if (s.length == 0) return Result<Sample>::fail("EMPTY SAMPLE FILE");
     s.volume = (uint8_t)(volume >= 0x10000 ? 64 : volume * 64 / 0x10000);
     setPitchFromRate(s, rate);
     if (repeat >= 2 && oneShot < s.length) {

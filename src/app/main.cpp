@@ -5,6 +5,7 @@
 #include <functional>
 
 #include "app/document.h"
+#include "formats/writers.h"
 #include "audio/engine.h"
 #include "formats/formats.h"
 #include "formats/sample_io.h"
@@ -125,14 +126,37 @@ bool saveTo(const std::wstring& path, SaveKind kind) {
         g_path = path;
         g_screen.editor().setClean();
     }
-    if (r.ok && !r.warnings.empty()) {
-        static char text[96];
-        wsprintfA(text, "MOD SAVED. %d LOSSES, E.G.: %s", (int)r.warnings.size(), r.warnings[0]);
-        g_screen.ask(text, {"OK"}, nullptr);
-    }
     updateTitle();
     g_dirty = true;
     return r.ok;
+}
+
+// MOD export first lists what the format cannot keep and asks; other kinds save directly.
+void exportChecked(const std::wstring& path, SaveKind kind) {
+    if (kind == SaveKind::Mod) {
+        g_engine->lock();
+        const ModExport m = exportMod(*g_engine->song());
+        g_engine->unlock();
+        if (!m.warnings.empty()) {
+            static char text[160];
+            wsprintfA(text, "MOD CANNOT KEEP %d FEATURE(S), E.G.: %s", (int)m.warnings.size(), m.warnings[0]);
+            g_screen.ask(text, {"EXPORT", "CANCEL"}, [path](int a) {
+                if (a == 0) saveTo(path, SaveKind::Mod);
+            });
+            g_dirty = true;
+            return;
+        }
+    }
+    saveTo(path, kind);
+}
+
+// DISK OP. saves: ask before replacing an existing file.
+void saveFromDiskOp(const std::wstring& path, SaveKind kind) {
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return exportChecked(path, kind);
+    g_screen.ask("FILE EXISTS. OVERWRITE?", {"OVERWRITE", "CANCEL"}, [path, kind](int a) {
+        if (a == 0) exportChecked(path, kind);
+    });
+    g_dirty = true;
 }
 
 bool saveCurrent(HWND hwnd) {
@@ -156,6 +180,10 @@ bool saveAsDialog(HWND hwnd) {
     const wchar_t* ext = kind == SaveKind::Mod ? L".mod" : kind == SaveKind::Wav ? L".wav" : L".xm";
     std::wstring path = file;
     if (kindFromPath(path) != kind) path = withExtension(path, ext);
+    if (kind != SaveKind::Xm) {  // exports never make the song clean
+        exportChecked(path, kind);
+        return false;
+    }
     return saveTo(path, kind);
 }
 
@@ -167,7 +195,7 @@ void confirmDiscard(HWND hwnd, std::function<void()> then) {
     g_screen.ask("THE SONG HAS UNSAVED CHANGES", {"SAVE", "DISCARD", "CANCEL"},
                  [hwnd, then](int a) {
                      if (a == 2) return;
-                     if (a == 0 && !saveCurrent(hwnd)) return;
+                     if (a == 0 && (!saveCurrent(hwnd) || g_screen.dirty())) return;
                      then();
                  });
     g_dirty = true;
@@ -199,7 +227,13 @@ void loadAnyFile(const std::wstring& path) {
         g_screen.setStatus(err);
         return;
     }
+    const bool sampleSig = data.size() >= 12 && ((!memcmp(data.data(), "RIFF", 4) && !memcmp(data.data() + 8, "WAVE", 4)) ||
+                                                  (!memcmp(data.data(), "FORM", 4) && !memcmp(data.data() + 8, "8SVX", 4)));
     auto smp = loadSampleFile(data.data(), data.size());
+    if (sampleSig && !smp.ok()) {
+        g_screen.setStatus(smp.error());
+        return;
+    }
     if (smp.ok()) {
         const size_t slash = path.find_last_of(L"\\/");
         g_screen.sampleLoaded(*g_engine, static_cast<Sample&&>(smp.value()), path.substr(slash + 1));
@@ -213,18 +247,23 @@ void handle(UiAction a, HWND hwnd) {
     if (a == UiAction::SaveFile) saveCurrent(hwnd);
     const std::wstring path = g_screen.actionPath();
     if (a == UiAction::LoadPath) loadAnyFile(path);
-    if (a == UiAction::SaveXmPath) saveTo(path, SaveKind::Xm);
-    if (a == UiAction::SaveModPath) saveTo(path, SaveKind::Mod);
-    if (a == UiAction::SaveWavPath) saveTo(path, SaveKind::Wav);
+    if (a == UiAction::SaveXmPath) saveFromDiskOp(path, SaveKind::Xm);
+    if (a == UiAction::SaveModPath) saveFromDiskOp(path, SaveKind::Mod);
+    if (a == UiAction::SaveWavPath) saveFromDiskOp(path, SaveKind::Wav);
     if (a == UiAction::SaveSamplePath) {
-        std::vector<uint8_t> bytes;
-        g_engine->lock();
-        const Song* s = g_engine->song();
-        const int idx = g_screen.currentSample();
-        if (s && idx < (int)s->samples.size() && s->samples[idx].length) bytes = saveSampleWav(s->samples[idx]);
-        g_engine->unlock();
-        if (bytes.empty()) g_screen.setStatus("ERROR: THE SAMPLE IS EMPTY");
-        else g_screen.setStatus(writeFileAtomic(path.c_str(), bytes) ? "SAMPLE SAVED (WAV)" : "ERROR: CANNOT WRITE FILE");
+        auto save = [path]() {
+            std::vector<uint8_t> bytes;
+            g_engine->lock();
+            const Song* s = g_engine->song();
+            const int idx = s ? g_screen.curSampleIndex(*s) : -1;
+            if (idx >= 0 && s->samples[idx].length) bytes = saveSampleWav(s->samples[idx]);
+            g_engine->unlock();
+            if (bytes.empty()) g_screen.setStatus("ERROR: THE SAMPLE IS EMPTY");
+            else g_screen.setStatus(writeFileAtomic(path.c_str(), bytes) ? "SAMPLE SAVED (WAV)" : "ERROR: CANNOT WRITE FILE");
+            g_dirty = true;
+        };
+        if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) save();
+        else g_screen.ask("FILE EXISTS. OVERWRITE?", {"OVERWRITE", "CANCEL"}, [save](int r) { if (r == 0) save(); });
     }
     if (a != UiAction::None) {
         g_dirty = true;
@@ -262,8 +301,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 toggleFullscreen(hwnd);
                 return 0;
             }
-            if (wp == VK_F4) break;  // Alt+F4 closes
-            [[fallthrough]];
+            [[fallthrough]];  // Alt+F4 copies the pattern like in ProTracker; close with the window button
         case WM_KEYDOWN: {
             const bool ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0;
             const bool alt = (lp & (1 << 29)) != 0, ext = (lp & (1 << 24)) != 0;

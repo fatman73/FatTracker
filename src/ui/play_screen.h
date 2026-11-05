@@ -61,6 +61,8 @@ public:
     Panel panel() const { return panel_; }
     void openPanel(Panel p);
     int currentSample() const { return sample_; }
+    int curSampleIndex(const Song& s, int note = 49) const;  // global sample for the SAMPLE counter
+    void clampView(const Song& s);
     void applyMetronome(Engine& e);
     bool animating() const { return animating_; }
     void songChanged();

@@ -98,7 +98,21 @@ void Player::songEdited() {
     if (!song_) return;
     mixer_.setNumChannels(song_->numChannels);
     for (int c = song_->numChannels; c < kMaxChannels; ++c) mixer_.stopVoice(c);
+    // the song may have lost patterns or positions (undo, clear): re-validate everything we index
+    if (song_->patterns.empty() || song_->order.empty()) {
+        stop();
+        order_ = pattern_ = row_ = 0;
+        return;
+    }
+    if (patternMode_) {
+        if (pattern_ >= song_->patterns.size()) pattern_ = 0;
+    } else {
+        if (order_ >= song_->order.size()) order_ = 0;
+        pattern_ = song_->order[order_] < song_->patterns.size() ? song_->order[order_] : 0;
+    }
     if (row_ >= patternRows()) row_ = 0;
+    if (breakRow_ >= 256) breakRow_ = 0;
+    if (loopTarget_ >= patternRows()) loopTarget_ = 0;
 }
 
 uint16_t Player::patternRows() const {
