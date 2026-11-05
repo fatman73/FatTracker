@@ -169,7 +169,7 @@ TEST(unsupported_formats_are_named) {
                  {"MMD1", 0, "BAD OCTAMED FILE"},  // OctaMED is supported now: a header of zeros is broken
                  {"SymM", 0, "BAD SYMPHONIE FILE"},  // Symphonie is supported now: a header of zeros is broken
                  {"SCRM", 44, "BAD S3M FILE"},  // S3M is supported now
-                 {"IMPM", 0, "UNSUPPORTED FORMAT: IMPULSE TRACKER"}};
+                 {"IMPM", 0, "BAD IT FILE"}};  // IT is supported now
     for (auto& c : cases) {
         std::vector<uint8_t> d(2048, 0);
         std::memcpy(d.data() + c.offset, c.magic, std::strlen(c.magic));

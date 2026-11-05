@@ -272,7 +272,7 @@ TEST(pc_formats_survive_truncation) {
 }
 
 TEST(real_modules_pc_load_and_play) {
-    const int n = playable({L".s3m", L".mtm", L".669"});
+    const int n = playable({L".s3m", L".mtm", L".669", L".it"});
     if (n < 0) std::printf("SKIP real_modules_pc (no modules folder)\n");
-    else std::printf("  s3m/mtm/669: %d modules\n", n);
+    else std::printf("  s3m/mtm/669/it: %d modules\n", n);
 }

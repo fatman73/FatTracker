@@ -5,8 +5,7 @@
 #include "core/reader.h"
 #include "formats/formats_internal.h"
 
-namespace {
-void copyName(char* dst, const uint8_t* src, size_t n, size_t cap) {
+void pcName(char* dst, const uint8_t* src, size_t n, size_t cap) {
     size_t k = 0;
     for (size_t i = 0; i < n && k < cap; ++i) {
         const char ch = (char)src[i];
@@ -17,7 +16,7 @@ void copyName(char* dst, const uint8_t* src, size_t n, size_t cap) {
     dst[k] = 0;
 }
 
-void setLoop(Sample& s, uint32_t start, uint32_t end) {
+void pcLoop(Sample& s, uint32_t start, uint32_t end) {
     if (end > s.length) end = s.length;
     if (start >= end || end - start < 2) {
         s.loop = LoopType::None;
@@ -29,7 +28,7 @@ void setLoop(Sample& s, uint32_t start, uint32_t end) {
 }
 
 // Reads `frames` of 8 / 16 bit (little endian) PCM, signed or unsigned.
-void readPcm(ByteReader& r, Sample& s, uint32_t frames, bool is16, bool isUnsigned) {
+void pcReadPcm(ByteReader& r, Sample& s, uint32_t frames, bool is16, bool isUnsigned) {
     const size_t bytes = (size_t)frames * (is16 ? 2 : 1);
     if (bytes > r.remaining()) frames = (uint32_t)(r.remaining() / (is16 ? 2 : 1));
     s.is16 = is16;
@@ -43,18 +42,20 @@ void readPcm(ByteReader& r, Sample& s, uint32_t frames, bool is16, bool isUnsign
     }
 }
 
+namespace {
 void setFx(Cell& c, int fx, int p) {
     c.fx = (uint8_t)fx;
     c.param = (uint8_t)p;
 }
+}  // namespace
 
-// S3M / IT effect letter (1 = A) -> our XM style effect.
-void s3mEffect(Cell& c, int cmd, int p) {
+// S3M / IT effect letter (1 = A) -> our XM style effect. IT: breaks are hex, global volume 0..128, X 0..255.
+void pcEffect(Cell& c, int cmd, int p, bool it) {
     const int hi = p >> 4, lo = p & 15;
     switch (cmd) {
         case 1: if (p) setFx(c, 0xF, p > 0x1F ? 0x1F : p); break;  // A speed
         case 2: setFx(c, 0xB, p); break;                            // B jump
-        case 3: setFx(c, 0xD, p); break;                            // C break (BCD like MOD)
+        case 3: setFx(c, 0xD, it ? ((p > 63 ? 63 : p) / 10) << 4 | (p > 63 ? 63 : p) % 10 : p); break;  // C break (player: BCD)
         case 4:                                                     // D volume slide (fine forms DxF / DFy)
             if (hi == 0xF && lo) setFx(c, 0xE, 0xB0 | lo);
             else if (lo == 0xF && hi) setFx(c, 0xE, 0xA0 | hi);
@@ -96,13 +97,14 @@ void s3mEffect(Cell& c, int cmd, int p) {
             break;
         case 20: if (p >= 0x20) setFx(c, 0xF, p); break;            // T tempo (slides dropped)
         case 21: setFx(c, 0x4, (p & 0xF0) | (lo / 4 ? lo / 4 : 1)); break;  // U fine vibrato
-        case 22: setFx(c, 16, p > 64 ? 64 : p); break;              // V global volume (XM G)
+        case 22: setFx(c, 16, it ? (p > 128 ? 64 : p / 2) : (p > 64 ? 64 : p)); break;  // V global volume (XM G)
         case 23: setFx(c, 17, p); break;                            // W global volume slide (XM H)
-        case 24: setFx(c, 0x8, p >= 0x80 ? 0xFF : p * 2); break;    // X panning 0..80
+        case 24: setFx(c, 0x8, it ? p : (p >= 0x80 ? 0xFF : p * 2)); break;  // X panning (S3M 0..80)
         default: break;                                             // Y panbrello, Z midi
     }
 }
 
+namespace {
 int clampNote(int n) { return n < 1 ? 1 : (n > 96 ? 96 : n); }
 }  // namespace
 
@@ -116,7 +118,7 @@ Result<Song> s3mLoad(const uint8_t* data, size_t size) {
     Song s;
     s.quirks = Quirks::FT2;
     s.freqMode = FreqMode::Amiga;
-    copyName(s.name, data, 28, 20);
+    pcName(s.name, data, 28, 20);
     r.seek(32);
     const int ordNum = r.u16le(), smpNum = r.u16le(), patNum = r.u16le();
     r.u16le();  // flags
@@ -163,7 +165,7 @@ Result<Song> s3mLoad(const uint8_t* data, size_t size) {
         const uint8_t* h = data + off;
         Sample& sm = s.samples[i];
         sm.hasPan = false;
-        copyName(sm.name, h + 48, 28, 22);
+        pcName(sm.name, h + 48, 28, 22);
         if (h[0] != 1) continue;  // not PCM (empty / AdLib)
         ByteReader hr(data, size);
         hr.seek(off + 13);
@@ -179,10 +181,10 @@ Result<Song> s3mLoad(const uint8_t* data, size_t size) {
         if (ptr < size) {
             ByteReader dr(data, size);
             dr.seek(ptr);
-            readPcm(dr, sm, len > (1u << 26) ? (1u << 26) : len, (flags & 4) != 0, format == 2);
+            pcReadPcm(dr, sm, len > (1u << 26) ? (1u << 26) : len, (flags & 4) != 0, format == 2);
             if (sm.length < len) s.loadFlags |= LOAD_TRUNCATED;
         }
-        if (flags & 1) setLoop(sm, ls, le);
+        if (flags & 1) pcLoop(sm, ls, le);
     }
 
     // patterns: 64 rows, packed (0 = end of row; channel | 0x20 note+instr | 0x40 volume | 0x80 effect)
@@ -215,7 +217,7 @@ Result<Song> s3mLoad(const uint8_t* data, size_t size) {
                 }
                 if (what & 0x80) {
                     const int cmd = pr.u8(), info = pr.u8();
-                    if (cmd) s3mEffect(c, cmd, info);
+                    if (cmd) pcEffect(c, cmd, info, false);
                 }
             }
         }
@@ -237,7 +239,7 @@ Result<Song> mtmLoad(const uint8_t* data, size_t size) {
     Song s;
     s.quirks = Quirks::PT23;
     s.freqMode = FreqMode::Amiga;
-    copyName(s.name, data + 4, 20, 20);
+    pcName(s.name, data + 4, 20, 20);
     r.seek(24);
     const int numTracks = r.u16le(), lastPattern = r.u8(), lastOrder = r.u8();
     const int commentSize = r.u16le(), numSamples = r.u8();
@@ -258,7 +260,7 @@ Result<Song> mtmLoad(const uint8_t* data, size_t size) {
     for (int i = 0; i < numSamples; ++i) {
         uint8_t nm[22];
         r.bytes(nm, 22);
-        copyName(s.samples[i].name, nm, 22, 22);
+        pcName(s.samples[i].name, nm, 22, 22);
         hdr[i].len = r.u32le();
         hdr[i].ls = r.u32le();
         hdr[i].le = r.u32le();
@@ -308,11 +310,11 @@ Result<Song> mtmLoad(const uint8_t* data, size_t size) {
             continue;
         }
         const bool is16 = (h.attr & 1) != 0;
-        readPcm(r, sm, is16 ? h.len / 2 : h.len, is16, true);
+        pcReadPcm(r, sm, is16 ? h.len / 2 : h.len, is16, true);
         if (sm.length < (is16 ? h.len / 2 : h.len)) s.loadFlags |= LOAD_TRUNCATED;
         uint32_t ls = h.ls, le = h.le ? h.le - 1 : 0;
         if (is16) ls /= 2, le /= 2;
-        if (le > 2 && ls + 4 < le) setLoop(sm, ls, le);
+        if (le > 2 && ls + 4 < le) pcLoop(sm, ls, le);
     }
     if (s.patterns.empty()) s.patterns.push_back(makePattern(64, s.numChannels));
     if (s.order.empty()) s.order.push_back(0);
@@ -343,7 +345,7 @@ Result<Song> c669Load(const uint8_t* data, size_t size) {
     s.freqMode = FreqMode::Amiga;
     s.initialSpeed = 4;
     s.initialBpm = 78;  // Composer 669 plays at 78 BPM
-    copyName(s.name, data + 2, 20, 20);
+    pcName(s.name, data + 2, 20, 20);
     for (int i = 0; i < 8; ++i) s.channelPan[i] = (i & 1) ? 0xD0 : 0x30;
     for (int i = 0; i < 128; ++i)
         if (data[0x71 + i] < 128) s.order.push_back(data[0x71 + i]);
@@ -359,7 +361,7 @@ Result<Song> c669Load(const uint8_t* data, size_t size) {
         s.samples[i].hasPan = false;
         uint8_t nm[13];
         r.bytes(nm, 13);
-        copyName(s.samples[i].name, nm, 13, 22);
+        pcName(s.samples[i].name, nm, 13, 22);
         hdr[i] = {r.u32le(), r.u32le(), r.u32le()};
     }
     for (int p = 0; p < numPatterns; ++p) {
@@ -401,9 +403,9 @@ Result<Song> c669Load(const uint8_t* data, size_t size) {
     }
     for (int i = 0; i < numSamples; ++i) {
         Sample& sm = s.samples[i];
-        readPcm(r, sm, hdr[i].len > (1u << 26) ? (1u << 26) : hdr[i].len, false, true);
+        pcReadPcm(r, sm, hdr[i].len > (1u << 26) ? (1u << 26) : hdr[i].len, false, true);
         if (sm.length < hdr[i].len) s.loadFlags |= LOAD_TRUNCATED;
-        if (hdr[i].le && !(hdr[i].le > sm.length && hdr[i].ls == 0)) setLoop(sm, hdr[i].ls, hdr[i].le);
+        if (hdr[i].le && !(hdr[i].le > sm.length && hdr[i].ls == 0)) pcLoop(sm, hdr[i].ls, hdr[i].le);
     }
     if (s.patterns.empty()) s.patterns.push_back(makePattern(64, 8));
     if (s.order.empty()) s.order.push_back(0);
