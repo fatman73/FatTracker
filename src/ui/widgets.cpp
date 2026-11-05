@@ -30,8 +30,8 @@ void drawCounter(Ui& u, RectF r, const char* label, const char* value, bool edit
     }
 }
 
-// ProTracker-style VU bar: the colour depends on the height (green at the bottom, yellow,
-// red at the top) and the bar is shaded like a cylinder (dark edges, glossy highlight).
+// ProTracker-style VU bar: a flat bar whose colour depends on the height
+// (green at the bottom, yellow, red at the top).
 void drawVu(Gfx& g, const Theme& t, RectF r, float level, float alpha) {
     if (level <= 0.001f) return;
     if (level > 1.f) level = 1.f;
@@ -48,11 +48,6 @@ void drawVu(Gfx& g, const Theme& t, RectF r, float level, float alpha) {
         float y0 = bottom - s.to * r.h, y1 = bottom - s.from * r.h;
         g.fillRoundGradientV({r.x, y0, r.w, y1 - y0}, 0.f, withAlpha(s.hi, alpha), withAlpha(s.lo, alpha));
     }
-    const Color edge = {0, 0, 0, 0.5f * alpha}, clear = {0, 0, 0, 0};
-    g.fillGradientH({r.x, lit.y, r.w * 0.5f, lit.h}, edge, clear);
-    g.fillGradientH({r.x + r.w * 0.5f, lit.y, r.w * 0.5f, lit.h}, clear, edge);
-    g.fillGradientH({r.x + r.w * 0.2f, lit.y, r.w * 0.18f, lit.h}, {1, 1, 1, 0}, {1, 1, 1, 0.4f * alpha});
-    g.fillGradientH({r.x + r.w * 0.38f, lit.y, r.w * 0.18f, lit.h}, {1, 1, 1, 0.4f * alpha}, {1, 1, 1, 0});
     g.popClip();
 }
 
