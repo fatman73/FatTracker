@@ -3,6 +3,7 @@
 namespace {
 constexpr float kCellGlyphs = 11.75f;  // 10 glyphs + 3 gaps of 0.25 + 1 glyph margin
 constexpr float kRowNumGlyphs = 3.5f;
+constexpr float kDenseGlyphs = 11.25f;  // full cell with a half-glyph margin (32-channel view)
 constexpr float kMaxGlyph = 13.f;  // max character advance (logical units)
 const char kHex[] = "0123456789ABCDEF";
 }  // namespace
@@ -10,15 +11,18 @@ const char kHex[] = "0123456789ABCDEF";
 PatternLayout computePatternLayout(int viewMode, int numChannels, int firstChannel, float areaW) {
     PatternLayout l{};
     if (numChannels < 1) numChannels = 1;
-    l.visible = viewMode < numChannels ? viewMode : numChannels;
-    if (l.visible < 1) l.visible = 1;
-    float g = areaW / (l.visible * kCellGlyphs + kRowNumGlyphs);
+    // the view always shows `viewMode` columns; columns past the song's channels stay empty
+    l.visible = viewMode < 1 ? 1 : viewMode;
+    // the 32-channel view uses a tighter margin so the font can stay a little larger
+    const float cellGlyphs = viewMode >= 32 ? kDenseGlyphs : kCellGlyphs;
+    float g = areaW / (l.visible * cellGlyphs + kRowNumGlyphs);
     l.glyph = g > kMaxGlyph ? kMaxGlyph : g;
     l.rowNumW = kRowNumGlyphs * l.glyph;
     // columns share the full width; the cell text is centered inside its column
     l.chanW = (areaW - l.rowNumW) / l.visible;
     l.gap = 0.25f * l.glyph;
     int maxFirst = numChannels - l.visible;
+    if (maxFirst < 0) maxFirst = 0;
     l.firstChannel = firstChannel < 0 ? 0 : (firstChannel > maxFirst ? maxFirst : firstChannel);
     return l;
 }

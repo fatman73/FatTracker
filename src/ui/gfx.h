@@ -42,6 +42,8 @@ public:
     void panel(RectF r, const Theme& t, PanelState s);       // raised, rounded, soft gradient
     void well(RectF r, const Theme& t, Color fill);          // sunken field (values, scopes, pattern)
     void fillRoundGradientV(RectF r, float radius, Color top, Color bottom);
+    void fillGradientH(RectF r, Color left, Color right);
+    void fillGradient(RectF r, float radius, Color c0, Color c1, bool horizontal);
     void beginGlow();
     void endGlow(float radiusLogical, float strength);
     void pushClip(RectF r);

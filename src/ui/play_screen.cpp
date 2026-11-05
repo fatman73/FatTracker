@@ -1,4 +1,4 @@
-﻿#include "ui/play_screen.h"
+#include "ui/play_screen.h"
 
 #include <cstdio>
 #include <cstring>
@@ -23,7 +23,7 @@ const char* const kSideButtons[] = {"INSERT", "CUT",     "DELETE", "COPY",    "C
 const char* const kCounterLabels[10] = {"POS",    "PATTERN", "LENGTH", "FINETUNE", "SAMPLE",
                                         "VOLUME", "LENGTH",  "REPEAT", "REPLEN",   "CHANNELS"};
 const bool kCounterEditable[10] = {true, true, false, true, true, true, false, true, true, true};
-constexpr int kViewModes[3] = {4, 8, 16};
+constexpr int kViewModes[4] = {4, 8, 16, 32};
 
 // hit ids
 constexpr int H_BUTTON = 0, H_ARROW = 100, H_VIEW = 200;
@@ -41,8 +41,8 @@ PlayScreen::Layout PlayScreen::layout(const Viewport& vp) const {
     l.scopeGrid = {l.scopes.x + 10, l.scopes.y + 10, l.scopes.w - 20, l.scopes.h - 70};
     l.info = {M, M + kTopH + G, l.W - 2 * M, kInfoH};
     const float py = l.info.y + kInfoH + G;
-    const bool side = viewMode_ < 16;
-    l.pattern = {M, py, l.W - 2 * M - (side ? kSideW + G : 0.f), l.H - py - M};
+    // the side panel is always visible; the pattern takes the rest of the width
+    l.pattern = {M, py, l.W - 2 * M - kSideW - G, l.H - py - M};
     l.side = {l.W - M - kSideW, py, kSideW, l.H - py - M};
     return l;
 }
@@ -58,7 +58,7 @@ RectF PlayScreen::buttonRect(int i) const {
 }
 
 RectF PlayScreen::viewButton(int i) const {
-    return {L_.info.x + L_.info.w - 10 - (3 - i) * 58.f, L_.info.y + 5, 52.f, 30.f};
+    return {L_.info.x + L_.info.w - 10 - (4 - i) * 58.f, L_.info.y + 5, 52.f, 30.f};
 }
 
 int PlayScreen::hitId(float x, float y) const {
@@ -67,7 +67,7 @@ int PlayScreen::hitId(float x, float y) const {
     for (int r = 0; r < 10; ++r)
         for (int k = 0; k < 2; ++k)
             if (counterArrow(counterRow(r), k).contains(x, y)) return H_ARROW + r * 2 + k;
-    for (int i = 0; i < 3; ++i)
+    for (int i = 0; i < 4; ++i)
         if (viewButton(i).contains(x, y)) return H_VIEW + i;
     return -1;
 }
@@ -84,7 +84,7 @@ void PlayScreen::songChanged() {
     viewRow_ = viewPattern_ = viewOrder_ = sample_ = firstChannel_ = 0;
 }
 
-void PlayScreen::setViewMode(int m) { viewMode_ = (m == 4 || m == 16) ? m : 8; }
+void PlayScreen::setViewMode(int m) { viewMode_ = (m == 4 || m == 16 || m == 32) ? m : 8; }
 
 PatternCtx PlayScreen::ctx(const Song* s, const Telemetry& tel) const {
     PatternCtx c{};
@@ -151,17 +151,19 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
         if ((i == B_PLAY && tel.playing) || (i == B_STOP && !tel.playing && false)) st = Gfx::PanelState::Active;
         drawButton(u, buttonRect(i), kButtons[i], st, 19.f);
     }
-    g.well(L_.logo, t, t.patternBg);
+    g.well(L_.logo, t, mixColor(t.panelLight, t.panel, 0.25f));
+    tx.draw(g, {L_.logo.x, L_.logo.y + 8, L_.logo.w, 64}, "FATTRACKER", 54.f, t.digits, Align::Center);
 
     // ---------- scopes ----------
     g.panel(L_.scopes, t, Gfx::PanelState::Normal);
     const int nch = s ? s->numChannels : 4;
-    const int nScopes = viewMode_ < nch ? viewMode_ : nch;
-    const int first = computePatternLayout(viewMode_, nch, firstChannel_, 1.f).firstChannel;
+    // one scope per song channel (up to 32), independent of the pattern view
+    const int nScopes = nch;
+    const int first = 0;
     const int cols = nScopes <= 4 ? nScopes : (nScopes <= 8 ? 4 : 8);
     const int rows = (nScopes + cols - 1) / cols;
     const float cw = L_.scopeGrid.w / cols, chh = L_.scopeGrid.h / rows;
-    RectF scopeRects[16];
+    RectF scopeRects[32];
     for (int i = 0; i < nScopes; ++i) {
         scopeRects[i] = {L_.scopeGrid.x + (i % cols) * cw + 3, L_.scopeGrid.y + (i / cols) * chh + 3, cw - 6, chh - 6};
         drawScopeBg(g, t, scopeRects[i]);
@@ -195,7 +197,7 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     std::snprintf(buf, sizeof buf, "TEMPO %02u   BPM %03u", tel.speed, tel.bpm);
     tx.draw(g, {L_.info.x + 560, y1, 300, rowH}, buf, 16.f, t.label, Align::Left, FontRole::Mono);
     tx.draw(g, {viewButton(0).x - 90, y1, 84, rowH}, "VIEW", 15.f, t.label, Align::Right);
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         Gfx::PanelState vs = viewMode_ == kViewModes[i] ? Gfx::PanelState::Active
                              : hover_ == H_VIEW + i       ? Gfx::PanelState::Hover
                                                           : Gfx::PanelState::Normal;
@@ -223,7 +225,7 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
 
     // ---------- pattern + side panel ----------
     pattern_.drawBack(g, tx, f, t, L_.pattern, pc);
-    if (viewMode_ < 16) {
+    {
         g.panel(L_.side, t, Gfx::PanelState::Normal);
         std::snprintf(buf, sizeof buf, "\x03 %02u \x04     \x03 %03u \x04", (unsigned)pc.pattern, tel.bpm);
         RectF hdr = {L_.side.x + 8, L_.side.y + 8, L_.side.w - 16, 34};
@@ -238,7 +240,6 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
 
     // ---------- glowing layer: logo, scope lines, VU meters ----------
     g.beginGlow();
-    tx.draw(g, {L_.logo.x, L_.logo.y + 8, L_.logo.w, 64}, "FATTRACKER", 54.f, t.patternText, Align::Center);
     for (int i = 0; i < nScopes; ++i) {
         e.scope(first + i, scopeBuf_, 256);
         drawScopeLine(g, t, scopeRects[i], scopeBuf_, 256);
@@ -246,7 +247,7 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     pattern_.drawMeters(g, f, t, L_.pattern, pc);
     g.endGlow(7.f, t.glow);
     tx.draw(g, {L_.logo.x, L_.logo.y + 72, L_.logo.w, 30}, "32 CHANNELS   \xB7   16 BIT   \xB7   V0.2", 14.f,
-            t.rowNumber, Align::Center);
+            t.panelDark, Align::Center);
 
     pattern_.drawText(g, f, t, L_.pattern, pc);
 
@@ -360,7 +361,7 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
             return UiAction::Redraw;
         case VK_F11:
             if (repeat) return UiAction::None;
-            viewMode_ = viewMode_ == 4 ? 8 : (viewMode_ == 8 ? 16 : 4);
+            viewMode_ = viewMode_ == 4 ? 8 : (viewMode_ == 8 ? 16 : (viewMode_ == 16 ? 32 : 4));
             return UiAction::Redraw;
         case VK_TAB:
             firstChannel_ += shift ? -1 : 1;
@@ -430,7 +431,7 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
         counterStep(row, (h - H_ARROW) % 2 == 0 ? 1 : -1, right, e);
         return UiAction::Redraw;
     }
-    if (h >= H_VIEW && h < H_VIEW + 3) {
+    if (h >= H_VIEW && h < H_VIEW + 4) {
         viewMode_ = kViewModes[h - H_VIEW];
         firstChannel_ = computePatternLayout(viewMode_, e.song() ? e.song()->numChannels : 4, firstChannel_, 1.f)
                             .firstChannel;

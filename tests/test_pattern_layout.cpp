@@ -22,14 +22,28 @@ TEST(pattern_layout_16ch) {
     CHECK(l.glyph >= 9.5f && l.glyph <= 10.5f);
 }
 
+TEST(pattern_layout_32ch_full_cells) {
+    // all 32 channels with complete cells (note, sample, volume, effect), smaller font
+    auto l = computePatternLayout(32, 32, 0, 1900);
+    CHECK_EQ(l.visible, 32);
+    CHECK(l.glyph >= 4.9f && l.glyph < 6.f);
+    CHECK(l.chanW >= 10.75f * l.glyph);  // a full cell fits in its column
+    CHECK_NEAR(l.rowNumW + 32 * l.chanW, 1900, 1e-2);
+}
+
 TEST(pattern_layout_clamp_first) {
     auto l = computePatternLayout(8, 12, 10, 1660);
     CHECK_EQ(l.firstChannel, 4);
 }
 
-TEST(pattern_layout_fewer_channels) {
+TEST(pattern_layout_view_shows_n_columns) {
+    // the chosen view always shows that many columns, even if the song has fewer channels
     auto l = computePatternLayout(16, 6, 0, 1920);
-    CHECK_EQ(l.visible, 6);
+    CHECK_EQ(l.visible, 16);
+    CHECK_EQ(l.firstChannel, 0);
+    auto l32 = computePatternLayout(32, 8, 5, 1920);
+    CHECK_EQ(l32.visible, 32);
+    CHECK_EQ(l32.firstChannel, 0);
 }
 
 TEST(pattern_cell_text) {
