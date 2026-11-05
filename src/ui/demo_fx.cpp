@@ -149,7 +149,6 @@ void DemoFx::sineScroller(double t) {
             px_[(size_t)y * W + x] = rgbOf(r, g, b);
         }
     }
-    for (int x = 0; x < W; ++x) px_[(size_t)kWater * W + x] = rgbOf(140, 180, 255);  // the water line
 }
 
 // ---- 3. starfield: stars fly out of the centre of the screen
@@ -173,6 +172,7 @@ void DemoFx::starfield(double t) {
         put((int)px, (int)py, rgbOf(v, v, v));
         if (s.z < 0.35f) put((int)px + 1, (int)py, rgbOf(v, v, v));  // close stars are bigger
     }
+    wireLogo(t);
 }
 
 // ---- 4. glenz vectors: a see-through rotating object, back faces dark, front faces bright
@@ -233,6 +233,7 @@ void DemoFx::glenz(double t) {
             triangle(m[2], m[1], c, (f & 1) ? c2 : c1, al);
             triangle(m[0], m[1], m[2], (f & 1) ? c1 : c2, al);
         }
+    flyingText(t);
 }
 
 // ---- 5. plasma
@@ -242,5 +243,141 @@ void DemoFx::plasma(double t) {
             const double v = std::sin(x * 0.045 + t) + std::sin(y * 0.11 - t * 1.3) +
                              std::sin((x + y) * 0.03 + t * 0.7) + std::sin(std::sqrt((x - 160.0) * (x - 160.0) + (y - 30.0) * (y - 30.0) * 9) * 0.05 - t * 2);
             px_[(size_t)y * W + x] = copper(v / 8.0 + t * 0.05, 0.85);
+        }
+    plasmaText(t);
+}
+
+// ---- extra demo parts: lines, the 3D wireframe logo, flying and cut-out texts
+
+void DemoFx::line(int x0, int y0, int x1, int y1, uint32_t c) {
+    const int dx = std::abs(x1 - x0), dy = -std::abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    for (int guard = 0; guard < 2000; ++guard) {
+        put(x0, y0, c);
+        if (x0 == x1 && y0 == y1) break;
+        const int e2 = 2 * err;
+        if (e2 >= dy) {
+            err += dy;
+            x0 += sx;
+        }
+        if (e2 <= dx) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+void DemoFx::wireLogo(double t) {
+    static const char* const kLogo = "FATTRACKER";
+    const int n = (int)std::strlen(kLogo);
+    if (logoEdges_.empty()) {  // outline of every glyph pixel block, plus the corners for depth lines
+        auto on = [&](int i, int c, int r) {
+            if (c < 0 || c > 6 || r < 0 || r > 6) return false;
+            return (amigaGlyph(kLogo[i])[r] & (0x40 >> c)) != 0;
+        };
+        for (int i = 0; i < n; ++i)
+            for (int r = 0; r < 7; ++r)
+                for (int c = 0; c < 7; ++c) {
+                    if (!on(i, c, r)) continue;
+                    const float x = (float)(i * 8 + c), y = (float)r;
+                    const bool u = on(i, c, r - 1), d = on(i, c, r + 1), l = on(i, c - 1, r), rt = on(i, c + 1, r);
+                    if (!u) logoEdges_.push_back({x, y, x + 1, y});
+                    if (!d) logoEdges_.push_back({x, y + 1, x + 1, y + 1});
+                    if (!l) logoEdges_.push_back({x, y, x, y + 1});
+                    if (!rt) logoEdges_.push_back({x + 1, y, x + 1, y + 1});
+                    if (!u && !l) logoCorners_.insert(logoCorners_.end(), {x, y});
+                    if (!u && !rt) logoCorners_.insert(logoCorners_.end(), {x + 1, y});
+                    if (!d && !l) logoCorners_.insert(logoCorners_.end(), {x, y + 1});
+                    if (!d && !rt) logoCorners_.insert(logoCorners_.end(), {x + 1, y + 1});
+                }
+    }
+    const float cx = n * 8 / 2.f, cy = 3.5f, depth = 1.6f;
+    const double ay = std::sin(t * 0.55) * 1.1, ax = std::sin(t * 0.8) * 0.35, az = std::sin(t * 0.37) * 0.15;
+    const double zoom = 1.0 + 0.12 * std::sin(t * 1.7);
+    auto project = [&](float mx, float my, float mz, int& sx, int& sy) {
+        const double x = mx - cx, y = (my - cy) * 1.25, z = mz;
+        const double x1 = x * std::cos(az) - y * std::sin(az), y1 = x * std::sin(az) + y * std::cos(az);
+        const double y2 = y1 * std::cos(ax) - z * std::sin(ax), z2 = y1 * std::sin(ax) + z * std::cos(ax);
+        const double x3 = x1 * std::cos(ay) + z2 * std::sin(ay), z3 = -x1 * std::sin(ay) + z2 * std::cos(ay);
+        const double persp = 70.0 / (70.0 + z3);
+        sx = (int)std::lround(W / 2 + x3 * 3.4 * persp * zoom);
+        sy = (int)std::lround(H / 2 + y2 * 5.2 * persp * zoom);
+    };
+    const uint32_t back = rgbOf(30, 70, 160), mid = rgbOf(60, 140, 220);
+    const uint32_t front = copper(0.55 + 0.1 * std::sin(t * 0.9));
+    for (const Edge& e : logoEdges_) {  // back outline
+        int a0, b0, a1, b1;
+        project(e.x0, e.y0, depth, a0, b0);
+        project(e.x1, e.y1, depth, a1, b1);
+        line(a0, b0, a1, b1, back);
+    }
+    for (size_t k = 0; k + 1 < logoCorners_.size(); k += 2) {  // depth lines
+        int a0, b0, a1, b1;
+        project(logoCorners_[k], logoCorners_[k + 1], -depth, a0, b0);
+        project(logoCorners_[k], logoCorners_[k + 1], depth, a1, b1);
+        line(a0, b0, a1, b1, mid);
+    }
+    for (const Edge& e : logoEdges_) {  // front outline
+        int a0, b0, a1, b1;
+        project(e.x0, e.y0, -depth, a0, b0);
+        project(e.x1, e.y1, -depth, a1, b1);
+        line(a0, b0, a1, b1, front);
+    }
+}
+
+void DemoFx::flyingText(double t) {
+    // every 12 seconds the logo flies from right to left for 6 seconds
+    const double phase = std::fmod(t, 12.0);
+    if (phase < 5.0 || phase > 11.0) return;
+    const double p = (phase - 5.0) / 6.0;
+    static const char* const kText = "FATTRACKER";
+    const int n = (int)std::strlen(kText), sx = 3, sy = 3, cw = 8 * sx;
+    const int x0 = (int)(W - p * (W + n * cw));
+    for (int i = 0; i < n; ++i) {
+        const int x = x0 + i * cw;
+        if (x > W || x + cw < 0) continue;
+        const int y = 14 + (int)(std::sin(t * 4.0 + i * 0.7) * 12);
+        const uint8_t* g = amigaGlyph(kText[i]);
+        for (int r = 0; r < 7; ++r)
+            for (int b = 0; b < 7; ++b)
+                if (g[r] & (0x40 >> b))
+                    for (int yy = 0; yy < sy; ++yy)
+                        for (int xx = 0; xx < sx; ++xx) {
+                            const int px = x + b * sx + xx, py = y + r * sy + yy;
+                            put(px + 2, py + 2, rgbOf(0, 0, 30));                   // shadow
+                            put(px, py, copper(py / 30.0 + t * 0.7 + i * 0.05));  // copper coloured letters
+                        }
+    }
+}
+
+void DemoFx::plasmaText(double t) {
+    // the logo pulses in for 6 of every 10 seconds, cut out of the plasma (inverted colours, dark rim)
+    const double phase = std::fmod(t + 2.0, 10.0);
+    if (phase > 6.0) return;
+    static const char* const kText = "FATTRACKER";
+    const int n = (int)std::strlen(kText);
+    const double fade = std::min(1.0, std::min(phase, 6.0 - phase) / 0.8);
+    const double scale = (0.85 + 0.12 * std::sin(t * 2.4)) * (0.4 + 0.6 * fade);
+    const double sxs = scale * 3.6, sys = scale * 6.0;
+    const double w = n * 8 * sxs, h = 7 * sys;
+    const double ox = (W - w) / 2, oy = (H - h) / 2 + std::sin(t * 1.3) * 3;
+    static std::vector<uint8_t> mask;
+    mask.assign((size_t)W * H, 0);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            const double gx = (x - ox) / sxs, gy = (y - oy) / sys;
+            if (gx < 0 || gy < 0 || gx >= n * 8 || gy >= 7) continue;
+            const int i = (int)gx / 8, c = (int)gx % 8, r = (int)gy;
+            if (c < 7 && (amigaGlyph(kText[i])[r] & (0x40 >> c))) mask[(size_t)y * W + x] = 1;
+        }
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            uint32_t& d = px_[(size_t)y * W + x];
+            if (mask[(size_t)y * W + x]) {
+                d = 0xFF000000u | (~d & 0xFFFFFF);  // inverted plasma inside the letters
+            } else if ((x > 0 && mask[(size_t)y * W + x - 1]) || (x + 1 < W && mask[(size_t)y * W + x + 1]) ||
+                       (y > 0 && mask[(size_t)(y - 1) * W + x]) || (y + 1 < H && mask[(size_t)(y + 1) * W + x])) {
+                d = rgbOf(0, 0, 0);  // dark rim around the letters
+            }
         }
 }

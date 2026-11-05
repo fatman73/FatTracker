@@ -30,6 +30,15 @@ private:
     void blend(int x, int y, uint32_t c, int alpha256);
     void bigText(int x, int y, const char* s, int scaleX, int scaleY, const uint32_t* rowColors, int clipBottom);
     void triangle(const float* a, const float* b, const float* c, uint32_t color, int alpha256);
+    void line(int x0, int y0, int x1, int y1, uint32_t c);
+    void wireLogo(double t);    // starfield: the FATTRACKER logo as a rotating 3D wireframe
+    void flyingText(double t);  // glenz: the logo flies through, letters bouncing on a sine
+    void plasmaText(double t);  // plasma: a pulsing logo cut out of the plasma
+    struct Edge {
+        float x0, y0, x1, y1;
+    };
+    std::vector<Edge> logoEdges_;     // outline of the logo glyphs (model space, built once)
+    std::vector<float> logoCorners_;  // x, y pairs where the outline turns (depth lines)
 
     std::vector<uint32_t> px_;
     int effect_ = SineScroller;

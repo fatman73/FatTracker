@@ -121,7 +121,7 @@ void loadFloppySounds() {
 // TFMX songs are two files: mdat.<name> (song) and smpl.<name> (samples), or .mdat/.smpl, .tfx/.sam.
 // Either one may be chosen; returns false when this is not TFMX at all.
 bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
-    const size_t slash = path.find_last_of(L"\/");
+    const size_t slash = path.find_last_of(L"\\/");
     const std::wstring dir = slash == std::wstring::npos ? L"" : path.substr(0, slash + 1);
     const std::wstring file = slash == std::wstring::npos ? path : path.substr(slash + 1);
     std::wstring mdatPath = path, smplPath;
