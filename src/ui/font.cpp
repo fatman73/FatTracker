@@ -102,41 +102,47 @@ Font::Atlas* Font::atlasFor(Gfx& g, int cellPx) {
     return victim;
 }
 
-float Font::drawText(Gfx& g, float x, float y, float size, const char* s, Color c) {
+void Font::drawGlyphs(Gfx& g, const Glyph* glyphs, int count, float size) {
     const Viewport& vp = g.viewport();
-    const float endX = x + advance(size) * (float)lstrlenA(s);
-    if (vp.scale <= 0 || !*s) return endX;
+    if (vp.scale <= 0 || count <= 0) return;
     int cellPx = (int)std::lround(size * vp.scale);
     if (cellPx < 4) cellPx = 4;
     Atlas* a = atlasFor(g, cellPx);
-    if (!a) return endX;
+    if (!a) return;
     ID2D1DeviceContext* dc = g.dc();
     ID2D1DeviceContext3* dc3 = nullptr;
-    if (FAILED(dc->QueryInterface(__uuidof(ID2D1DeviceContext3), (void**)&dc3))) return endX;
+    if (FAILED(dc->QueryInterface(__uuidof(ID2D1DeviceContext3), (void**)&dc3))) return;
     if (!batch_) dc3->CreateSpriteBatch(&batch_);
     if (!batch_) {
         dc3->Release();
-        return endX;
+        return;
     }
     batch_->Clear();
     const int pitch = cellPx + 2 * kPad;
-    D2D1_RECT_F dst[256];
-    D2D1_RECT_U src[256];
+    constexpr int kChunk = 512;
+    D2D1_RECT_F dst[kChunk];
+    D2D1_RECT_U src[kChunk];
+    D2D1_COLOR_F col[kChunk];
     int n = 0;
-    const float step = advance(size) * vp.scale;
-    const float dy = std::floor(vp.offY + y * vp.scale + 0.5f);
-    for (int i = 0; s[i] && n < 256; ++i) {
-        unsigned char ch = (unsigned char)s[i];
+    auto flush = [&]() {
+        if (n) batch_->AddSprites((UINT32)n, dst, src, col, nullptr, sizeof(D2D1_RECT_F), sizeof(D2D1_RECT_U),
+                                  sizeof(D2D1_COLOR_F), 0);
+        n = 0;
+    };
+    for (int i = 0; i < count; ++i) {
+        const Glyph& gl = glyphs[i];
+        unsigned char ch = (unsigned char)gl.ch;
         if (ch == ' ' || ch >= 128) continue;
-        const float dx = std::floor(vp.offX + x * vp.scale + i * step + 0.5f);
+        const float dx = std::floor(vp.offX + gl.x * vp.scale + 0.5f);
+        const float dy = std::floor(vp.offY + gl.y * vp.scale + 0.5f);
         const UINT32 sx = (UINT32)((ch % kCols) * pitch), sy = (UINT32)((ch / kCols) * pitch);
         src[n] = {sx, sy, sx + (UINT32)pitch, sy + (UINT32)pitch};
         dst[n] = {dx - kPad, dy - kPad, dx - kPad + pitch, dy - kPad + pitch};
-        ++n;
+        col[n] = {gl.c.r, gl.c.g, gl.c.b, gl.c.a};
+        if (++n == kChunk) flush();
     }
-    if (n) {
-        D2D1_COLOR_F col = {c.r, c.g, c.b, c.a};
-        batch_->AddSprites((UINT32)n, dst, src, &col, nullptr, sizeof(D2D1_RECT_F), sizeof(D2D1_RECT_U), 0, 0);
+    flush();
+    if (batch_->GetSpriteCount()) {
         D2D1_MATRIX_3X2_F xf;
         dc->GetTransform(&xf);
         D2D1_ANTIALIAS_MODE aa = dc->GetAntialiasMode();
@@ -148,5 +154,12 @@ float Font::drawText(Gfx& g, float x, float y, float size, const char* s, Color 
         dc->SetTransform(xf);
     }
     dc3->Release();
-    return endX;
+}
+
+float Font::drawText(Gfx& g, float x, float y, float size, const char* s, Color c) {
+    Glyph buf[256];
+    int n = 0;
+    for (int i = 0; s[i] && n < 256; ++i) buf[n++] = {x + i * advance(size), y, s[i], c};
+    drawGlyphs(g, buf, n, size);
+    return x + advance(size) * (float)n;
 }

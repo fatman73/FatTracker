@@ -6,9 +6,17 @@
 
 #include "ui/gfx.h"
 
+struct Glyph {
+    float x, y;  // logical
+    char ch;
+    Color c;
+};
+
 class Font {
 public:
     ~Font();
+    // Many glyphs of one size in a single sprite batch (used by the pattern view).
+    void drawGlyphs(Gfx& g, const Glyph* glyphs, int n, float size);
     // x, y, size in logical units; size = height of the 8x8 cell. Returns the end x.
     float drawText(Gfx& g, float x, float y, float size, const char* s, Color c);
     float advance(float size) const { return size; }
