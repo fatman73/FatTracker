@@ -245,7 +245,9 @@ void Gfx::strokeRect(RectF r, Color c, float width) {
     dc_->DrawRectangle({r.x + h, r.y + h, r.x + r.w - h, r.y + r.h - h}, brush(c), width);
 }
 
-void Gfx::fillGradientV(RectF r, Color top, Color bottom) {
+void Gfx::fillGradientV(RectF r, Color top, Color bottom) { fillRoundGradientV(r, 0.f, top, bottom); }
+
+void Gfx::fillRoundGradientV(RectF r, float radius, Color top, Color bottom) {
     uint32_t k0 = pack(top), k1 = pack(bottom);
     ID2D1GradientStopCollection* stops = nullptr;
     for (auto& g : grad_)
@@ -260,9 +262,22 @@ void Gfx::fillGradientV(RectF r, Color top, Color bottom) {
     }
     ID2D1LinearGradientBrush* lb = nullptr;
     if (SUCCEEDED(dc_->CreateLinearGradientBrush({{r.x, r.y}, {r.x, r.y + r.h}}, stops, &lb))) {
-        dc_->FillRectangle(drect(r), lb);
+        if (radius > 0)
+            dc_->FillRoundedRectangle({drect(r), radius, radius}, lb);
+        else
+            dc_->FillRectangle(drect(r), lb);
         lb->Release();
     }
+}
+
+void Gfx::well(RectF r, const Theme& t, Color fill) {
+    const float rad = t.corner;
+    dc_->FillRoundedRectangle({drect(r), rad, rad}, brush(fill));
+    // inner shadow along the top edge, light rim along the bottom
+    fillRoundGradientV({r.x + 1, r.y + 1, r.w - 2, 6.f}, 0.f, withAlpha({0, 0, 0, 1}, 0.35f), {0, 0, 0, 0});
+    dc_->DrawRoundedRectangle({{r.x + 0.5f, r.y + 0.5f, r.x + r.w - 0.5f, r.y + r.h - 0.5f}, rad, rad},
+                              brush(withAlpha(t.panelDark, 0.9f)), 1.f);
+    line(r.x + rad, r.y + r.h + 0.5f, r.x + r.w - rad, r.y + r.h + 0.5f, withAlpha(t.panelLight, 0.7f), 1.f);
 }
 
 void Gfx::line(float x0, float y0, float x1, float y1, Color c, float width) {
@@ -285,20 +300,34 @@ void Gfx::polyline(const float* xy, int points, Color c, float width) {
     geo->Release();
 }
 
-void Gfx::bevel(RectF r, const Theme& t, bool pressed) {
-    const float g = t.bevelGradient;
-    if (g > 0)
-        fillGradientV(r, mixColor(t.panel, t.panelLight, g * (pressed ? 0.1f : 0.45f)),
-                      mixColor(t.panel, t.panelDark, g * (pressed ? 0.1f : 0.35f)));
-    else
-        fillRect(r, t.panel);
-    const float e = 2.f;
-    Color hi = pressed ? t.panelDark : t.panelLight;
-    Color lo = pressed ? t.panelLight : t.panelDark;
-    fillRect({r.x, r.y, r.w, e}, hi);
-    fillRect({r.x, r.y, e, r.h}, hi);
-    fillRect({r.x, r.y + r.h - e, r.w, e}, lo);
-    fillRect({r.x + r.w - e, r.y, e, r.h}, lo);
+void Gfx::bevel(RectF r, const Theme& t, bool pressed) { panel(r, t, pressed ? PanelState::Pressed : PanelState::Normal); }
+
+void Gfx::panel(RectF r, const Theme& t, PanelState s) {
+    const float rad = t.corner, g = t.bevelGradient;
+    Color top, bot;
+    switch (s) {
+        case PanelState::Pressed:
+            top = mixColor(t.panel, t.panelDark, 0.35f * g + 0.1f);
+            bot = mixColor(t.panel, t.panelLight, 0.2f * g);
+            break;
+        case PanelState::Hover:
+            top = mixColor(t.panel, t.panelLight, 0.85f * g + 0.1f);
+            bot = mixColor(t.panel, t.panelLight, 0.15f);
+            break;
+        case PanelState::Active:
+            top = mixColor(t.digits, t.panelLight, 0.55f);
+            bot = mixColor(t.digits, t.panelLight, 0.2f);
+            break;
+        default:
+            top = mixColor(t.panel, t.panelLight, 0.65f * g + 0.05f);
+            bot = mixColor(t.panel, t.panelDark, 0.25f * g);
+            break;
+    }
+    fillRoundGradientV(r, rad, top, bot);
+    if (s != PanelState::Pressed)
+        line(r.x + rad, r.y + 1.5f, r.x + r.w - rad, r.y + 1.5f, withAlpha(t.panelLight, 0.95f), 1.f);
+    dc_->DrawRoundedRectangle({{r.x + 0.5f, r.y + 0.5f, r.x + r.w - 0.5f, r.y + r.h - 0.5f}, rad, rad},
+                              brush(withAlpha(t.panelDark, 0.75f)), 1.f);
 }
 
 void Gfx::beginGlow() {

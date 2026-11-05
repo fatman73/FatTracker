@@ -1,8 +1,9 @@
-#include "ui/pattern_layout.h"
+﻿#include "ui/pattern_layout.h"
 
 namespace {
 constexpr float kCellGlyphs = 11.75f;  // 10 glyphs + 3 gaps of 0.25 + 1 glyph margin
 constexpr float kRowNumGlyphs = 3.5f;
+constexpr float kMaxGlyph = 13.f;  // max character advance (logical units)
 const char kHex[] = "0123456789ABCDEF";
 }  // namespace
 
@@ -12,9 +13,10 @@ PatternLayout computePatternLayout(int viewMode, int numChannels, int firstChann
     l.visible = viewMode < numChannels ? viewMode : numChannels;
     if (l.visible < 1) l.visible = 1;
     float g = areaW / (l.visible * kCellGlyphs + kRowNumGlyphs);
-    l.glyph = g > 28.f ? 28.f : g;
+    l.glyph = g > kMaxGlyph ? kMaxGlyph : g;
     l.rowNumW = kRowNumGlyphs * l.glyph;
-    l.chanW = kCellGlyphs * l.glyph;
+    // columns share the full width; the cell text is centered inside its column
+    l.chanW = (areaW - l.rowNumW) / l.visible;
     l.gap = 0.25f * l.glyph;
     int maxFirst = numChannels - l.visible;
     l.firstChannel = firstChannel < 0 ? 0 : (firstChannel > maxFirst ? maxFirst : firstChannel);

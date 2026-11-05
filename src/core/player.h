@@ -68,6 +68,7 @@ public:
     uint32_t samplesPerTick() const;
     double periodToHz(int32_t period) const;
     void setMute(int ch, bool m);
+    void songEdited();  // call after changing the song in place (e.g. channel count)
     const ChannelState& channel(int ch) const { return ch_[ch < 0 ? 0 : (ch >= kMaxChannels ? kMaxChannels - 1 : ch)]; }
     const Song* song() const { return song_; }
 

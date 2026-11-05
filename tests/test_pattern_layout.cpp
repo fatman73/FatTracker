@@ -4,13 +4,16 @@
 TEST(pattern_layout_4ch) {
     auto l = computePatternLayout(4, 4, 0, 1660);
     CHECK_EQ(l.visible, 4);
-    CHECK_NEAR(l.glyph, 28, 1e-3);
+    CHECK_NEAR(l.glyph, 13, 1e-3);  // glyph = character advance of the monospace font, capped
+    // columns stretch to use the whole width
+    CHECK_NEAR(l.rowNumW + 4 * l.chanW, 1660, 1e-2);
 }
 
 TEST(pattern_layout_8ch) {
     auto l = computePatternLayout(8, 32, 0, 1660);
     CHECK_EQ(l.visible, 8);
-    CHECK(l.glyph >= 16 && l.glyph <= 18);
+    CHECK_NEAR(l.glyph, 13, 1e-3);
+    CHECK_NEAR(l.rowNumW + 8 * l.chanW, 1660, 1e-2);
 }
 
 TEST(pattern_layout_16ch) {

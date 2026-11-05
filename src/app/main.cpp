@@ -14,6 +14,7 @@
 
 namespace {
 Gfx g_gfx;
+Text g_text;
 Font g_font;
 Engine* g_engine = nullptr;
 PlayScreen g_screen;
@@ -48,7 +49,7 @@ void toggleFullscreen(HWND hwnd) {
 bool drawFrame() {
     const Theme& t = themeHybrid();
     if (!g_gfx.beginFrame(t.background)) return false;
-    g_screen.draw(g_gfx, g_font, t, *g_engine);
+    g_screen.draw(g_gfx, g_text, g_font, t, *g_engine);
     g_gfx.endFrame();
     return true;
 }
@@ -111,10 +112,15 @@ void openFileDialog(HWND hwnd) {
     g_dirty = true;
 }
 
-void mouse(LPARAM lp, bool right) {
+void handle(UiAction a, HWND hwnd) {
+    if (a == UiAction::OpenFile) openFileDialog(hwnd);
+    if (a != UiAction::None) g_dirty = true;
+}
+
+void mouse(HWND hwnd, LPARAM lp, bool right) {
     float lx, ly;
     deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
-    if (g_screen.onMouse(lx, ly, right, *g_engine)) g_dirty = true;
+    handle(g_screen.onMouse(lx, ly, right, *g_engine), hwnd);
 }
 
 LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -139,21 +145,28 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_KEYDOWN: {
             const bool ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0;
             const bool alt = (lp & (1 << 29)) != 0, ext = (lp & (1 << 24)) != 0;
+            const bool repeat = (lp & (1 << 30)) != 0;  // keyboard auto-repeat
             if (ctrl && !alt && wp == 'O') {
-                openFileDialog(hwnd);
+                if (!repeat) openFileDialog(hwnd);
                 return 0;
             }
-            if (g_screen.onKey((unsigned)wp, shift, ctrl, alt, ext, *g_engine)) g_dirty = true;
+            handle(g_screen.onKey((unsigned)wp, shift, ctrl, alt, ext, repeat, *g_engine), hwnd);
             return 0;
         }
         case WM_SYSCHAR:
             return 0;  // no menu beep on Alt combinations
         case WM_LBUTTONDOWN:
-            mouse(lp, false);
+            mouse(hwnd, lp, false);
             return 0;
         case WM_RBUTTONDOWN:
-            mouse(lp, true);
+            mouse(hwnd, lp, true);
             return 0;
+        case WM_MOUSEMOVE: {
+            float lx, ly;
+            deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
+            if (g_screen.onMouseMove(lx, ly)) g_dirty = true;
+            return 0;
+        }
         case WM_DROPFILES: {
             HDROP drop = (HDROP)wp;
             wchar_t file[MAX_PATH];
@@ -165,7 +178,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_TIMER:
             if (wp == kTimerAudio) {
                 g_engine->pollAudio();
-                if (const char* st = g_engine->audioStatus()) g_screen.setStatus(st);
+                if (const char* st = g_engine->audioStatus())
+                    g_screen.setStatus(st);
+                else
+                    g_screen.clearStatusIf("ERROR: NO AUDIO");
             }
             g_dirty = true;
             return 0;
@@ -213,6 +229,8 @@ int screenshotMode() {
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     g_engine = new Engine();
     g_engine->setSong(std::make_unique<Song>(makeEmptySong(4)));
+    g_text.init();
+    g_font.setText(&g_text);
     if (int shot = screenshotMode(); shot >= 0) return shot;
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -241,6 +259,12 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     if (!g_engine->startAudio()) g_screen.setStatus(g_engine->audioStatus());
     SetTimer(hwnd, kTimerAudio, 2000, nullptr);
     SetTimer(hwnd, kTimerClock, 1000, nullptr);
+    {  // FatTracker.exe <module>  (also used by "Open with")
+        int argc = 0;
+        LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (argv && argc >= 2) loadModuleFile(argv[1]);
+        if (argv) LocalFree(argv);
+    }
     ShowWindow(hwnd, show);
 
     MSG m;

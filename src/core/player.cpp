@@ -67,6 +67,13 @@ void Player::setMute(int c, bool m) {
     mixer_.setVolume(c, m ? 0.f : ch_[c].outVol01, ch_[c].outPan01);
 }
 
+void Player::songEdited() {
+    if (!song_) return;
+    mixer_.setNumChannels(song_->numChannels);
+    for (int c = song_->numChannels; c < kMaxChannels; ++c) mixer_.stopVoice(c);
+    if (row_ >= patternRows()) row_ = 0;
+}
+
 uint16_t Player::patternRows() const {
     if (!song_ || pattern_ >= song_->patterns.size()) return 64;
     return song_->patterns[pattern_].rows;

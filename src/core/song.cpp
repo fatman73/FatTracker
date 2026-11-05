@@ -15,6 +15,19 @@ void setDefaultPanning(Song& s) {
     }
 }
 
+void setChannelCount(Song& s, int channels) {
+    if (channels < 4) channels = 4;
+    if (channels > kMaxChannels) channels = kMaxChannels;
+    for (Pattern& p : s.patterns) {
+        Pattern q = makePattern(p.rows, channels);
+        const int keep = p.channels < channels ? p.channels : channels;
+        for (int r = 0; r < p.rows; ++r)
+            for (int c = 0; c < keep; ++c) q.at(r, c) = p.at(r, c);
+        p = static_cast<Pattern&&>(q);
+    }
+    s.numChannels = (uint8_t)channels;
+}
+
 Song makeEmptySong(int channels) {
     Song s;
     s.numChannels = (uint8_t)channels;
