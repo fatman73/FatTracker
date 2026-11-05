@@ -94,3 +94,22 @@ TEST(pure_layout_matches_protracker) {
     CHECK_EQ(track(0).x, 32);
     CHECK_EQ(track(3).x + track(3).w, 316);
 }
+
+TEST(pixel_font_medium_is_six_rows) {
+    // counter values and names: 6 px tall, so they keep a margin inside the 11 px boxes like ProTracker
+    static PixelCanvas c;
+    c.clear(0);
+    c.text(0, 0, "0825", kInk, kMedium);
+    bool row6 = false;
+    for (int x = 0; x < 32; ++x) row6 |= c.at(x, 6) != 0;
+    CHECK(!row6);
+    CHECK(c.at(1, 5) == kInk);  // '0' closes at its bottom
+    CHECK_EQ(glyphRows(kMedium), 6);
+}
+
+TEST(pixel_font_medium_three_keeps_its_middle) {
+    static PixelCanvas c;
+    c.clear(0);
+    c.text(0, 0, "3", kInk, kMedium);
+    CHECK(c.at(4, 2) == kInk);  // the middle stroke of the 3 (without it the 3 reads as a J)
+}

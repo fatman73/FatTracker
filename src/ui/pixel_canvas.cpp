@@ -116,10 +116,17 @@ const GlyphDef kSmallGlyphs[] = {
     {'', {"..###..", "#######", ".#####.", "..###..", "...#..."}},
 };
 
+// 6 px versions drawn by hand where dropping a row would spoil the shape.
+const GlyphDef kMediumGlyphs[] = {
+    {'3', {".####..", "##..##.", "...###.", "....##.", "##..##.", ".####.."}},
+    {'S', {".####..", "##.....", ".####..", "....##.", "##..##.", ".####.."}},
+};
+
 struct FontTables {
     uint8_t full[128][7] = {};
     uint8_t small[128][5] = {};
     uint8_t tall[128][9] = {};
+    uint8_t medium[128][6] = {};
     FontTables() {
         for (const GlyphDef& g : kGlyphs) {
             uint8_t* r = full[(unsigned char)g.c];
@@ -143,6 +150,15 @@ struct FontTables {
                 --n;
             }
             for (int y = 0; y < 5; ++y) small[(unsigned char)g.c][y] = tmp[y];
+            // 6-row version: drop the first repeated row, else the middle one
+            int drop = 3;
+            for (int y = 1; y < 6; ++y)
+                if (r[y] == r[y + 1]) {
+                    drop = y;
+                    break;
+                }
+            for (int y = 0, k = 0; y < 7; ++y)
+                if (y != drop) medium[(unsigned char)g.c][k++] = r[y];
             // 9-row version for the playing row: the 2nd and 6th rows are doubled
             static const int kTallMap[9] = {0, 1, 1, 2, 3, 4, 5, 5, 6};
             for (int y = 0; y < 9; ++y) tall[(unsigned char)g.c][y] = r[kTallMap[y]];
@@ -155,10 +171,19 @@ struct FontTables {
                     if (g.rows[y][x] == '#') r[y] |= (uint8_t)(0x40 >> x);
             }
         }
+        for (const GlyphDef& g : kMediumGlyphs) {
+            uint8_t* r = medium[(unsigned char)g.c];
+            for (int y = 0; y < 6; ++y) {
+                r[y] = 0;
+                for (int x = 0; x < 7; ++x)
+                    if (g.rows[y][x] == '#') r[y] |= (uint8_t)(0x40 >> x);
+            }
+        }
         for (int ch = 'a'; ch <= 'z'; ++ch) {  // lower case shows as upper case, like the classic trackers
             for (int y = 0; y < 7; ++y) full[ch][y] = full[ch - 32][y];
             for (int y = 0; y < 5; ++y) small[ch][y] = small[ch - 32][y];
             for (int y = 0; y < 9; ++y) tall[ch][y] = tall[ch - 32][y];
+            for (int y = 0; y < 6; ++y) medium[ch][y] = medium[ch - 32][y];
         }
     }
 };
@@ -173,7 +198,7 @@ const uint8_t* amigaGlyph(char c) {
     return fonts().full[u < 128 ? u : 0];
 }
 
-int glyphRows(FontSize size) { return size == kSmall ? 5 : size == kTall ? 9 : 7; }
+int glyphRows(FontSize size) { return size == kSmall ? 5 : size == kTall ? 9 : size == kMedium ? 6 : 7; }
 
 void PixelCanvas::fill(int x, int y, int w, int h, uint32_t c) {
     const int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
@@ -204,7 +229,7 @@ void PixelCanvas::text(int x, int y, const char* s, uint32_t c, FontSize size) {
     for (; *s; ++s, x += 8) {
         unsigned u = (unsigned char)*s;
         if (u >= 128) u = 0;
-        const uint8_t* g = size == kSmall ? f.small[u] : size == kTall ? f.tall[u] : f.full[u];
+        const uint8_t* g = size == kSmall ? f.small[u] : size == kTall ? f.tall[u] : size == kMedium ? f.medium[u] : f.full[u];
         for (int r = 0; r < rows; ++r)
             for (int b = 0; b < 7; ++b)
                 if (g[r] & (0x40 >> b)) set(x + b, y + r, c);
