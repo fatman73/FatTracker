@@ -126,3 +126,24 @@ TEST(tfmx_absurd_tempo_does_not_hang) {
     const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     CHECK(secs < 2.0);  // loading must not spin for minutes
 }
+
+TEST(tfmx_display_columns_are_voices) {
+    // a column is a Paula voice (what the VU meters and scopes show), not a TFMX track:
+    // a track sends each note to its own channel, so tracks would put notes in the wrong column
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::path(FT_SOURCE_DIR) / "modules" / "Chris Huelsbeck" / "TFMX";
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) return;
+    for (const auto& e : fs::directory_iterator(dir, ec)) {
+        const std::wstring name = e.path().filename().wstring();
+        if (_wcsnicmp(name.c_str(), L"mdat.", 5) != 0) continue;
+        const auto mdat = readAll(e.path()), smpl = readAll(dir / (L"smpl." + name.substr(5)));
+        TfmxPlayer p;
+        CHECK(p.load(mdat.data(), mdat.size(), smpl.data(), smpl.size()));
+        Song s;
+        if (!p.buildDisplay(s)) continue;
+        const int voices = p.voices();
+        if (s.numChannels > (voices > 4 ? voices : 4)) std::printf("  %ls: %d columns for %d voices\n", name.c_str(), s.numChannels, voices);
+        CHECK(s.numChannels <= (voices > 4 ? voices : 4));
+    }
+}

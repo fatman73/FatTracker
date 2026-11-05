@@ -171,35 +171,37 @@ const char* TfmxPlayer::format() const { return impl_->loaded ? impl_->dec.forma
 
 bool TfmxPlayer::buildDisplay(Song& out) {
     if (!impl_->loaded) return false;
-    tfmxaudiodecoder::TFMXDecoder::PatternDisplayData data;
+    using Dec = tfmxaudiodecoder::TFMXDecoder;
+    Dec::PatternDisplayData data;
     if (!impl_->dec.buildPatternDisplayForCurrentSong(data)) return false;
-    int used[tfmxaudiodecoder::TFMXDecoder::PatternDisplayData::MAX_TRACKS];
-    int nUsed = 0;
+    // one column per Paula voice: each note goes to the voice it really plays on (a TFMX track
+    // can send notes to any channel), so the notes match the VU meters and the scopes
+    const int nv = voices();
+    int lastVoice = -1;
     uint32_t ticks = 0;
-    for (int t = 0; t < data.numTracks && t < tfmxaudiodecoder::TFMXDecoder::PatternDisplayData::MAX_TRACKS; ++t) {
-        bool notes = false;
-        for (const auto& r : data.tracks[t].rows) notes |= r.type == 0;
-        if (!notes) continue;
-        used[nUsed++] = t;
-        const uint32_t end = data.tracks[t].totalTicks + 1;
-        if (end > ticks) ticks = end;
-    }
-    if (!nUsed) return false;
+    for (int t = 0; t < data.numTracks && t < Dec::PatternDisplayData::MAX_TRACKS; ++t)
+        for (const auto& r : data.tracks[t].rows) {
+            if (r.type != 0 || r.channel >= nv) continue;
+            if (r.channel > lastVoice) lastVoice = r.channel;
+            if (r.tick + 1 > ticks) ticks = r.tick + 1;
+        }
+    if (lastVoice < 0) return false;
+    const int columns = lastVoice + 1 < 4 ? 4 : lastVoice + 1;
     int numPat = (int)((ticks + kDisplayRows - 1) / kDisplayRows);
     if (numPat > 256) numPat = 256;
     if (numPat < 1) numPat = 1;
-    out = makeEmptySong(nUsed < 4 ? 4 : nUsed);
+    out = makeEmptySong(columns);
     out.patterns.clear();
     for (int p = 0; p < numPat; ++p) out.patterns.push_back(makePattern(kDisplayRows, out.numChannels));
     out.order.clear();
     for (int p = 0; p < numPat; ++p) out.order.push_back((uint8_t)p);
-    for (int k = 0; k < nUsed; ++k)
-        for (const auto& r : data.tracks[used[k]].rows) {
-            if (r.type != 0) continue;  // waits, loops and jumps are not shown
+    for (int t = 0; t < data.numTracks && t < Dec::PatternDisplayData::MAX_TRACKS; ++t)
+        for (const auto& r : data.tracks[t].rows) {
+            if (r.type != 0 || r.channel >= columns) continue;  // waits, loops and jumps are not shown
             const uint32_t p = r.tick / kDisplayRows;
-            if (p >= (uint32_t)numPat) break;
-            Cell& c = out.patterns[p].at((int)(r.tick % kDisplayRows), k);
-            if (c.note) continue;  // several notes on one tick: keep the first
+            if (p >= (uint32_t)numPat) continue;
+            Cell& c = out.patterns[p].at((int)(r.tick % kDisplayRows), r.channel);
+            if (c.note) continue;  // two notes on one voice in one tick: keep the first
             // TFMX note 0 = period 1710 (one octave below ProTracker C-1) = XM C-1 (25)
             const int n = (r.note & 0x3F) + 25;
             c.note = (uint8_t)(n > 96 ? 96 : n);
