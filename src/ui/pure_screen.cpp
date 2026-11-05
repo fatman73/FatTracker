@@ -27,11 +27,11 @@ void box(PixelCanvas& c, const pure::Box& b, bool sunken = false) { c.bevel(b.x,
 
 void label(PixelCanvas& c, const pure::Box& b, const char* s) {  // embossed, centred
     const int w = (int)std::strlen(s) * 8 - 1;
-    c.textShadow(b.x + (b.w - w) / 2, b.y + (b.h - 7) / 2, s, kLabelInk, kLabelShadow);
+    c.textShadow(b.x + (b.w - w) / 2, b.y + (b.h - 5) / 2, s, kLabelInk, kLabelShadow, kSmall);
 }
 
 void value(PixelCanvas& c, const pure::Box& b, const char* s) {  // black, right aligned
-    c.text(b.x + b.w - 2 - (int)std::strlen(s) * 8 + 1, b.y + 2, s, kValueInk);
+    c.text(b.x + b.w - 3 - (int)std::strlen(s) * 8 + 1, b.y + (b.h - 6) / 2 + 1, s, kValueInk, kMedium);
 }
 
 // VU colour k pixels above the bar: green at the bottom, yellow, orange, red at the top.
@@ -125,7 +125,7 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
         for (int d = 0; d < 2; ++d) {
             const pure::Box a = pure::counterArrow(r, d);
             box(c, a);
-            c.textShadow(a.x + 2, a.y + 2, d ? "\x02" : "\x01", kLabelInk, kLabelShadow);
+            c.textShadow(a.x + 2, a.y + 3, d ? "\x02" : "\x01", kLabelInk, kLabelShadow, kSmall);
         }
     }
     for (int i = 0; i < 2; ++i) {
@@ -167,7 +167,7 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     // machine line: name and the power / drive LEDs of the A500 case, then EXIT
     const pure::Box cl = pure::creditLine();
     c.bevel(cl.x, cl.y, cl.w, cl.h, kFace, kFace, kFace);
-    c.textShadow(cl.x + 4, cl.y + 2, pure_ == 2 ? "A1200" : "A500", kLabelInk, kLabelShadow);
+    c.textShadow(cl.x + 4, cl.y + 3, pure_ == 2 ? "A1200" : "A500", kLabelInk, kLabelShadow, kSmall);
     const uint32_t power = tel.led ? argb(0x33FF44) : argb(0x1C7A24);  // dims with the filter, like the A500
     const uint32_t drive = tel.drive ? argb(0xFFA020) : argb(0x5A3A10);
     c.bevel(cl.x + 52, cl.y + 3, 14, 5, power, power, kDark, true);
@@ -179,22 +179,22 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     // ---- song / sample names: embossed captions, black names
     const pure::Box sr = pure::songRow();
     box(c, sr);
-    c.textShadow(sr.x + 18, sr.y + 2, "SONGNAME:", kLabelInk, kLabelShadow);
+    c.textShadow(sr.x + 18, sr.y + 3, "SONGNAME:", kLabelInk, kLabelShadow, kSmall);
     char name[23];
     std::snprintf(name, sizeof name, "%-20.20s", s ? s->name : "");
     for (char& ch : name)
         if (ch == ' ') ch = '_';
-    c.text(sr.x + 106, sr.y + 2, name, kValueInk);
+    c.text(sr.x + 106, sr.y + 3, name, kValueInk, kMedium);
     const unsigned secs = tel.rate ? (unsigned)(tel.playFrames / tel.rate) : 0;
     std::snprintf(buf, sizeof buf, "%02u:%02u", (secs / 60) % 100, secs % 60);
     value(c, sr, buf);
     const pure::Box smr = pure::sampleRow();
     box(c, smr);
-    c.textShadow(smr.x + 10, smr.y + 2, "SAMPLENAME:", kLabelInk, kLabelShadow);
+    c.textShadow(smr.x + 10, smr.y + 3, "SAMPLENAME:", kLabelInk, kLabelShadow, kSmall);
     std::snprintf(name, sizeof name, "%-22.22s", smp ? smp->name : "");
     for (char& ch : name)
         if (ch == ' ') ch = '_';
-    c.text(smr.x + 106, smr.y + 2, name, kValueInk);
+    c.text(smr.x + 106, smr.y + 3, name, kValueInk, kMedium);
     box(c, pure::loadButton());
     label(c, pure::loadButton(), "LOAD");
 
@@ -203,23 +203,23 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     box(c, info);
     c.bevel(8, info.y + 5, 22, 11, kFace, kDark, kLight);
     std::snprintf(buf, sizeof buf, "%2d", editSkip_);
-    c.text(11, info.y + 7, buf, kValueInk);
+    c.text(11, info.y + 8, buf, kValueInk, kMedium);
     std::snprintf(buf, sizeof buf, "%3d", tel.playing ? tel.bpm : (s ? s->initialBpm : 125));
-    c.text(36, info.y + 1, buf, kValueInk);
+    c.text(36, info.y + 2, buf, kValueInk, kMedium);
     c.textShadow(pure::tempoArrow(0).x, pure::tempoArrow(0).y + 1, "\x01", kLabelInk, kLabelShadow, kSmall);
     c.textShadow(pure::tempoArrow(0).x + 8, pure::tempoArrow(0).y + 1, "TEMPO", kLabelInk, kLabelShadow, kSmall);
     c.textShadow(pure::tempoArrow(1).x, pure::tempoArrow(1).y + 1, "\x02", kLabelInk, kLabelShadow, kSmall);
     c.textShadow(90, info.y + 7, "STATUS:", kLabelInk, kLabelShadow, kSmall);
     std::snprintf(buf, sizeof buf, "%.15s", status_);
-    c.text(148, info.y + 5, buf, kValueInk);
+    c.text(148, info.y + 7, buf, kValueInk, kMedium);
     size_t bytes = 0;
     if (s)
         for (const Sample& sm : s->samples) bytes += (size_t)sm.length * (sm.is16 ? 2 : 1);
-    c.textShadow(234, info.y + 1, "TUNE", kLabelInk, kLabelShadow);
+    c.textShadow(234, info.y + 2, "TUNE", kLabelInk, kLabelShadow, kSmall);
     std::snprintf(buf, sizeof buf, "%6u", (unsigned)(bytes % 1000000));
-    c.text(270, info.y + 1, buf, kValueInk);
-    c.textShadow(234, info.y + 9, "TIMING", kLabelInk, kLabelShadow);
-    c.text(294, info.y + 9, "CIA", kValueInk);
+    c.text(270, info.y + 2, buf, kValueInk, kMedium);
+    c.textShadow(234, info.y + 10, "TIMING", kLabelInk, kLabelShadow, kSmall);
+    c.text(294, info.y + 10, "CIA", kValueInk, kMedium);
 
     // ---- pattern: grey frame, black columns, small blue text, tall black text on the playing row
     c.fill(0, pure::kPatternY, 320, 256 - pure::kPatternY, kFace);

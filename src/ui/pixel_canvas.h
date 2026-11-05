@@ -5,8 +5,8 @@
 
 constexpr uint32_t argb(uint32_t rgb) { return 0xFF000000u | rgb; }
 
-// Glyph heights: 5 px (pattern rows), 7 px (everything else), 9 px (the playing row bar).
-enum FontSize : int { kSmall = 0, kNormal = 1, kTall = 2 };
+// Glyph heights: 5 px (captions, pattern rows), 6 px (values), 7 px, 9 px (the playing row bar).
+enum FontSize : int { kSmall = 0, kNormal = 1, kTall = 2, kMedium = 3 };
 
 class PixelCanvas {
 public:
@@ -33,4 +33,4 @@ private:
 // Glyph rows (7 rows, bit 6 = leftmost of 7 columns); unknown characters are blank.
 // '\x01' / '\x02' are the up / down arrows of the counters.
 const uint8_t* amigaGlyph(char c);
-int glyphRows(FontSize size);  // 5, 7 or 9
+int glyphRows(FontSize size);  // 5, 6, 7 or 9
