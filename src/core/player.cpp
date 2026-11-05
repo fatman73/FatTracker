@@ -16,6 +16,7 @@ void Player::setSong(const Song* s) {
 
 void Player::start(uint16_t order, uint16_t row, bool patternMode, uint16_t pattern) {
     if (!song_ || song_->order.empty() || song_->patterns.empty()) return;
+    if (order == 0 && row == 0) mixer_.setLed(false);  // a fresh start, like PT: filter LED off
     for (int c = 0; c < kMaxChannels; ++c) {
         bool m = ch_[c].muted;
         ch_[c] = ChannelState{};

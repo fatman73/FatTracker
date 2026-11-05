@@ -126,6 +126,9 @@ void Player::rowEffects(int c) {
         case 0xE: {
             const uint8_t x = p & 15;
             switch (p >> 4) {
+                case 0x0:  // E0x: Amiga "LED" filter, 0 = on (FT2 ignores it)
+                    if (!ft2) mixer_.setLed(x == 0);
+                    break;
                 case 0x1: {
                     uint8_t v = x;
                     if (ft2) {

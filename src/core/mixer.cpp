@@ -15,12 +15,29 @@ inline float softclip(float x) {
 }
 }  // namespace
 
-Mixer::Mixer(uint32_t sampleRate) : rate_(sampleRate), rampLen_((int)(sampleRate / 1000)) {}
+Mixer::Mixer(uint32_t sampleRate) : rate_(sampleRate), rampLen_((int)(sampleRate / 1000)) { filter_.setRate(rate_); }
 
 void Mixer::setRate(uint32_t hz) {
     rate_ = hz ? hz : 48000;
     rampLen_ = (int)(rate_ / 1000);
     if (rampLen_ < 1) rampLen_ = 1;
+    filter_.setRate(rate_);
+}
+
+void Mixer::setPaula(PaulaModel m) {
+    if (m == paula_) return;
+    paula_ = m;
+    filter_.setModel(m);
+    filter_.reset();
+    for (int i = 0; i < kMaxVoices; ++i) {  // re-pan every voice at once, drop fading ghosts
+        ghosts_[i].active = false;
+        Voice& v = voices_[i];
+        if (v.stopping) v.active = false;
+        setTargets(v);
+        v.curL = v.tgtL;
+        v.curR = v.tgtR;
+        v.rampLeft = 0;
+    }
 }
 
 void Mixer::setNumChannels(int n) { autoScale_ = std::sqrt(4.f / (float)(n < 4 ? 4 : n)); }
@@ -47,7 +64,7 @@ int64_t Mixer::mapIndex(const Voice& v, int64_t vi) {
 void Mixer::trigger(int idx, const Sample* s, uint32_t offset) {
     if (idx < 0 || idx >= kMaxVoices) return;
     Voice& v = voices_[idx];
-    if (ramp_ && v.active && (v.curL != 0 || v.curR != 0)) {
+    if (ramping() && v.active && (v.curL != 0 || v.curR != 0)) {
         Voice& g = ghosts_[idx];
         g = v;
         g.tgtL = g.tgtR = 0;
@@ -78,7 +95,7 @@ void Mixer::trigger(int idx, const Sample* s, uint32_t offset) {
     }
     v.pos = offset;
     v.active = true;
-    if (ramp_) {
+    if (ramping()) {
         v.curL = v.curR = 0;
         startRamp(v);
     } else {
@@ -92,7 +109,7 @@ void Mixer::stopVoice(int idx) {
     if (idx < 0 || idx >= kMaxVoices) return;
     Voice& v = voices_[idx];
     if (!v.active) return;
-    if (ramp_) {
+    if (ramping()) {
         v.stopping = true;
         v.tgtL = v.tgtR = 0;
         startRamp(v);
@@ -102,6 +119,7 @@ void Mixer::stopVoice(int idx) {
 }
 
 void Mixer::reset() {
+    filter_.reset();
     for (int i = 0; i < kMaxVoices; ++i) {
         voices_[i] = Voice{};
         ghosts_[i] = Voice{};
@@ -117,7 +135,14 @@ void Mixer::setFrequency(int idx, double hz) {
 
 void Mixer::setTargets(Voice& v) {
     float p = v.pan < 0 ? 0 : (v.pan > 1 ? 1 : v.pan);
-    p = 0.5f + (p - 0.5f) * separation_;
+    if (paula_ != PaulaModel::None) {
+        // Paula: channels 0 and 3 are wired left, 1 and 2 right; preview voices sit in the middle
+        int idx = (int)(&v - voices_);
+        if (idx < 0 || idx >= kMaxVoices) idx = (int)(&v - ghosts_);
+        p = idx >= 32 ? 0.5f : ((idx & 3) == 0 || (idx & 3) == 3 ? 0.f : 1.f);
+    } else {
+        p = 0.5f + (p - 0.5f) * separation_;
+    }
     v.tgtL = kVoiceGain * v.vol * std::cos(p * kHalfPi);
     v.tgtR = kVoiceGain * v.vol * std::sin(p * kHalfPi);
 }
@@ -136,7 +161,7 @@ void Mixer::setVolume(int idx, float vol01, float pan01) {
     v.pan = pan01;
     if (v.stopping) return;
     setTargets(v);
-    if (ramp_ && v.active) {
+    if (ramping() && v.active) {
         startRamp(v);
     } else {
         v.curL = v.tgtL;
@@ -149,10 +174,17 @@ template <class T>
 void Mixer::mixVoice(Voice& v, int idx, const T* data, float norm, float* out, uint32_t frames, float& peak) {
     const int64_t len = v.s->length;
     const int64_t linearEnd = v.loop == LoopType::None ? len : v.loopStart + v.loopLen;  // no wrap below this
+    const bool paula = paula_ != PaulaModel::None;
+    auto value = [&](int64_t m) -> float {
+        if constexpr (sizeof(T) == 2) {
+            if (paula) return (float)(data[m] >> 8) * (1.f / 128.f);  // Paula's DAC has 8 bits
+        }
+        return data[m] * norm;
+    };
     auto fetch = [&](int64_t vi) -> float {
-        if (vi >= 0 && vi < linearEnd) return data[vi] * norm;
+        if (vi >= 0 && vi < linearEnd) return value(vi);
         int64_t m = mapIndex(v, vi);
-        return m < 0 ? 0.f : data[m] * norm;
+        return m < 0 ? 0.f : value(m);
     };
     float* scope = scope_[idx];
     uint32_t sp = scopePos_[idx];
@@ -165,7 +197,16 @@ void Mixer::mixVoice(Voice& v, int idx, const T* data, float norm, float* out, u
         }
         float t = (float)(v.pos - (double)i);
         float smp;
-        switch (interp_) {
+        if (paula) {
+            // sample-and-hold, averaged over this output sample's interval [pos, pos + step)
+            const double end = v.pos + v.step;
+            if (end <= (double)(i + 1) || v.step <= 0) {
+                smp = fetch(i);
+            } else {
+                const float w = (float)(((double)(i + 1) - v.pos) / v.step);
+                smp = fetch(i) * w + fetch(i + 1) * (1.f - w);
+            }
+        } else switch (interp_) {
             case Interp::None:
                 smp = fetch(i);
                 break;
@@ -233,6 +274,7 @@ void Mixer::mix(float* out, uint32_t frames) {
         float d = vu_[i] * decay;
         vu_[i] = peak > d ? peak : d;
     }
+    filter_.process(out, frames);
     const float g = master_ * autoScale_;
     for (uint32_t k = 0; k < frames * 2; ++k) out[k] = softclip(out[k] * g);
 }
