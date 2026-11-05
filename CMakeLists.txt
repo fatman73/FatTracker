@@ -28,6 +28,7 @@ file(GLOB FT_TEST_SOURCES CONFIGURE_DEPENDS tests/*.cpp)
 add_executable(fttest ${FT_TEST_SOURCES} ${FT_AUDIO_SOURCES} ${FT_UI_PURE_SOURCES})
 target_link_libraries(fttest PRIVATE ftcore ole32 avrt uuid)
 target_include_directories(fttest PRIVATE src tests)
+target_compile_definitions(fttest PRIVATE FT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 file(GLOB FT_UI_SOURCES CONFIGURE_DEPENDS src/ui/*.cpp)
 file(GLOB FT_APP_SOURCES CONFIGURE_DEPENDS src/app/*.cpp)

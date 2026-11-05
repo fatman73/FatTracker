@@ -1,2 +1,5 @@
 build/
 .superpowers/
+tests/ref/*.mod
+tests/ref/*.xm
+tests/ref/*.wav
