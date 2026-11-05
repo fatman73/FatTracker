@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "core/render.h"
+#include "core/sample_edit.h"
 #include "ui/pixel_canvas.h"
 #include "ui/play_screen.h"
 #include "ui/pattern_layout.h"
@@ -95,7 +97,8 @@ int PlayScreen::pureFirstChannel(int numChannels) {
 void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     if (!canvas_) canvas_ = std::make_unique<PixelCanvas>();
     PixelCanvas& c = *canvas_;
-    panel_ = Panel::Main;  // the classic screen has no modern panels
+    if (panel_ != Panel::EditOp && panel_ != Panel::Sampler && panel_ != Panel::PosEd)
+        panel_ = Panel::Main;  // the other panels exist only on the normal screen
     const Song* s = e.song();
     const Telemetry& tel = last_;
     const int nch = s ? s->numChannels : 4;
@@ -139,7 +142,9 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     // ---- buttons
     for (int i = 0; i < 12; ++i) {
         const int b = kPureButtons[i];
-        const bool on = (b == 0 && tel.playing && !recordMode_) || (b == 4 && editMode_) || (b == 6 && recordMode_);
+        const bool on = (b == 0 && tel.playing && !recordMode_) || (b == 4 && editMode_) || (b == 6 && recordMode_) ||
+                        (b == -4 && panel_ == Panel::EditOp) || (b == -5 && panel_ == Panel::PosEd) ||
+                        (b == -7 && panel_ == Panel::Sampler);
         box(c, pure::gridButton(i), on);
         label(c, pure::gridButton(i), pure::buttonLabel(i));
     }
@@ -150,7 +155,11 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
         label(c, pure::sideButton(i), d);
     }
 
-    // ---- quadrascope: yellow dots on black
+    // ---- quadrascope: yellow dots on black (EDIT OP. and POS ED. take its place)
+    const bool opView = panel_ == Panel::EditOp || panel_ == Panel::PosEd;
+    if (panel_ == Panel::EditOp) pureOpDraw(c, e);
+    if (panel_ == Panel::PosEd) purePosDraw(c, e);
+    if (!opView) {
     box(c, pure::scopeTitle());
     label(c, pure::scopeTitle(), "QUADRASCOPE");
     c.bevel(120, 5 * pure::kRowH, 200, 3 * pure::kRowH, kFace, kLight, kDark);
@@ -178,6 +187,7 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     c.textShadow(cl.x + 92, cl.y + 3, "DF0", kLabelInk, kLabelShadow, kSmall);
     box(c, pure::exitButton(), hover_ == kPureExitHover);
     label(c, pure::exitButton(), "EXIT PURE");
+    }
 
     // ---- song / sample names: embossed captions, black names
     const pure::Box sr = pure::songRow();
@@ -227,6 +237,8 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     c.text(294, info.y + 10, "CIA", kValueInk, kMedium);
 
     // ---- pattern: grey frame, black columns, small blue text, tall black text on the playing row
+    if (panel_ == Panel::Sampler) pureSamplerDraw(c, e);
+    else {
     c.fill(0, pure::kPatternY, 320, 256 - pure::kPatternY, kFace);
     const pure::Box rn = pure::rowNumbers();
     constexpr int kBottomFrame = 3;  // grey frame under the pattern, like ProTracker
@@ -276,6 +288,7 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
         const int x = pure::track(i).x + 25;
         for (int k = 0; k < h; ++k) c.fill(x, pure::kBarY - 1 - k, 10, 1, vuColor(k));
     }
+    }
 
     // ---- show it over the whole window
     float ox, oy, sx, sy;
@@ -291,7 +304,30 @@ UiAction PlayScreen::pureMouse(float lx, float ly, bool right, Engine& e) {
     const Song* s = e.song();
     const int nch = s ? s->numChannels : 4;
     const int first = pureFirstChannel(nch);
-    const int h = pure::hitTest(ax, ay);
+    const int h = pure::hitTest(ax, ay, (pure::View)pureView(), editOpScreen_);
+    if (h == pure::kOpExit) {
+        panel_ = Panel::Main;
+        return UiAction::Redraw;
+    }
+    if (h == pure::kOpTitle) {
+        if (panel_ == Panel::EditOp) editOpScreen_ = (editOpScreen_ + (right ? pure::kOpScreens - 1 : 1)) % pure::kOpScreens;
+        return UiAction::Redraw;
+    }
+    if (h >= pure::kOpItem && h < pure::kOpItem + 40) return pureOpClick(h - pure::kOpItem, right, e);
+    if (h >= pure::kPosLine && h < pure::kPosLine + pure::kPosLines) {
+        const int d = h - pure::kPosLine - (pure::kPosLines / 2 - 1);
+        if (d) counterStep(0, d, false, e);
+        return UiAction::Redraw;
+    }
+    if (h == pure::kPosUp || h == pure::kPosDown) {
+        counterStep(0, h == pure::kPosUp ? -1 : 1, right, e);
+        return UiAction::Redraw;
+    }
+    if (h == pure::kSmpWave) return samplerWaveMouse(lx, ly, right, e);
+    if (h >= pure::kSmpButton && h < pure::kSmpButton + pure::kSamplerButtons) {
+        samplerOp(h - pure::kSmpButton, e);
+        return UiAction::Redraw;
+    }
     if (h >= pure::kArrow && h < pure::kArrow + 18) {
         const int row = (h - pure::kArrow) / 2;
         if (row == 6) {
@@ -315,7 +351,20 @@ UiAction PlayScreen::pureMouse(float lx, float ly, bool right, Engine& e) {
         if (b >= 0) return pressButton(b, e);
         if (b == -2) return UiAction::ExportWav;
         if (b == -6) return UiAction::OpenFile;  // DISK OP.: the file requester
-        setStatus("NOT IN PURE");
+        if (b == -3) {
+            pat2smp(e);
+            return UiAction::Redraw;
+        }
+        if (b == -4) {  // EDIT OP.: open, then each press shows the next screen (as in ProTracker)
+            if (panel_ == Panel::EditOp) editOpScreen_ = (editOpScreen_ + 1) % pure::kOpScreens;
+            else panel_ = Panel::EditOp;
+            return UiAction::Redraw;
+        }
+        if (b == -5) {
+            panel_ = panel_ == Panel::PosEd ? Panel::Main : Panel::PosEd;
+            return UiAction::Redraw;
+        }
+        openPanel(Panel::Sampler);  // -7: SAMPLER
         return UiAction::Redraw;
     }
     if (h >= pure::kSide && h < pure::kSide + 5) {
@@ -355,4 +404,224 @@ UiAction PlayScreen::pureMouse(float lx, float ly, bool right, Engine& e) {
         return UiAction::Redraw;
     }
     return UiAction::None;
+}
+
+// ---------------------------------------------------------------- Pure panels
+
+int PlayScreen::pureView() const {
+    switch (panel_) {
+        case Panel::EditOp: return pure::kViewEditOp;
+        case Panel::PosEd: return pure::kViewPosEd;
+        case Panel::Sampler: return pure::kViewSampler;
+        default: return pure::kViewMain;
+    }
+}
+
+namespace {
+void arrowBox(PixelCanvas& c, const pure::Box& b, bool up) {
+    box(c, b);
+    c.textShadow(b.x + (b.w - 5) / 2, b.y + (b.h - 5) / 2, up ? "\x01" : "\x02", kLabelInk, kLabelShadow, kSmall);
+}
+
+// title row of EDIT OP. / POS ED.: embossed title and EXIT
+void opFrame(PixelCanvas& c, const char* title) {
+    const pure::Box a = pure::opArea();
+    c.fill(a.x, a.y, a.w, a.h, kFace);
+    box(c, pure::opTitle());
+    label(c, pure::opTitle(), title);
+    box(c, pure::opExit());
+    label(c, pure::opExit(), "EXIT");
+}
+}  // namespace
+
+void PlayScreen::pureOpDraw(PixelCanvas& c, Engine& e) {
+    char title[24];
+    std::snprintf(title, sizeof title, "%s %d/3", pure::opScreenTitle(editOpScreen_), editOpScreen_ + 1);
+    opFrame(c, title);
+    const Song* s = e.song();
+    char buf[8];
+    for (int i = 0; i < pure::opCount(editOpScreen_); ++i) {
+        const pure::OpItem it = pure::opItem(editOpScreen_, i);
+        switch (it.kind) {
+            case pure::kOpUp:
+            case pure::kOpDown: arrowBox(c, it.box, it.kind == pure::kOpUp); break;
+            case pure::kOpValue: {
+                switch (it.action) {
+                    case pure::kOpExchange: std::snprintf(buf, sizeof buf, "%02X", exchangeTo_); break;
+                    case pure::kOpSkip: std::snprintf(buf, sizeof buf, "%d", editSkip_); break;
+                    case pure::kOpOctave: std::snprintf(buf, sizeof buf, "%d", octave_); break;
+                    case pure::kOpQuant: std::snprintf(buf, sizeof buf, quantize_ > 1 ? "%d" : "OFF", quantize_); break;
+                    case pure::kOpMetro: std::snprintf(buf, sizeof buf, metronome_ ? "%d" : "OFF", metroEvery_); break;
+                    default: std::snprintf(buf, sizeof buf, "%d", s && editPattern() < (int)s->patterns.size() ? s->patterns[editPattern()].rows : 64); break;
+                }
+                box(c, it.box);
+                value(c, it.box, buf);
+                break;
+            }
+            default: {
+                const bool on = (it.action >= pure::kOpTrack && it.action <= pure::kOpBlock && transposeScope_ == it.action - pure::kOpTrack) ||
+                                (it.action == pure::kOpOnlySample && transposeOnlySample_);
+                box(c, it.box, on);
+                label(c, it.box, it.label);
+            }
+        }
+    }
+}
+
+UiAction PlayScreen::pureOpClick(int item, bool right, Engine& e) {
+    const pure::OpItem it = pure::opItem(editOpScreen_, item);
+    if (it.action >= pure::kOpSample) {
+        samplerOp(it.action - pure::kOpSample, e);
+        return UiAction::Redraw;
+    }
+    const int d = it.kind == pure::kOpUp ? 1 : it.kind == pure::kOpDown ? -1 : 0;
+    switch (it.action) {
+        case pure::kOpTrack: case pure::kOpPattern: case pure::kOpSong: case pure::kOpBlock:
+            transposeScope_ = it.action - pure::kOpTrack;
+            break;
+        case pure::kOpTrM12: opTranspose(-12, e); break;
+        case pure::kOpTrM1: opTranspose(-1, e); break;
+        case pure::kOpTrP1: opTranspose(1, e); break;
+        case pure::kOpTrP12: opTranspose(12, e); break;
+        case pure::kOpOnlySample: transposeOnlySample_ = !transposeOnlySample_; break;
+        case pure::kOpExchange:
+            if (d > 0) exchangeTo_ = exchangeTo_ < 255 ? exchangeTo_ + 1 : 1;
+            if (d < 0) exchangeTo_ = exchangeTo_ > 1 ? exchangeTo_ - 1 : 255;
+            break;
+        case pure::kOpReplace: opExchange(false, e); break;
+        case pure::kOpSwap: opExchange(true, e); break;
+        case pure::kOpNewPat: opNewPattern(false, e); break;
+        case pure::kOpClonePat: opNewPattern(true, e); break;
+        case pure::kOpMetro:
+            if (it.kind == pure::kOpValue) {
+                metronome_ = !metronome_;
+                applyMetronome(e);
+                break;
+            }
+            [[fallthrough]];
+        default:
+            if (d && it.action >= pure::kOpSkip && it.action <= pure::kOpPatLen) opStep(it.action - pure::kOpSkip, d, right, e);
+            break;
+    }
+    return UiAction::Redraw;
+}
+
+void PlayScreen::purePosDraw(PixelCanvas& c, Engine& e) {
+    opFrame(c, "POSITION ED.");
+    const Song* s = e.song();
+    const pure::Box l0 = pure::posLine(0);
+    c.fill(l0.x, l0.y - 1, l0.w, pure::kPosLines * l0.h + 2, kBlack);
+    char buf[32];
+    for (int i = 0; i < pure::kPosLines; ++i) {
+        const pure::Box l = pure::posLine(i);
+        const int pos = viewOrder_ + i - (pure::kPosLines / 2 - 1);
+        const bool cur = i == pure::kPosLines / 2 - 1;
+        if (cur) c.bevel(l.x, l.y - 1, l.w, l.h + 1, kBarFace, kBarLight, kBarDark);
+        if (!s || pos < 0 || pos >= (int)s->order.size()) continue;
+        const int pat = s->order[pos];
+        std::snprintf(buf, sizeof buf, "%04d : PATTERN %02d", pos, pat);
+        c.text(l.x + 4, l.y + 1, buf, cur ? kValueInk : kBlue, kSmall);
+    }
+    arrowBox(c, pure::posScroll(0), true);
+    arrowBox(c, pure::posScroll(1), false);
+}
+
+void PlayScreen::pureSamplerDraw(PixelCanvas& c, Engine& e) {
+    c.fill(0, pure::kPatternY, 320, 256 - pure::kPatternY, kFace);
+    const pure::Box w = pure::samplerWave();
+    c.bevel(w.x, w.y, w.w, w.h, kFace, kDark, kLight);
+    const int x0 = w.x + 2, y0 = w.y + 2, ww = w.w - 4, wh = w.h - 4;
+    c.fill(x0, y0, ww, wh, kBlack);
+    const Song* s = e.song();
+    const int si = s ? curSampleIndex(*s) : -1;
+    const Sample* sm = si >= 0 ? &s->samples[si] : nullptr;
+    const uint32_t len = sm ? sm->length : 0;
+    if (viewEnd_ > len || viewEnd_ <= viewStart_) {
+        viewStart_ = 0;
+        viewEnd_ = len;
+    }
+    selA_ = std::min(selA_, len);
+    selB_ = std::min(selB_, len);
+    const int mid = y0 + wh / 2;
+    if (!sm || !len) {
+        c.text(x0 + (ww - 12 * 8) / 2, mid - 3, "EMPTY SAMPLE", kBlue, kMedium);
+    } else {
+        const double span = (double)(viewEnd_ - viewStart_) / ww;
+        auto px = [&](uint32_t i) { return x0 + (int)(((double)i - viewStart_) / (viewEnd_ - viewStart_) * ww); };
+        const uint32_t s0 = std::min(selA_, selB_), s1 = std::max(selA_, selB_);
+        if (s1 > s0) {  // the marked range: grey behind the wave
+            const int a = std::clamp(px(s0), x0, x0 + ww), b = std::clamp(px(s1), x0, x0 + ww);
+            c.fill(a, y0, std::max(1, b - a), wh, kDark);
+        }
+        c.fill(x0, mid, ww, 1, argb(0x333333));
+        auto val = [&](uint32_t i) { return sm->is16 ? sm->data16[i] / 32768.f : sm->data8[i] / 128.f; };
+        const float amp = wh / 2.f - 1;
+        int prev = mid;
+        for (int col = 0; col < ww; ++col) {
+            uint32_t i0 = viewStart_ + (uint32_t)(col * span), i1 = viewStart_ + (uint32_t)((col + 1) * span);
+            if (i0 >= len) break;
+            if (i1 <= i0) i1 = i0 + 1;
+            i1 = std::min(i1, len);
+            float mn = 1, mx = -1;
+            for (uint32_t i = i0; i < i1; ++i) {
+                mn = std::min(mn, val(i));
+                mx = std::max(mx, val(i));
+            }
+            int top = mid - (int)std::lround(mx * amp), bot = mid - (int)std::lround(mn * amp);
+            if (span <= 1.0) {  // zoomed in: join the samples
+                top = std::min(top, prev);
+                bot = std::max(bot, prev);
+                prev = mid - (int)std::lround(val(i0) * amp);
+            }
+            c.fill(x0 + col, std::clamp(top, y0, y0 + wh - 1), 1, std::max(1, std::clamp(bot, y0, y0 + wh - 1) - std::clamp(top, y0, y0 + wh - 1) + 1), kScope);
+        }
+        if (sm->loop != LoopType::None)  // loop start / end: red lines with a handle on top
+            for (int k = 0; k < 2; ++k) {
+                const int x = px(k ? sm->loopStart + sm->loopLength : sm->loopStart);
+                if (x < x0 || x >= x0 + ww) continue;
+                c.fill(x, y0, 1, wh, kCursor);
+                c.fill(std::max(x0, x - 2), y0, 5, 4, kCursor);
+            }
+    }
+    for (int i = 0; i < pure::kSamplerButtons; ++i) {
+        const pure::Box b = pure::samplerButton(i);
+        const bool on = (i == 27 && drawMode_) || (i == 28 && sampling_);  // DRAW, SAMPLE
+        box(c, b, on);
+        label(c, b, pure::samplerLabel(i));
+    }
+}
+
+// PAT2SMP: the pattern on screen becomes the current sample.
+void PlayScreen::pat2smp(Engine& e) {
+    if (!e.song() || e.tfmx()) {
+        setStatus("NO PATTERN");
+        return;
+    }
+    ask("PAT2SMP: SAMPLE THE PATTERN", {"HI", "LO", "CANCEL"}, [this, &e](int a) {
+        const Song* cur = e.song();
+        if (a == 2 || !cur) return;
+        const uint32_t rate = a == 0 ? 16726 : 8363;  // an octave above C / the C rate
+        Sample sm = renderPatternSample(*cur, viewPattern_, rate);
+        if (!sm.length) {
+            setStatus("EMPTY PATTERN");
+            return;
+        }
+        const bool pt = cur->quirks == Quirks::PT23;
+        if (pt) {  // ProTracker: 8 bits, 128 KB, the pitch is the note you play
+            const uint32_t n = std::min<uint32_t>(sm.length, 131070);
+            sm.data8.resize(n);
+            for (uint32_t i = 0; i < n; ++i) sm.data8[i] = (int8_t)(sm.data16[i] >> 8);
+            sm.data16.clear();
+            sm.is16 = false;
+            sm.length = n;
+        } else {
+            sampleSetRate(sm, rate);  // C-4 plays it back at the speed it was made
+        }
+        char nm[24];
+        std::snprintf(nm, sizeof nm, "pattern %02d", viewPattern_);
+        std::wstring wn;
+        for (const char* p = nm; *p; ++p) wn += (wchar_t)*p;
+        sampleLoaded(e, static_cast<Sample&&>(sm), wn);
+        setStatus(!pt ? "SAMPLED" : a == 0 ? "NOTE C-3" : "NOTE C-2");
+    });
 }

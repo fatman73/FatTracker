@@ -26,6 +26,24 @@ size_t renderSong(const Song& s, uint32_t rate, Interp interp, bool ramps, float
     return frames;
 }
 
+Sample renderPatternSample(const Song& s, int pattern, uint32_t rate) {
+    Sample out;
+    if (pattern < 0 || pattern >= (int)s.patterns.size() || !rate) return out;
+    Song one = s;
+    one.order.assign(1, (uint8_t)pattern);
+    one.restartPos = 0;
+    std::vector<float> st;
+    const size_t frames = renderSong(one, rate, Interp::Linear, true, 60.f, st);
+    out.is16 = true;
+    out.length = (uint32_t)frames;
+    out.data16.resize(frames);
+    for (size_t i = 0; i < frames; ++i) {
+        const float m = (st[i * 2] + st[i * 2 + 1]) * 0.5f * 32767.f;
+        out.data16[i] = (int16_t)(m > 32767.f ? 32767 : (m < -32768.f ? -32768 : std::lround(m)));
+    }
+    return out;
+}
+
 double correlation(const float* a, size_t na, const float* b, size_t nb) {
     size_t n = na < nb ? na : nb;
     if (n == 0) return 0;

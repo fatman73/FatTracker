@@ -128,6 +128,10 @@ void PlayScreen::setPure(int mode, Engine& e) {
         setCurrentTheme(themeBeforePure_);
     }
     pure_ = mode;
+    // Pure has its own EDIT OP., POS ED. and SAMPLER; the other panels exist only on the normal screen
+    if (mode ? panel_ != Panel::EditOp && panel_ != Panel::Sampler && panel_ != Panel::PosEd : panel_ == Panel::PosEd)
+        panel_ = Panel::Main;
+    drag_ = 0;
     e.setPure(mode);
     setStatus(mode == 0 ? "PURE MODE OFF" : mode == 1 ? "PURE MODE: AMIGA 500" : "PURE MODE: AMIGA 1200");
 }

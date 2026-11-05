@@ -1,4 +1,5 @@
 // Stage 3: Pure mode screen - pixel canvas, Amiga style font, ProTracker style layout.
+#include <cstring>
 #include <initializer_list>
 
 #include "test.h"
@@ -175,4 +176,57 @@ TEST(pure_layout_name_rows_are_clickable) {
     CHECK_EQ(hitTest(150, songRow().y + 4), kSongName);
     CHECK_EQ(hitTest(150, sampleRow().y + 4), kSampleName);
     CHECK_EQ(hitTest(loadButton().x + 4, loadButton().y + 4), kLoad);  // LOAD keeps working
+}
+
+// ---- Pure panels: EDIT OP. and POS ED. over the quadrascope, SAMPLER over the pattern area
+TEST(pure_edit_op_covers_the_scopes) {
+    using namespace pure;
+    const Box a = opArea();
+    CHECK_EQ(a.x, 120);
+    CHECK_EQ(a.y, 44);
+    CHECK_EQ(hitTest(150, 70), kScope + 0);  // main view: the scope
+    for (int sc = 0; sc < kOpScreens; ++sc) {
+        CHECK(opCount(sc) > 0);
+        for (int i = 0; i < opCount(sc); ++i) {
+            const OpItem it = opItem(sc, i);
+            CHECK(it.box.x >= a.x && it.box.y >= a.y && it.box.x + it.box.w <= a.x + a.w && it.box.y + it.box.h <= a.y + a.h);
+            CHECK((int)std::strlen(it.label) * 8 - 1 <= it.box.w - 6);  // 3 px of face on each side of the label
+            const int h = hitTest(it.box.x + it.box.w / 2, it.box.y + it.box.h / 2, kViewEditOp, sc);
+            CHECK_EQ(h, kOpItem + i);
+            for (int j = 0; j < i; ++j) {  // no overlaps
+                const Box b = opItem(sc, j).box;
+                CHECK(it.box.x >= b.x + b.w || b.x >= it.box.x + it.box.w || it.box.y >= b.y + b.h || b.y >= it.box.y + it.box.h);
+            }
+        }
+    }
+    CHECK_EQ(hitTest(opTitle().x + 5, opTitle().y + 5, kViewEditOp, 0), kOpTitle);
+    CHECK_EQ(hitTest(opExit().x + 5, opExit().y + 5, kViewEditOp, 0), kOpExit);
+    CHECK_EQ(hitTest(130, 5, kViewEditOp, 0), kButton + 0);  // the button grid stays usable
+}
+
+TEST(pure_position_editor_lines) {
+    using namespace pure;
+    for (int i = 0; i < kPosLines; ++i) {
+        const Box l = posLine(i);
+        CHECK(l.y >= opArea().y + kRowH && l.y + l.h <= opArea().y + opArea().h);
+        CHECK_EQ(hitTest(l.x + 4, l.y + l.h / 2, kViewPosEd), kPosLine + i);
+    }
+    CHECK_EQ(hitTest(posScroll(0).x + 3, posScroll(0).y + 3, kViewPosEd), kPosUp);
+    CHECK_EQ(hitTest(posScroll(1).x + 3, posScroll(1).y + 3, kViewPosEd), kPosDown);
+    CHECK_EQ(hitTest(opExit().x + 5, opExit().y + 5, kViewPosEd), kOpExit);
+}
+
+TEST(pure_sampler_replaces_the_pattern_area) {
+    using namespace pure;
+    const Box w = samplerWave();
+    CHECK_EQ(w.y, kPatternY);
+    CHECK_EQ(hitTest(160, w.y + w.h / 2, kViewSampler), kSmpWave);
+    CHECK_EQ(hitTest(40, 200), kTrack + 0);
+    for (int i = 0; i < kSamplerButtons; ++i) {
+        const Box b = samplerButton(i);
+        CHECK(b.x >= 0 && b.x + b.w <= 320 && b.y >= w.y + w.h && b.y + b.h <= 256);
+        CHECK((int)std::strlen(samplerLabel(i)) * 8 - 1 <= b.w - 6);
+        CHECK_EQ(hitTest(b.x + b.w / 2, b.y + b.h / 2, kViewSampler), kSmpButton + i);
+    }
+    CHECK_EQ(hitTest(130, 5, kViewSampler), kButton + 0);
 }
