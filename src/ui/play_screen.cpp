@@ -1,5 +1,6 @@
 #include "ui/play_screen.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -85,17 +86,36 @@ int PlayScreen::hitId(float x, float y) const {
             if (dialogButton(i).contains(x, y)) return H_DIALOG + i;
         return -1;
     }
+    if (panel_ == Panel::DiskOp) {
+        for (int i = 0; i < 13; ++i)
+            if (diskButton(i).contains(x, y)) return 600 + i;
+    } else if (panel_ == Panel::EditOp) {
+        const int eh = editOpHit(x, y);
+        if (eh >= 0) return eh;
+    } else if (panel_ == Panel::Setup) {
+        for (int id = 0; id < 100; ++id)
+            if (setupRect(id).w > 0 && setupRect(id).contains(x, y)) return 900 + id;
+    }
+    if (panel_ == Panel::Sampler)
+        for (int i = 0; i < 20; ++i)
+            if (samplerButton(i).contains(x, y)) return 700 + i;
+    const bool topMain = panel_ != Panel::DiskOp && panel_ != Panel::EditOp && panel_ != Panel::Setup;
+    const bool bottomPattern = panel_ != Panel::Sampler && panel_ != Panel::Help;
+    if (topMain)
     for (int i = 0; i < 12; ++i)
         if (buttonRect(i).contains(x, y)) return H_BUTTON + i;
+    if (topMain)
     for (int r = 0; r < 10; ++r)
         for (int k = 0; k < 2; ++k)
             if (counterArrow(counterRow(r), k).contains(x, y)) return H_ARROW + r * 2 + k;
     for (int i = 0; i < 4; ++i)
         if (viewButton(i).contains(x, y)) return H_VIEW + i;
-    for (int i = 0; i < 16; ++i)
-        if (sideButton(i).contains(x, y)) return H_SIDE + i;
-    for (int i = 0; i < 4; ++i)
-        if (sideArrow(i).contains(x, y)) return H_SIDEARROW + i;
+    if (bottomPattern) {
+        for (int i = 0; i < 16; ++i)
+            if (sideButton(i).contains(x, y)) return H_SIDE + i;
+        for (int i = 0; i < 4; ++i)
+            if (sideArrow(i).contains(x, y)) return H_SIDEARROW + i;
+    }
     return -1;
 }
 
@@ -170,10 +190,17 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     if (s && curCh_ >= s->numChannels) curCh_ = s->numChannels - 1;
     const PatternCtx pc = ctx(s, tel);
     char buf[128];
+    if (s && pc.pattern < (int)s->patterns.size()) patternRowsCache_ = s->patterns[pc.pattern].rows;
+    const bool topMain = panel_ != Panel::DiskOp && panel_ != Panel::EditOp && panel_ != Panel::Setup;
+    const bool bottomPattern = panel_ != Panel::Sampler && panel_ != Panel::Help;
 
     // ---------- counters ----------
-    g.panel(L_.counters, t, Gfx::PanelState::Normal);
     const Sample* smp = s && sample_ < (int)s->samples.size() ? &s->samples[sample_] : nullptr;
+    if (panel_ == Panel::DiskOp) diskDraw(g, tx, t);
+    if (panel_ == Panel::EditOp) editOpDraw(g, tx, t);
+    if (panel_ == Panel::Setup) setupDraw(g, tx, t);
+    if (topMain) {
+    g.panel(L_.counters, t, Gfx::PanelState::Normal);
     unsigned vals[10] = {(unsigned)viewOrder_,
                          (unsigned)pc.pattern,
                          s ? (unsigned)s->order.size() : 0u,
@@ -212,6 +239,7 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     }
     g.well(L_.logo, t, mixColor(t.panelLight, t.panel, 0.25f));
     tx.draw(g, {L_.logo.x, L_.logo.y + 8, L_.logo.w, 64}, "FATTRACKER", 54.f, t.digits, Align::Center);
+    }  // topMain
 
     // ---------- scopes ----------
     g.panel(L_.scopes, t, Gfx::PanelState::Normal);
@@ -282,7 +310,10 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     std::snprintf(buf, sizeof buf, "SAMPLES %uK", (unsigned)(bytes / 1024));
     tx.draw(g, {L_.info.x + L_.info.w - 214, y2, 208, rowH}, buf, 15.f, t.label, Align::Right, FontRole::Mono);
 
-    // ---------- pattern + side panel ----------
+    // ---------- pattern + side panel (or SAMPLER / HELP) ----------
+    if (panel_ == Panel::Sampler) samplerDraw(g, tx, t, e);
+    if (panel_ == Panel::Help) helpDraw(g, tx, t);
+    if (bottomPattern) {
     pattern_.drawBack(g, tx, f, t, L_.pattern, pc);
     pattern_.drawCursor(g, f, t, L_.pattern, pc);
     g.panel(L_.side, t, Gfx::PanelState::Normal);
@@ -304,6 +335,7 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
         if (i == 0) sst = Gfx::PanelState::Active;
         drawButton(u, sideButton(i), label, sst, 14.f);
     }
+    }  // bottomPattern
 
     // ---------- glowing layer: scope lines, VU meters ----------
     g.beginGlow();
@@ -311,12 +343,12 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
         e.scope(i, scopeBuf_, 256);
         drawScopeLine(g, t, scopeRects[i], scopeBuf_, 256);
     }
-    pattern_.drawMeters(g, f, t, L_.pattern, pc);
+    if (bottomPattern) pattern_.drawMeters(g, f, t, L_.pattern, pc);
     g.endGlow(7.f, t.glow);
-    tx.draw(g, {L_.logo.x, L_.logo.y + 72, L_.logo.w, 30}, "32 CHANNELS   \xB7   16 BIT   \xB7   V0.3", 14.f,
+    if (topMain) tx.draw(g, {L_.logo.x, L_.logo.y + 72, L_.logo.w, 30}, "32 CHANNELS   \xB7   16 BIT   \xB7   V0.3", 14.f,
             t.panelDark, Align::Center);
 
-    pattern_.drawText(g, f, t, L_.pattern, pc);
+    if (bottomPattern) pattern_.drawText(g, f, t, L_.pattern, pc);
     drawDialog(g, tx, t);
 
     bool anyVu = false;
@@ -452,6 +484,17 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
         e.playPattern((uint16_t)viewPattern_);
         return UiAction::Redraw;
     }
+    // ---- panels get the keyboard first
+    if (panel_ == Panel::DiskOp) return vk == VK_SPACE ? UiAction::None : diskKey(vk, ctrl, e);
+    if (panel_ == Panel::Sampler) {
+        const UiAction r = samplerKey(vk, shift, ctrl, e);
+        if (r != UiAction::None) return r;
+        if (vk != VK_SPACE) return UiAction::None;
+    }
+    if (vk == VK_ESCAPE && panel_ != Panel::Main) {
+        panel_ = Panel::Main;
+        return UiAction::Redraw;
+    }
     if (vk == VK_SPACE && !alt && !ctrl) {  // ProTracker: space stops and toggles edit mode
         if (repeat) return UiAction::None;
         if (last_.playing) {
@@ -481,13 +524,73 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
     return editKey(vk, shift, ctrl, alt, repeat, e);
 }
 
-bool PlayScreen::onMouseMove(float x, float y) {
-    const int h = hitId(x, y);
-    if (h == hover_) return false;
-    hover_ = h;
-    return true;
+void PlayScreen::openPanel(Panel p) {
+    panel_ = panel_ == p ? Panel::Main : p;
+    if (panel_ == Panel::DiskOp) diskRefresh();
+    if (panel_ == Panel::Sampler) viewStart_ = viewEnd_ = selA_ = selB_ = 0;
 }
 
+bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
+    bool redraw = false;
+    if (drag_ && leftDown && panel_ == Panel::Sampler) {
+        const uint32_t pos = xToSample(x);
+        if (drag_ == 1) {
+            selB_ = pos;
+        } else if (e.song() && sample_ < (int)e.song()->samples.size()) {
+            const int idx = sample_;
+            const int which = drag_;
+            e.edit([&](Song& song) {
+                Sample& sm = song.samples[idx];
+                const uint32_t end = sm.loopStart + sm.loopLength;
+                if (which == 2 && pos + 2 <= end) {
+                    sm.loopLength = end - pos;
+                    sm.loopStart = pos;
+                }
+                if (which == 3 && pos >= sm.loopStart + 2 && pos <= sm.length) sm.loopLength = pos - sm.loopStart;
+            });
+            editor_.markDirty();
+        }
+        redraw = true;
+    }
+    const int h = hitId(x, y);
+    if (h != hover_) {
+        hover_ = h;
+        redraw = true;
+    }
+    return redraw;
+}
+
+UiAction PlayScreen::onMouseUp(float, float, Engine&) {
+    if (!drag_) return UiAction::None;
+    drag_ = 0;
+    return UiAction::Redraw;
+}
+
+UiAction PlayScreen::onWheel(float x, float y, int delta, Engine& e) {
+    const int notches = delta / 120 != 0 ? delta / 120 : (delta > 0 ? 1 : -1);
+    if (panel_ == Panel::Sampler && samplerWave().contains(x, y) && viewEnd_ > viewStart_) {
+        const uint32_t center = xToSample(x);
+        const double f = notches > 0 ? 0.7 : 1.0 / 0.7;
+        const double len = e.song() && sample_ < (int)e.song()->samples.size() ? e.song()->samples[sample_].length : 0;
+        double a = center - (center - (double)viewStart_) * f, b = center + ((double)viewEnd_ - center) * f;
+        if (b - a < 16) b = a + 16;
+        a = a < 0 ? 0 : a;
+        b = b > len ? len : b;
+        viewStart_ = (uint32_t)a;
+        viewEnd_ = (uint32_t)b;
+        return UiAction::Redraw;
+    }
+    if (panel_ == Panel::DiskOp && diskList().contains(x, y)) {
+        diskScroll_ = std::max(0, std::min((int)entries_.size() - diskRows(), diskScroll_ - notches * 3));
+        diskSel_ = std::max(diskScroll_, std::min(diskSel_, diskScroll_ + diskRows() - 1));
+        return UiAction::Redraw;
+    }
+    if (panel_ != Panel::Sampler && panel_ != Panel::Help && L_.pattern.contains(x, y) && !last_.playing) {
+        moveCursor(-notches, 0, e);
+        return UiAction::Redraw;
+    }
+    return UiAction::None;
+}
 UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
     const int h = hitId(x, y);
     if (dialog_.open) {
@@ -496,6 +599,14 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
             dialog_.open = false;
             if (d.onAnswer) d.onAnswer(h - H_DIALOG);
         }
+        return UiAction::Redraw;
+    }
+    if (panel_ == Panel::DiskOp && panelArea().contains(x, y)) return diskMouse(x, y, right, e);
+    if (panel_ == Panel::EditOp && panelArea().contains(x, y)) return editOpMouse(x, y, right, e);
+    if (panel_ == Panel::Setup && panelArea().contains(x, y)) return setupMouse(x, y, right, e);
+    if (panel_ == Panel::Sampler && bottomArea().contains(x, y)) return samplerMouse(x, y, right, e);
+    if (panel_ == Panel::Help && bottomArea().contains(x, y)) {
+        panel_ = Panel::Main;
         return UiAction::Redraw;
     }
     if (h >= H_BUTTON && h < H_BUTTON + 12) {
@@ -540,7 +651,20 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
                 });
                 break;
             case B_DISKOP:
-                return UiAction::OpenFile;
+                openPanel(Panel::DiskOp);
+                break;
+            case B_EDITOP:
+                openPanel(Panel::EditOp);
+                break;
+            case B_SETUP:
+                openPanel(Panel::Setup);
+                break;
+            case B_SAMPLER:
+                openPanel(Panel::Sampler);
+                break;
+            case B_HELP:
+                openPanel(Panel::Help);
+                break;
             default: {
                 char m[64];
                 std::snprintf(m, sizeof m, "%s: COMING SOON", kButtons[h - H_BUTTON]);

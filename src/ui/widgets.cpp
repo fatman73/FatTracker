@@ -7,7 +7,12 @@ constexpr float kValueW = 130.f;
 
 void drawButton(Ui& u, RectF r, const char* label, Gfx::PanelState s, float size) {
     u.g.panel(r, u.t, s);
-    Color c = s == Gfx::PanelState::Active ? u.t.panelLight : u.t.label;
+    Color c = u.t.label;
+    if (s == Gfx::PanelState::Active) {  // readable on the active fill whatever the theme
+        const Color fill = mixColor(u.t.digits, u.t.panelLight, 0.4f);
+        const float lum = 0.3f * fill.r + 0.59f * fill.g + 0.11f * fill.b;
+        c = lum > 0.6f ? Color{0.08f, 0.1f, 0.14f, 1.f} : Color{1.f, 1.f, 1.f, 1.f};
+    }
     u.text.draw(u.g, r, label, size, c, Align::Center);
 }
 

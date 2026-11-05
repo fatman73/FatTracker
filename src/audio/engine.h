@@ -44,7 +44,9 @@ public:
     void playPattern(uint16_t pattern);
     void stop();
     void setMute(int ch, bool m);
-    void previewNote(int sample, int note);  // jam / keyboard preview (works while stopped)
+    void previewNote(int sample, int note, uint32_t offset = 0);  // jam / keyboard preview (works while stopped)
+    void setMetronome(bool on, int everyRows);
+    void setMixing(int interp, float separation, float gain);  // interp: 0 none, 1 linear, 2 cubic
     void previewStop();
 
     void lock();    // exclusive, for edits from the UI

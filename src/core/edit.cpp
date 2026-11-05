@@ -253,6 +253,18 @@ void Editor::rotate(Song& s, const Block& in, int dir) {
     }
 }
 
+void Editor::exchangeInstrument(Song& s, int from, int to, bool swap) {
+    if (from < 1 || to < 1 || from > 255 || to > 255 || from == to) return;
+    record(s, {kAll});
+    for (Pattern& p : s.patterns)
+        for (Cell& c : p.cells) {
+            if (c.instr == from)
+                c.instr = (uint8_t)to;
+            else if (swap && c.instr == to)
+                c.instr = (uint8_t)from;
+        }
+}
+
 void Editor::flip(Song& s, const Block& in) {
     Block b = normalize(s, in);
     if (b.row1 <= b.row0 || b.ch1 < b.ch0) return;

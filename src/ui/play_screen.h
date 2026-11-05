@@ -1,7 +1,9 @@
-﻿// Main screen: ProTracker-style layout (counters, buttons, scopes, info bar, pattern) that
+// Main screen: ProTracker-style layout (counters, buttons, scopes, info bar, pattern) that
 // stretches to fill the whole window, with a modern finish, plus the pattern editor.
 #pragma once
 #include <functional>
+#include <string>
+#include <vector>
 
 #include "audio/engine.h"
 #include "core/edit.h"
@@ -10,7 +12,26 @@
 #include "ui/pattern_view.h"
 #include "ui/text.h"
 
-enum class UiAction { None, Redraw, OpenFile, SaveFile, Quit };
+enum class UiAction {
+    None,
+    Redraw,
+    OpenFile,     // Ctrl+O: system open dialog
+    SaveFile,     // Ctrl+S
+    LoadPath,     // load actionPath() (module or sample)
+    SaveXmPath,   // save to actionPath()
+    SaveModPath,
+    SaveWavPath,
+    SaveSamplePath,
+    Quit
+};
+
+enum class Panel { Main, DiskOp, EditOp, Setup, Sampler, Help };
+
+struct DirEntry {
+    std::wstring name;
+    bool dir;
+    uint64_t size;
+};
 
 // Modal question with up to four answers (drawn over the pattern area).
 struct Dialog {
@@ -29,7 +50,17 @@ public:
     UiAction onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool extended, bool repeat, Engine& e);
     UiAction onKeyUp(unsigned vk, Engine& e);
     UiAction onMouse(float lx, float ly, bool right, Engine& e);
-    bool onMouseMove(float lx, float ly);  // true when the hovered element changed
+    UiAction onMouseUp(float lx, float ly, Engine& e);
+    bool onMouseMove(float lx, float ly, bool leftDown, Engine& e);  // true when a redraw is needed
+    UiAction onWheel(float lx, float ly, int delta, Engine& e);
+    UiAction onChar(wchar_t c, Engine& e);
+    const std::wstring& actionPath() const { return actionPath_; }
+    void setCurrentPath(const std::wstring& p);  // file of the song, used by DISK OP.
+    void sampleLoaded(Engine& e, Sample&& s, const std::wstring& fileName);
+    Panel panel() const { return panel_; }
+    void openPanel(Panel p);
+    int currentSample() const { return sample_; }
+    void applyMetronome(Engine& e);
     bool animating() const { return animating_; }
     void songChanged();
     void setViewMode(int m);
@@ -94,5 +125,66 @@ private:
     unsigned jamKey_ = 0;
     Dialog dialog_;
 
-    friend class EditOpScreen;
+    // ---- panels (disk_op.cpp, sampler.cpp, edit_op.cpp, help.cpp)
+    Panel panel_ = Panel::Main;
+    RectF panelArea() const;    // top band (DISK OP., EDIT OP., SETUP)
+    RectF bottomArea() const;   // pattern + side (SAMPLER, HELP)
+    std::wstring actionPath_;
+    // DISK OP.
+    std::wstring dir_;
+    std::wstring fileName_ = L"untitled";
+    std::vector<DirEntry> entries_;
+    int diskSel_ = 0, diskScroll_ = 0;
+    int diskFilter_ = 0;  // 0 modules, 1 samples, 2 all
+    void diskRefresh();
+    void diskDraw(Gfx& g, Text& tx, const Theme& t);
+    UiAction diskMouse(float x, float y, bool right, Engine& e);
+    UiAction diskKey(unsigned vk, bool ctrl, Engine& e);
+    UiAction diskActivate(int index, Engine& e);
+    int diskRows() const;
+    RectF diskButton(int i) const;
+    RectF diskList() const;
+    RectF diskNameField() const;
+    // SAMPLER
+    uint32_t viewStart_ = 0, viewEnd_ = 0;  // visible range of the waveform
+    uint32_t selA_ = 0, selB_ = 0;
+    int drag_ = 0;  // 0 none, 1 selecting, 2 loop start, 3 loop end
+    Sample sampleClip_;
+    Sample sampleUndo_;
+    int sampleUndoIndex_ = -1;
+    void samplerDraw(Gfx& g, Text& tx, const Theme& t, Engine& e);
+    UiAction samplerMouse(float x, float y, bool right, Engine& e);
+    UiAction samplerKey(unsigned vk, bool shift, bool ctrl, Engine& e);
+    void samplerOp(int op, Engine& e);
+    RectF samplerWave() const;
+    RectF samplerButton(int i) const;
+    uint32_t xToSample(float x) const;
+    float sampleToX(uint32_t i) const;
+    // EDIT OP.
+    int quantize_ = 1;
+    bool metronome_ = false;
+    int metroEvery_ = 4;
+    int transposeScope_ = 0;  // 0 track, 1 pattern, 2 song, 3 block
+    bool transposeOnlySample_ = false;
+    int exchangeTo_ = 2;
+    void editOpDraw(Gfx& g, Text& tx, const Theme& t);
+    UiAction editOpMouse(float x, float y, bool right, Engine& e);
+    RectF editOpCell(int row, int col) const;
+    int editOpHit(float x, float y) const;
+    // HELP
+    int helpScroll_ = 0;
+    void helpDraw(Gfx& g, Text& tx, const Theme& t);
+    // SETUP (setup.cpp)
+    void setupDraw(Gfx& g, Text& tx, const Theme& t);
+    UiAction setupMouse(float x, float y, bool right, Engine& e);
+    RectF setupRect(int id) const;
+    int interp_ = 2, separationPct_ = 100, gainPct_ = 100, defaultChannels_ = 4;
+    int selColor_ = 0;
+    int patternRowsCache_ = 64;
+
+public:
+    void applyMixing(Engine& e);
+    void loadSettings(const wchar_t* ini, Engine& e);
+    void saveSettings(const wchar_t* ini) const;
+    int defaultChannels() const { return defaultChannels_; }
 };

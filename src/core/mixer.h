@@ -17,6 +17,7 @@ public:
     void setInterp(Interp i) { interp_ = i; }
     void setRamp(bool on) { ramp_ = on; }
     void setMasterGain(float g) { master_ = g; }
+    void setSeparation(float s) { separation_ = s < 0 ? 0 : (s > 1 ? 1 : s); }  // 1 = full stereo
     void setNumChannels(int n);
 
     void trigger(int v, const Sample* s, uint32_t offset);
@@ -56,6 +57,7 @@ private:
     Interp interp_ = Interp::Cubic;
     bool ramp_ = true;
     float master_ = 1.f;
+    float separation_ = 1.f;
     float autoScale_ = 1.f;
     Voice voices_[kMaxVoices];
     Voice ghosts_[kMaxVoices];  // fading-out copies of retriggered voices

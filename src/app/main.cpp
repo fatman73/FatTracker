@@ -7,6 +7,7 @@
 #include "app/document.h"
 #include "audio/engine.h"
 #include "formats/formats.h"
+#include "formats/sample_io.h"
 #include "ui/font.h"
 #include "ui/gfx.h"
 #include "ui/play_screen.h"
@@ -50,7 +51,7 @@ void toggleFullscreen(HWND hwnd) {
 
 // Returns false when nothing could be drawn (minimized window, lost device).
 bool drawFrame() {
-    const Theme& t = themeHybrid();
+    const Theme& t = currentTheme();
     if (!g_gfx.beginFrame(t.background)) return false;
     g_screen.draw(g_gfx, g_text, g_font, t, *g_engine);
     g_gfx.endFrame();
@@ -58,6 +59,13 @@ bool drawFrame() {
 }
 
 std::wstring g_path;  // file of the current song ("" = untitled)
+
+std::wstring iniPath() {
+    wchar_t buf[MAX_PATH];
+    GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    std::wstring p = buf;
+    return p.substr(0, p.find_last_of(L'\\') + 1) + L"FatTracker.ini";
+}
 
 void updateTitle() {
     if (!g_hwnd) return;
@@ -93,6 +101,7 @@ bool loadModuleFile(const wchar_t* path) {
     g_screen.songChanged();
     g_screen.setStatus(truncated ? "LOADED: FILE TRUNCATED" : "ALL RIGHT");
     g_path = path;
+    g_screen.setCurrentPath(path);
     updateTitle();
     return true;
 }
@@ -172,9 +181,39 @@ void openFileDialog(HWND hwnd) {
     });
 }
 
+void loadAnyFile(const std::wstring& path) {
+    std::vector<uint8_t> data;
+    if (const char* err = readFileW(path.c_str(), data)) {
+        g_screen.setStatus(err);
+        return;
+    }
+    auto smp = loadSampleFile(data.data(), data.size());
+    if (smp.ok()) {
+        const size_t slash = path.find_last_of(L"\\/");
+        g_screen.sampleLoaded(*g_engine, static_cast<Sample&&>(smp.value()), path.substr(slash + 1));
+        return;
+    }
+    confirmDiscard(g_hwnd, [path]() { loadModuleFile(path.c_str()); });
+}
+
 void handle(UiAction a, HWND hwnd) {
     if (a == UiAction::OpenFile) openFileDialog(hwnd);
     if (a == UiAction::SaveFile) saveCurrent(hwnd);
+    const std::wstring path = g_screen.actionPath();
+    if (a == UiAction::LoadPath) loadAnyFile(path);
+    if (a == UiAction::SaveXmPath) saveTo(path, SaveKind::Xm);
+    if (a == UiAction::SaveModPath) saveTo(path, SaveKind::Mod);
+    if (a == UiAction::SaveWavPath) saveTo(path, SaveKind::Wav);
+    if (a == UiAction::SaveSamplePath) {
+        std::vector<uint8_t> bytes;
+        g_engine->lock();
+        const Song* s = g_engine->song();
+        const int idx = g_screen.currentSample();
+        if (s && idx < (int)s->samples.size() && s->samples[idx].length) bytes = saveSampleWav(s->samples[idx]);
+        g_engine->unlock();
+        if (bytes.empty()) g_screen.setStatus("ERROR: THE SAMPLE IS EMPTY");
+        else g_screen.setStatus(writeFileAtomic(path.c_str(), bytes) ? "SAMPLE SAVED (WAV)" : "ERROR: CANNOT WRITE FILE");
+    }
     if (a != UiAction::None) {
         g_dirty = true;
         updateTitle();
@@ -183,6 +222,7 @@ void handle(UiAction a, HWND hwnd) {
 void mouse(HWND hwnd, LPARAM lp, bool right) {
     float lx, ly;
     deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
+    if (!right) SetCapture(hwnd);
     handle(g_screen.onMouse(lx, ly, right, *g_engine), hwnd);
 }
 
@@ -225,13 +265,31 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_LBUTTONDOWN:
             mouse(hwnd, lp, false);
             return 0;
+        case WM_LBUTTONUP: {
+            ReleaseCapture();
+            float lx, ly;
+            deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
+            handle(g_screen.onMouseUp(lx, ly, *g_engine), hwnd);
+            return 0;
+        }
+        case WM_MOUSEWHEEL: {
+            POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            ScreenToClient(hwnd, &pt);
+            float lx, ly;
+            deviceToLogical(g_gfx.viewport(), (float)pt.x, (float)pt.y, lx, ly);
+            handle(g_screen.onWheel(lx, ly, GET_WHEEL_DELTA_WPARAM(wp), *g_engine), hwnd);
+            return 0;
+        }
+        case WM_CHAR:
+            handle(g_screen.onChar((wchar_t)wp, *g_engine), hwnd);
+            return 0;
         case WM_RBUTTONDOWN:
             mouse(hwnd, lp, true);
             return 0;
         case WM_MOUSEMOVE: {
             float lx, ly;
             deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
-            if (g_screen.onMouseMove(lx, ly)) g_dirty = true;
+            if (g_screen.onMouseMove(lx, ly, (wp & MK_LBUTTON) != 0, *g_engine)) g_dirty = true;
             return 0;
         }
         case WM_DROPFILES: {
@@ -239,7 +297,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             wchar_t file[MAX_PATH];
             if (DragQueryFileW(drop, 0, file, MAX_PATH)) {
                 std::wstring path = file;
-                confirmDiscard(hwnd, [path]() { loadModuleFile(path.c_str()); });
+                loadAnyFile(path);
             }
             DragFinish(drop);
             g_dirty = true;
@@ -265,6 +323,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             confirmDiscard(hwnd, [hwnd]() { DestroyWindow(hwnd); });
             return 0;
         case WM_DESTROY:
+            g_screen.saveSettings(iniPath().c_str());
             PostQuitMessage(0);
             return 0;
     }
@@ -308,6 +367,19 @@ int screenshotMode() {
                     else if (!wcsncmp(tok, L"A+", 2)) alt = true;
                     else break;
                     tok += 2;
+                }
+                if (!wcsncmp(tok, L"T:", 2)) {  // theme index
+                    setCurrentTheme(_wtoi(tok + 2));
+                    drawFrame();
+                    continue;
+                }
+                if (!wcsncmp(tok, L"P:", 2)) {
+                    const wchar_t* pn = tok + 2;
+                    Panel p = !lstrcmpiW(pn, L"DISKOP") ? Panel::DiskOp : !lstrcmpiW(pn, L"SAMPLER") ? Panel::Sampler
+                            : !lstrcmpiW(pn, L"EDITOP") ? Panel::EditOp : !lstrcmpiW(pn, L"SETUP") ? Panel::Setup : Panel::Help;
+                    g_screen.openPanel(p);
+                    drawFrame();
+                    continue;
                 }
                 unsigned vk = tok[1] ? 0 : (unsigned)towupper(tok[0]);
                 for (const Named& n : names)
@@ -358,6 +430,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
         return 1;
     }
     if (!g_engine->startAudio()) g_screen.setStatus(g_engine->audioStatus());
+    g_screen.loadSettings(iniPath().c_str(), *g_engine);
+    g_engine->setSong(std::make_unique<Song>(makeEmptySong(g_screen.defaultChannels())));
+    g_screen.songChanged();
     SetTimer(hwnd, kTimerAudio, 2000, nullptr);
     SetTimer(hwnd, kTimerClock, 1000, nullptr);
     {  // FatTracker.exe <module>  (also used by "Open with")

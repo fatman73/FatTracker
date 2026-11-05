@@ -17,7 +17,15 @@ void PlayScreen::ask(const char* text, std::initializer_list<const char*> button
     dialog_.onAnswer = static_cast<std::function<void(int)>&&>(onAnswer);
 }
 
-int PlayScreen::editRow() const { return (recordMode_ && last_.playing) ? last_.row : viewRow_; }
+int PlayScreen::editRow() const {
+    if (!(recordMode_ && last_.playing)) return viewRow_;
+    int r = last_.row;
+    if (quantize_ > 1) {  // record quantize: snap to the nearest multiple
+        r = (r + quantize_ / 2) / quantize_ * quantize_;
+        if (r >= patternRowsCache_) r = 0;
+    }
+    return r;
+}
 
 int PlayScreen::editPattern() const { return last_.playing ? last_.pattern : viewPattern_; }
 

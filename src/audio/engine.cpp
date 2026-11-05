@@ -92,9 +92,23 @@ void Engine::songEdited() { player_->songEdited(); }
 
 void Engine::resetPlayer() { player_->setSong(song_.get()); }
 
-void Engine::previewNote(int sample, int note) {
+void Engine::setMetronome(bool on, int everyRows) {
     lock();
-    player_->previewNote(sample, note);
+    player_->setMetronome(on, everyRows);
+    unlock();
+}
+
+void Engine::setMixing(int interp, float separation, float gain) {
+    lock();
+    mixer_->setInterp(interp == 0 ? Interp::None : interp == 1 ? Interp::Linear : Interp::Cubic);
+    mixer_->setSeparation(separation);
+    mixer_->setMasterGain(gain);
+    unlock();
+}
+
+void Engine::previewNote(int sample, int note, uint32_t offset) {
+    lock();
+    player_->previewNote(sample, note, offset);
     unlock();
 }
 

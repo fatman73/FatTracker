@@ -46,6 +46,7 @@ public:
     void transpose(Song& s, const Block& b, int semitones, int onlyInstr);
     void transposeSong(Song& s, int semitones, int onlyInstr);
     void rotate(Song& s, const Block& b, int dir);  // -1 up, +1 down (wraps)
+    void exchangeInstrument(Song& s, int from, int to, bool swap);  // in all patterns
     void flip(Song& s, const Block& b);             // reverse row order
     // patterns and positions
     void setPatternRows(Song& s, int pat, int rows);
@@ -61,6 +62,7 @@ public:
     void reset() { undo_.clear(); redo_.clear(); }
     bool dirty() const { return dirty_; }
     void setClean() { dirty_ = false; }
+    void markDirty() { dirty_ = true; }
 
     static Block normalize(const Song& s, Block b);
 

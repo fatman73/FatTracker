@@ -141,6 +141,24 @@ TEST(edit_undo_limit_and_redo_cleared) {
     CHECK(!ed.redo(s));
 }
 
+TEST(edit_exchange_instrument) {
+    Song s = song4(4);
+    s.patterns.push_back(makePattern(4, 4));
+    s.patterns[0].at(0, 0).instr = 1;
+    s.patterns[0].at(1, 0).instr = 2;
+    s.patterns[1].at(2, 3).instr = 1;
+    Editor ed;
+    ed.exchangeInstrument(s, 1, 3, false);  // replace 1 -> 3
+    CHECK_EQ(s.patterns[0].at(0, 0).instr, 3);
+    CHECK_EQ(s.patterns[1].at(2, 3).instr, 3);
+    CHECK_EQ(s.patterns[0].at(1, 0).instr, 2);
+    ed.exchangeInstrument(s, 3, 2, true);  // swap 3 <-> 2
+    CHECK_EQ(s.patterns[0].at(0, 0).instr, 2);
+    CHECK_EQ(s.patterns[0].at(1, 0).instr, 3);
+    CHECK(ed.undo(s));
+    CHECK_EQ(s.patterns[0].at(0, 0).instr, 3);
+}
+
 TEST(edit_rotate_and_flip) {
     Song s = song4(4);
     Editor ed;

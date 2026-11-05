@@ -117,6 +117,7 @@ void Mixer::setFrequency(int idx, double hz) {
 
 void Mixer::setTargets(Voice& v) {
     float p = v.pan < 0 ? 0 : (v.pan > 1 ? 1 : v.pan);
+    p = 0.5f + (p - 0.5f) * separation_;
     v.tgtL = kVoiceGain * v.vol * std::cos(p * kHalfPi);
     v.tgtR = kVoiceGain * v.vol * std::sin(p * kHalfPi);
 }

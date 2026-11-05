@@ -83,11 +83,11 @@ double Player::noteHz(int sample, int note) const {
                                                : xmAmigaHz(xmAmigaPeriod(n0, sm.finetune));
 }
 
-void Player::previewNote(int sample, int note) {
+void Player::previewNote(int sample, int note, uint32_t offset) {
     const double hz = noteHz(sample, note);
     if (hz <= 0) return;
     const Sample& sm = song_->samples[sample];
-    mixer_.trigger(32, &sm, 0);
+    mixer_.trigger(32, &sm, offset);
     mixer_.setFrequency(32, hz);
     mixer_.setVolume(32, sm.volume / 64.f, 0.5f);
 }
@@ -278,6 +278,20 @@ void Player::processRow() {
     if (pendingStop_) {
         pendingStop_ = false;
         stop();
+        return;
+    }
+    if (metroOn_ && !repeatingRow_ && row_ % metroEvery_ == 0) {
+        if (!click_.length) {  // short decaying square click, generated once
+            click_.length = 1200;
+            click_.data8.resize(click_.length);
+            for (uint32_t i = 0; i < click_.length; ++i) {
+                const double env = std::exp(-(double)i / 180.0);
+                click_.data8[i] = (int8_t)(((i / 12) & 1 ? 1 : -1) * 110 * env);
+            }
+        }
+        mixer_.trigger(33, &click_, 0);
+        mixer_.setFrequency(33, 22050.0);
+        mixer_.setVolume(33, row_ % (metroEvery_ * 4) == 0 ? 0.8f : 0.5f, 0.5f);
     }
 }
 
