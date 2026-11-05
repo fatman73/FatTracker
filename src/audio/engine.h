@@ -44,6 +44,10 @@ public:
     void playPattern(uint16_t pattern);
     void stop();
     void setMute(int ch, bool m);
+    void previewNote(int sample, int note, uint32_t offset = 0);  // jam / keyboard preview (works while stopped)
+    void setMetronome(bool on, int everyRows);
+    void setMixing(int interp, float separation, float gain);  // interp: 0 none, 1 linear, 2 cubic
+    void previewStop();
 
     void lock();    // exclusive, for edits from the UI
     void unlock();
@@ -58,6 +62,19 @@ public:
         publish();
         unlock();
     }
+    // Like edit(), but for changes that reallocate sample data or remove objects: playback
+    // stops and all mixer voices are dropped before `f` runs.
+    template <class F>
+    void editStructure(F&& f) {
+        lock();
+        if (song_) {
+            resetPlayer();
+            f(*song_);
+            resetPlayer();
+        }
+        publish();
+        unlock();
+    }
     void play(uint16_t order);
     void render(float* out, uint32_t frames);
     void snapshot(Telemetry& out) const;
@@ -67,6 +84,7 @@ private:
     static void audioCallback(void* user, float* out, uint32_t frames, uint32_t rate);
     void publish();
     void songEdited();
+    void resetPlayer();  // stops playback and drops every voice (lock held)
 
     void* srw_;  // SRWLOCK storage (pointer-sized)
     std::unique_ptr<Song> song_;

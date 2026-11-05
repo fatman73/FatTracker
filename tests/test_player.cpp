@@ -184,6 +184,28 @@ TEST(player_missing_sample_no_crash) {
     CHECK(!m.active(0));
 }
 
+TEST(player_metronome_clicks_on_beats) {
+    Mixer m(48000);
+    m.setRamp(false);
+    Player p(m);
+    Song s = testSong(4, 64);
+    s.initialSpeed = 1;
+    p.setSong(&s);
+    p.setMetronome(true, 4);
+    p.play();
+    p.tick();  // row 0
+    CHECK(m.active(33));
+    std::vector<float> buf(20000);
+    m.mix(buf.data(), 9000);  // click decays
+    CHECK(!m.active(33));
+    p.tick();  // row 1: no click
+    CHECK(!m.active(33));
+    p.tick();
+    p.tick();
+    p.tick();  // row 4: click
+    CHECK(m.active(33));
+}
+
 TEST(player_mute) {
     Mixer m(48000);
     m.setRamp(false);

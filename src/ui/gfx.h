@@ -48,6 +48,8 @@ public:
     void endGlow(float radiusLogical, float strength);
     void pushClip(RectF r);
     void popClip();
+    void pushRoundedClip(RectF r, float radius);  // anti-aliased rounded mask (layer)
+    void popLayer();
     ID2D1SolidColorBrush* brush(Color c);
 
 private:

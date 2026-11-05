@@ -1,8 +1,9 @@
-﻿#include "ui/pattern_view.h"
+#include "ui/pattern_view.h"
 
 #include <cmath>
 #include <cstdio>
 
+#include "core/edit.h"
 #include "ui/widgets.h"
 
 namespace {
@@ -83,9 +84,9 @@ void PatternView::drawMeters(Gfx& g, Font& f, const Theme& t, RectF area, const 
         if (ch >= kMaxChannels || !c.song || ch >= c.song->numChannels) continue;
         const ChannelTelemetry& ct = c.tel->ch[ch];
         if (ct.muted) continue;
-        const float w = o.l.chanW * 0.3f;
+        const float w = o.l.chanW * 0.17f;
         const float x = o.x0 + o.l.rowNumW + k * o.l.chanW + (o.l.chanW - w) * 0.5f;
-        drawVu(g, t, {x, o.bodyTop + 6.f, w, h}, ct.vu, 0.9f);
+        drawVu(g, t, {x, o.bodyTop + 6.f, w, h}, ct.vu, 1.f);
     }
 }
 
@@ -136,6 +137,68 @@ void PatternView::drawText(Gfx& g, Font& f, const Theme& t, RectF area, const Pa
     g.pushClip({area.x + 2, o.bodyTop, area.w - 4, o.bodyBottom - o.bodyTop});
     f.drawGlyphs(g, glyphs_.data(), (int)glyphs_.size(), o.em);
     g.popClip();
+}
+
+namespace {
+// x offset (in glyph advances) and width of each cursor column inside a cell
+void columnSpan(int col, float gap, float& off, float& w) {
+    static const float base[kColCount] = {0, 3, 4, 5, 6, 7, 8, 9};
+    static const int gaps[kColCount] = {0, 1, 1, 2, 2, 3, 3, 3};
+    off = base[col] + gaps[col] * gap;
+    w = col == kColNote ? 3.f : 1.f;
+}
+}  // namespace
+
+void PatternView::drawCursor(Gfx& g, Font& f, const Theme& t, RectF area, const PatternCtx& c) {
+    const Geo o = geometry(f, area, c);
+    const float gl = o.l.glyph, gapG = o.l.gap / gl;
+    auto chanX = [&](int ch) { return o.x0 + o.l.rowNumW + (ch - o.l.firstChannel) * o.l.chanW; };
+    auto cellX = [&](int ch) { return chanX(ch) + (o.l.chanW - 10.75f * gl) * 0.5f; };
+    g.pushClip({area.x + 2, o.bodyTop, area.w - 4, o.bodyBottom - o.bodyTop});
+    if (c.blockOn) {
+        const int ch0 = c.bCh0 < o.l.firstChannel ? o.l.firstChannel : c.bCh0;
+        const int ch1 = c.bCh1 >= o.l.firstChannel + o.l.visible ? o.l.firstChannel + o.l.visible - 1 : c.bCh1;
+        if (ch1 >= ch0) {
+            const float y0 = o.centerY + (c.bRow0 - c.row) * o.rowH, y1 = o.centerY + (c.bRow1 - c.row + 1) * o.rowH;
+            RectF br = {chanX(ch0) + 2, y0, (ch1 - ch0 + 1) * o.l.chanW - 4, y1 - y0};
+            g.fillRect(br, withAlpha(t.patternSample, 0.22f));
+            g.strokeRect(br, withAlpha(t.patternSample, 0.8f), 1.5f);
+        }
+    }
+    if (c.cursorCh >= o.l.firstChannel && c.cursorCh < o.l.firstChannel + o.l.visible) {
+        float off, w;
+        columnSpan(c.cursorCol, gapG, off, w);
+        RectF cr = {cellX(c.cursorCh) + off * gl - 2, o.centerY + 1, w * gl + 4, o.rowH - 2};
+        const Color col = c.edit ? t.cursor : t.panelDark;
+        g.fillRoundRect(cr, 3.f, withAlpha(col, 0.55f));
+        g.strokeRect(cr, col, 1.5f);
+    }
+    g.popClip();
+}
+
+bool PatternView::cellHit(Font& f, RectF area, const PatternCtx& c, float x, float y, int& row, int& ch,
+                          int& col) const {
+    const Geo o = geometry(f, area, c);
+    if (y < o.bodyTop || y >= o.bodyBottom) return false;
+    const float rel = x - (o.x0 + o.l.rowNumW);
+    if (rel < 0) return false;
+    const int k = (int)(rel / o.l.chanW);
+    if (k >= o.l.visible) return false;
+    ch = o.l.firstChannel + k;
+    if (!c.song || ch >= c.song->numChannels) return false;
+    row = c.row + (int)std::floor((y - o.centerY) / o.rowH);
+    const float gl = o.l.glyph;
+    const float inCell = (rel - k * o.l.chanW - (o.l.chanW - 10.75f * gl) * 0.5f) / gl;
+    col = kColNote;
+    for (int i = kColCount - 1; i >= 0; --i) {
+        float off, w;
+        columnSpan(i, o.l.gap / gl, off, w);
+        if (inCell >= off - 0.12f) {
+            col = i;
+            break;
+        }
+    }
+    return true;
 }
 
 int PatternView::headerHit(Font& f, RectF area, const PatternCtx& c, float x, float y) const {

@@ -67,11 +67,52 @@ void Player::setMute(int c, bool m) {
     mixer_.setVolume(c, m ? 0.f : ch_[c].outVol01, ch_[c].outPan01);
 }
 
+double Player::noteHz(int sample, int note) const {
+    if (!song_ || sample < 0 || sample >= (int)song_->samples.size() || note < 1 || note > 96) return 0;
+    const Sample& sm = song_->samples[sample];
+    if (!isFT2()) {
+        const int ft = ptFinetuneIndex(sm.finetune);
+        const int idx = xmNoteToPt(note);
+        const double period =
+            idx >= 0 ? kPtPeriods[ft][idx] : kPtPeriods[ft][12] * std::pow(2.0, (49 - note) / 12.0);
+        return periodToHz((int32_t)std::lround(period));
+    }
+    int n0 = note - 1 + sm.relativeNote;
+    n0 = n0 < 0 ? 0 : (n0 > 118 ? 118 : n0);
+    return song_->freqMode == FreqMode::Linear ? xmLinearHz(xmLinearPeriod(n0, sm.finetune))
+                                               : xmAmigaHz(xmAmigaPeriod(n0, sm.finetune));
+}
+
+void Player::previewNote(int sample, int note, uint32_t offset) {
+    const double hz = noteHz(sample, note);
+    if (hz <= 0) return;
+    const Sample& sm = song_->samples[sample];
+    mixer_.trigger(32, &sm, offset);
+    mixer_.setFrequency(32, hz);
+    mixer_.setVolume(32, sm.volume / 64.f, 0.5f);
+}
+
+void Player::previewStop() { mixer_.stopVoice(32); }
+
 void Player::songEdited() {
     if (!song_) return;
     mixer_.setNumChannels(song_->numChannels);
     for (int c = song_->numChannels; c < kMaxChannels; ++c) mixer_.stopVoice(c);
+    // the song may have lost patterns or positions (undo, clear): re-validate everything we index
+    if (song_->patterns.empty() || song_->order.empty()) {
+        stop();
+        order_ = pattern_ = row_ = 0;
+        return;
+    }
+    if (patternMode_) {
+        if (pattern_ >= song_->patterns.size()) pattern_ = 0;
+    } else {
+        if (order_ >= song_->order.size()) order_ = 0;
+        pattern_ = song_->order[order_] < song_->patterns.size() ? song_->order[order_] : 0;
+    }
     if (row_ >= patternRows()) row_ = 0;
+    if (breakRow_ >= 256) breakRow_ = 0;
+    if (loopTarget_ >= patternRows()) loopTarget_ = 0;
 }
 
 uint16_t Player::patternRows() const {
@@ -251,6 +292,20 @@ void Player::processRow() {
     if (pendingStop_) {
         pendingStop_ = false;
         stop();
+        return;
+    }
+    if (metroOn_ && !repeatingRow_ && row_ % metroEvery_ == 0) {
+        if (!click_.length) {  // short decaying square click, generated once
+            click_.length = 1200;
+            click_.data8.resize(click_.length);
+            for (uint32_t i = 0; i < click_.length; ++i) {
+                const double env = std::exp(-(double)i / 180.0);
+                click_.data8[i] = (int8_t)(((i / 12) & 1 ? 1 : -1) * 110 * env);
+            }
+        }
+        mixer_.trigger(33, &click_, 0);
+        mixer_.setFrequency(33, 22050.0);
+        mixer_.setVolume(33, row_ % (metroEvery_ * 4) == 0 ? 0.8f : 0.5f, 0.5f);
     }
 }
 

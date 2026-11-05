@@ -22,3 +22,15 @@ struct Theme {
 };
 
 const Theme& themeHybrid();
+
+// Presets 0..themeCount()-1, plus the editable custom theme at index themeCount().
+int themeCount();
+const char* themeName(int i);  // also "CUSTOM" for i == themeCount()
+const Theme& themePreset(int i);
+const Theme& currentTheme();
+int currentThemeIndex();
+void setCurrentTheme(int i);  // the --shot dev mode also uses it
+Theme& customTheme();  // edited by the palette editor; becomes current when edited
+constexpr int kThemeColors = 23;
+const char* themeColorName(int i);
+Color& themeColor(Theme& t, int i);

@@ -7,7 +7,12 @@ constexpr float kValueW = 130.f;
 
 void drawButton(Ui& u, RectF r, const char* label, Gfx::PanelState s, float size) {
     u.g.panel(r, u.t, s);
-    Color c = s == Gfx::PanelState::Active ? u.t.panelLight : u.t.label;
+    Color c = u.t.label;
+    if (s == Gfx::PanelState::Active) {  // readable on the active fill whatever the theme
+        const Color fill = mixColor(u.t.digits, u.t.panelLight, 0.4f);
+        const float lum = 0.3f * fill.r + 0.59f * fill.g + 0.11f * fill.b;
+        c = lum > 0.6f ? Color{0.08f, 0.1f, 0.14f, 1.f} : Color{1.f, 1.f, 1.f, 1.f};
+    }
     u.text.draw(u.g, r, label, size, c, Align::Center);
 }
 
@@ -30,23 +35,26 @@ void drawCounter(Ui& u, RectF r, const char* label, const char* value, bool edit
     }
 }
 
-// ProTracker-style VU bar: a flat bar whose colour depends on the height
-// (green at the bottom, yellow, red at the top).
+// ProTracker style VU bar: flat, its gradient spans the bar itself - red at its top,
+// then orange and yellow, green at the bottom.
 void drawVu(Gfx& g, const Theme& t, RectF r, float level, float alpha) {
     if (level <= 0.001f) return;
     if (level > 1.f) level = 1.f;
     const float bottom = r.y + r.h;
+    const float h = level * r.h;
+    const RectF lit = {r.x, bottom - h, r.w, h};
+    const Color red = t.vuHigh, orange = mixColor(t.vuHigh, t.vuMid, 0.55f), yellow = t.vuMid,
+                green = t.vuLow, deep = mixColor(t.vuLow, {0, 0, 0, 1}, 0.35f);
     struct Seg {
-        float from, to;
-        Color lo, hi;
-    } segs[3] = {{0.f, 0.55f, mixColor(t.vuLow, {0, 0, 0, 1}, 0.2f), t.vuLow},
-                 {0.55f, 0.8f, t.vuLow, t.vuMid},
-                 {0.8f, 1.f, t.vuMid, t.vuHigh}};
-    const RectF lit = {r.x, bottom - level * r.h, r.w, level * r.h};
+        float from, to;  // fraction of the bar, measured from its top
+        Color a, b;
+    } segs[4] = {{0.f, 0.12f, red, orange}, {0.12f, 0.38f, orange, yellow}, {0.38f, 0.62f, yellow, green},
+                 {0.62f, 1.f, green, deep}};
+    // flat bar: no rounding, no shading
     g.pushClip(lit);
     for (const Seg& s : segs) {
-        float y0 = bottom - s.to * r.h, y1 = bottom - s.from * r.h;
-        g.fillRoundGradientV({r.x, y0, r.w, y1 - y0}, 0.f, withAlpha(s.hi, alpha), withAlpha(s.lo, alpha));
+        const float y0 = lit.y + s.from * h, y1 = lit.y + s.to * h;
+        g.fillRoundGradientV({r.x, y0, r.w, y1 - y0 + 0.5f}, 0.f, withAlpha(s.a, alpha), withAlpha(s.b, alpha));
     }
     g.popClip();
 }

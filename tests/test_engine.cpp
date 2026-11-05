@@ -88,6 +88,35 @@ TEST(engine_audio_device_optional) {
     }
 }
 
+TEST(engine_preview_note_while_stopped) {
+    Engine e;
+    e.setSong(noteSong());
+    std::vector<float> buf(960 * 2);
+    e.previewNote(0, 49);
+    e.render(buf.data(), 960);
+    float mx = 0;
+    for (float v : buf) mx = v > mx ? v : mx;
+    CHECK(mx > 0.f);
+    e.previewStop();
+    for (int i = 0; i < 4; ++i) e.render(buf.data(), 960);
+    float after = 0;
+    for (float v : buf) after = v > after ? v : after;
+    CHECK_EQ(after, 0.f);
+}
+
+TEST(player_note_hz_pt_and_ft2) {
+    Mixer m(48000);
+    Player p(m);
+    Song s = testSong(4, 64);
+    p.setSong(&s);
+    CHECK_NEAR(p.noteHz(0, 49), 8287.14, 0.05);
+    Song x = testSong(4, 64, Quirks::FT2);
+    x.freqMode = FreqMode::Linear;
+    x.samples[0].relativeNote = 12;
+    p.setSong(&x);
+    CHECK_NEAR(p.noteHz(0, 49), 16726.0, 0.1);
+}
+
 TEST(engine_no_song_renders_silence) {
     Engine e;
     std::vector<float> buf(480 * 2, 1.f);

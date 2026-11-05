@@ -1,9 +1,15 @@
-﻿// FatTracker entry point: window, message loop, file loading, input routing.
+// FatTracker entry point: window, message loop, file loading, input routing.
 #include <memory>
 #include <vector>
 
+#include <functional>
+
+#include "app/document.h"
+#include "formats/writers.h"
 #include "audio/engine.h"
 #include "formats/formats.h"
+#include "formats/sample_io.h"
+#include "ui/cursor.h"
 #include "ui/font.h"
 #include "ui/gfx.h"
 #include "ui/play_screen.h"
@@ -17,6 +23,8 @@ Gfx g_gfx;
 Text g_text;
 Font g_font;
 Engine* g_engine = nullptr;
+AmigaCursors g_cursors;
+bool g_busy = false;
 PlayScreen g_screen;
 HWND g_hwnd = nullptr;
 bool g_dirty = true;
@@ -47,29 +55,30 @@ void toggleFullscreen(HWND hwnd) {
 
 // Returns false when nothing could be drawn (minimized window, lost device).
 bool drawFrame() {
-    const Theme& t = themeHybrid();
+    const Theme& t = currentTheme();
     if (!g_gfx.beginFrame(t.background)) return false;
     g_screen.draw(g_gfx, g_text, g_font, t, *g_engine);
     g_gfx.endFrame();
     return true;
 }
 
-// Reads a whole file (max 256 MB). Returns an error string or nullptr.
-const char* readFileW(const wchar_t* path, std::vector<uint8_t>& out) {
-    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return "ERROR: CANNOT OPEN FILE";
-    LARGE_INTEGER sz;
-    const char* err = nullptr;
-    if (!GetFileSizeEx(h, &sz)) err = "ERROR: CANNOT READ FILE";
-    else if (sz.QuadPart > 256ll * 1024 * 1024) err = "ERROR: FILE TOO BIG";
-    if (!err) {
-        out.resize((size_t)sz.QuadPart);
-        DWORD got = 0;
-        if (!out.empty() && (!ReadFile(h, out.data(), (DWORD)out.size(), &got, nullptr) || got != out.size()))
-            err = "ERROR: CANNOT READ FILE";
-    }
-    CloseHandle(h);
-    return err;
+std::wstring g_path;  // file of the current song ("" = untitled)
+
+std::wstring iniPath() {
+    wchar_t buf[MAX_PATH];
+    GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    std::wstring p = buf;
+    return p.substr(0, p.find_last_of(L'\\') + 1) + L"FatTracker.ini";
+}
+
+void updateTitle() {
+    if (!g_hwnd) return;
+    const wchar_t* name = g_path.empty() ? L"untitled" : g_path.c_str();
+    for (const wchar_t* p = name; *p; ++p)
+        if (*p == L'\\' || *p == L'/') name = p + 1;
+    wchar_t title[300];
+    wsprintfW(title, L"FatTracker \x2014 %s%s", name, g_screen.dirty() ? L" *" : L"");
+    SetWindowTextW(g_hwnd, title);
 }
 
 bool loadModuleFile(const wchar_t* path) {
@@ -80,8 +89,14 @@ bool loadModuleFile(const wchar_t* path) {
     }
     auto r = loadModule(data.data(), data.size());
     if (!r.ok()) {
-        static char msg[64];
-        wsprintfA(msg, "ERROR: %s", r.error());
+        static char msg[96];
+        const wchar_t* name = path;
+        for (const wchar_t* p = path; *p; ++p)
+            if (*p == L'\\' || *p == L'/') name = p + 1;
+        if (!_wcsnicmp(name, L"smpl.", 5))
+            wsprintfA(msg, "THIS IS A TFMX SAMPLE FILE - LOAD THE MDAT FILE");
+        else
+            wsprintfA(msg, "ERROR: %s", r.error());
         g_screen.setStatus(msg);
         return false;
     }
@@ -89,37 +104,176 @@ bool loadModuleFile(const wchar_t* path) {
     g_engine->setSong(std::make_unique<Song>(static_cast<Song&&>(r.value())));
     g_screen.songChanged();
     g_screen.setStatus(truncated ? "LOADED: FILE TRUNCATED" : "ALL RIGHT");
-    if (g_hwnd) {
-        const wchar_t* name = path;
-        for (const wchar_t* p = path; *p; ++p)
-            if (*p == L'\\' || *p == L'/') name = p + 1;
-        wchar_t title[300];
-        wsprintfW(title, L"FatTracker \x2014 %s", name);
-        SetWindowTextW(g_hwnd, title);
-    }
+    g_path = path;
+    g_screen.setCurrentPath(path);
+    updateTitle();
     return true;
 }
 
-void openFileDialog(HWND hwnd) {
+// Runs `then` right away, or after asking to save unsaved changes.
+void confirmDiscard(HWND hwnd, std::function<void()> then);
+
+bool saveAsDialog(HWND hwnd);
+
+bool saveTo(const std::wstring& path, SaveKind kind) {
+    g_busy = true;
+    SetCursor(g_cursors.busy());
+    SaveResult r = saveSong(*g_engine, path, kind);
+    g_busy = false;
+    SetCursor(g_cursors.arrow());
+    g_screen.setStatus(r.message);
+    if (r.ok && kind == SaveKind::Xm) {
+        g_path = path;
+        g_screen.editor().setClean();
+    }
+    updateTitle();
+    g_dirty = true;
+    return r.ok;
+}
+
+// MOD export first lists what the format cannot keep and asks; other kinds save directly.
+void exportChecked(const std::wstring& path, SaveKind kind) {
+    if (kind == SaveKind::Mod) {
+        g_engine->lock();
+        const ModExport m = exportMod(*g_engine->song());
+        g_engine->unlock();
+        if (!m.warnings.empty()) {
+            static char text[160];
+            wsprintfA(text, "MOD CANNOT KEEP %d FEATURE(S), E.G.: %s", (int)m.warnings.size(), m.warnings[0]);
+            g_screen.ask(text, {"EXPORT", "CANCEL"}, [path](int a) {
+                if (a == 0) saveTo(path, SaveKind::Mod);
+            });
+            g_dirty = true;
+            return;
+        }
+    }
+    saveTo(path, kind);
+}
+
+// DISK OP. saves: ask before replacing an existing file.
+void saveFromDiskOp(const std::wstring& path, SaveKind kind) {
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return exportChecked(path, kind);
+    g_screen.ask("FILE EXISTS. OVERWRITE?", {"OVERWRITE", "CANCEL"}, [path, kind](int a) {
+        if (a == 0) exportChecked(path, kind);
+    });
+    g_dirty = true;
+}
+
+bool saveCurrent(HWND hwnd) {
+    if (!g_path.empty() && kindFromPath(g_path) == SaveKind::Xm) return saveTo(g_path, SaveKind::Xm);
+    return saveAsDialog(hwnd);
+}
+
+bool saveAsDialog(HWND hwnd) {
     wchar_t file[MAX_PATH] = {};
+    std::wstring def = g_path.empty() ? L"untitled.xm" : withExtension(g_path, L".xm");
+    lstrcpynW(file, def.c_str(), MAX_PATH);
     OPENFILENAMEW ofn = {sizeof ofn};
     ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = L"Modules (*.mod;*.xm;*.stk)\0*.mod;*.xm;*.stk;mod.*\0All files (*.*)\0*.*\0";
+    ofn.lpstrFilter = L"FastTracker 2 module (*.xm)\0*.xm\0ProTracker module (*.mod)\0*.mod\0WAV audio (*.wav)\0*.wav\0";
     ofn.lpstrFile = file;
     ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameW(&ofn)) loadModuleFile(file);
+    ofn.lpstrDefExt = L"xm";
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetSaveFileNameW(&ofn)) return false;
+    const SaveKind kind = ofn.nFilterIndex == 2 ? SaveKind::Mod : ofn.nFilterIndex == 3 ? SaveKind::Wav : SaveKind::Xm;
+    const wchar_t* ext = kind == SaveKind::Mod ? L".mod" : kind == SaveKind::Wav ? L".wav" : L".xm";
+    std::wstring path = file;
+    if (kindFromPath(path) != kind) path = withExtension(path, ext);
+    if (kind != SaveKind::Xm) {  // exports never make the song clean
+        exportChecked(path, kind);
+        return false;
+    }
+    return saveTo(path, kind);
+}
+
+void confirmDiscard(HWND hwnd, std::function<void()> then) {
+    if (!g_screen.dirty()) {
+        then();
+        return;
+    }
+    g_screen.ask("THE SONG HAS UNSAVED CHANGES", {"SAVE", "DISCARD", "CANCEL"},
+                 [hwnd, then](int a) {
+                     if (a == 2) return;
+                     if (a == 0 && (!saveCurrent(hwnd) || g_screen.dirty())) return;
+                     then();
+                 });
     g_dirty = true;
+}
+
+void openFileDialog(HWND hwnd) {
+    confirmDiscard(hwnd, [hwnd]() {
+        wchar_t file[MAX_PATH] = {};
+        OPENFILENAMEW ofn = {sizeof ofn};
+        ofn.hwndOwner = hwnd;
+        ofn.lpstrFilter = L"Modules (*.mod;*.xm;*.stk)\0*.mod;*.xm;*.stk;mod.*\0All files (*.*)\0*.*\0";
+        ofn.lpstrFile = file;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        wchar_t dir[MAX_PATH];
+        GetFullPathNameW(g_screen.browseDir().c_str(), MAX_PATH, dir, nullptr);
+        if (!g_screen.browseDir().empty() && g_screen.browseDir() != L"::drives") ofn.lpstrInitialDir = dir;
+        if (GetOpenFileNameW(&ofn)) {
+            loadModuleFile(file);
+            g_screen.openPanel(Panel::Main);
+        }
+        g_dirty = true;
+    });
+}
+
+void loadAnyFile(const std::wstring& path) {
+    std::vector<uint8_t> data;
+    if (const char* err = readFileW(path.c_str(), data)) {
+        g_screen.setStatus(err);
+        return;
+    }
+    const bool sampleSig = data.size() >= 12 && ((!memcmp(data.data(), "RIFF", 4) && !memcmp(data.data() + 8, "WAVE", 4)) ||
+                                                  (!memcmp(data.data(), "FORM", 4) && !memcmp(data.data() + 8, "8SVX", 4)));
+    auto smp = loadSampleFile(data.data(), data.size());
+    if (sampleSig && !smp.ok()) {
+        g_screen.setStatus(smp.error());
+        return;
+    }
+    if (smp.ok()) {
+        const size_t slash = path.find_last_of(L"\\/");
+        g_screen.sampleLoaded(*g_engine, static_cast<Sample&&>(smp.value()), path.substr(slash + 1));
+        return;
+    }
+    confirmDiscard(g_hwnd, [path]() { loadModuleFile(path.c_str()); });
 }
 
 void handle(UiAction a, HWND hwnd) {
     if (a == UiAction::OpenFile) openFileDialog(hwnd);
-    if (a != UiAction::None) g_dirty = true;
+    if (a == UiAction::SaveFile) saveCurrent(hwnd);
+    const std::wstring path = g_screen.actionPath();
+    if (a == UiAction::LoadPath) loadAnyFile(path);
+    if (a == UiAction::SaveXmPath) saveFromDiskOp(path, SaveKind::Xm);
+    if (a == UiAction::SaveModPath) saveFromDiskOp(path, SaveKind::Mod);
+    if (a == UiAction::SaveWavPath) saveFromDiskOp(path, SaveKind::Wav);
+    if (a == UiAction::SaveSamplePath) {
+        auto save = [path]() {
+            std::vector<uint8_t> bytes;
+            g_engine->lock();
+            const Song* s = g_engine->song();
+            const int idx = s ? g_screen.curSampleIndex(*s) : -1;
+            if (idx >= 0 && s->samples[idx].length) bytes = saveSampleWav(s->samples[idx]);
+            g_engine->unlock();
+            if (bytes.empty()) g_screen.setStatus("ERROR: THE SAMPLE IS EMPTY");
+            else g_screen.setStatus(writeFileAtomic(path.c_str(), bytes) ? "SAMPLE SAVED (WAV)" : "ERROR: CANNOT WRITE FILE");
+            g_dirty = true;
+        };
+        if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) save();
+        else g_screen.ask("FILE EXISTS. OVERWRITE?", {"OVERWRITE", "CANCEL"}, [save](int r) { if (r == 0) save(); });
+    }
+    if (a != UiAction::None) {
+        g_dirty = true;
+        updateTitle();
+    }
 }
-
 void mouse(HWND hwnd, LPARAM lp, bool right) {
     float lx, ly;
     deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
+    if (!right) SetCapture(hwnd);
     handle(g_screen.onMouse(lx, ly, right, *g_engine), hwnd);
 }
 
@@ -129,7 +283,14 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_gfx.resize(LOWORD(lp), HIWORD(lp));
             g_dirty = true;
             return 0;
+        case WM_SETCURSOR:
+            if (LOWORD(lp) == HTCLIENT) {
+                SetCursor(g_busy ? g_cursors.busy() : g_cursors.arrow());
+                return TRUE;
+            }
+            break;
         case WM_DPICHANGED: {
+            g_cursors.build(HIWORD(wp));
             const RECT* r = (const RECT*)lp;
             SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top,
                          SWP_NOZORDER | SWP_NOACTIVATE);
@@ -140,8 +301,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 toggleFullscreen(hwnd);
                 return 0;
             }
-            if (wp == VK_F4) break;  // Alt+F4 closes
-            [[fallthrough]];
+            [[fallthrough]];  // Alt+F4 copies the pattern like in ProTracker; close with the window button
         case WM_KEYDOWN: {
             const bool ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0;
             const bool alt = (lp & (1 << 29)) != 0, ext = (lp & (1 << 24)) != 0;
@@ -153,10 +313,32 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             handle(g_screen.onKey((unsigned)wp, shift, ctrl, alt, ext, repeat, *g_engine), hwnd);
             return 0;
         }
+        case WM_KEYUP:
+        case WM_SYSKEYUP:
+            handle(g_screen.onKeyUp((unsigned)wp, *g_engine), hwnd);
+            break;
         case WM_SYSCHAR:
             return 0;  // no menu beep on Alt combinations
         case WM_LBUTTONDOWN:
             mouse(hwnd, lp, false);
+            return 0;
+        case WM_LBUTTONUP: {
+            ReleaseCapture();
+            float lx, ly;
+            deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
+            handle(g_screen.onMouseUp(lx, ly, *g_engine), hwnd);
+            return 0;
+        }
+        case WM_MOUSEWHEEL: {
+            POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            ScreenToClient(hwnd, &pt);
+            float lx, ly;
+            deviceToLogical(g_gfx.viewport(), (float)pt.x, (float)pt.y, lx, ly);
+            handle(g_screen.onWheel(lx, ly, GET_WHEEL_DELTA_WPARAM(wp), *g_engine), hwnd);
+            return 0;
+        }
+        case WM_CHAR:
+            handle(g_screen.onChar((wchar_t)wp, *g_engine), hwnd);
             return 0;
         case WM_RBUTTONDOWN:
             mouse(hwnd, lp, true);
@@ -164,13 +346,16 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_MOUSEMOVE: {
             float lx, ly;
             deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
-            if (g_screen.onMouseMove(lx, ly)) g_dirty = true;
+            if (g_screen.onMouseMove(lx, ly, (wp & MK_LBUTTON) != 0, *g_engine)) g_dirty = true;
             return 0;
         }
         case WM_DROPFILES: {
             HDROP drop = (HDROP)wp;
             wchar_t file[MAX_PATH];
-            if (DragQueryFileW(drop, 0, file, MAX_PATH)) loadModuleFile(file);
+            if (DragQueryFileW(drop, 0, file, MAX_PATH)) {
+                std::wstring path = file;
+                loadAnyFile(path);
+            }
             DragFinish(drop);
             g_dirty = true;
             return 0;
@@ -191,7 +376,11 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             ValidateRect(hwnd, nullptr);
             g_dirty = true;
             return 0;
+        case WM_CLOSE:
+            confirmDiscard(hwnd, [hwnd]() { DestroyWindow(hwnd); });
+            return 0;
         case WM_DESTROY:
+            g_screen.saveSettings(iniPath().c_str());
             PostQuitMessage(0);
             return 0;
     }
@@ -204,11 +393,16 @@ int screenshotMode() {
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     int result = -1;
+    if (argv && argc >= 3 && lstrcmpW(argv[1], L"--cursor") == 0) {  // dev: cursor artwork preview
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        result = AmigaCursors::savePng(argv[2], 64) ? 0 : 1;
+    }
     if (argv && argc >= 3 && lstrcmpW(argv[1], L"--shot") == 0) {
         uint32_t w = argc >= 5 ? (uint32_t)_wtoi(argv[3]) : 1920;
         uint32_t h = argc >= 5 ? (uint32_t)_wtoi(argv[4]) : 1080;
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         result = 1;
+        const bool gfxOk = w && h && g_gfx.initOffscreen(w, h);  // one device for the whole run
         if (argc >= 6 && loadModuleFile(argv[5])) {
             g_engine->play();
             const int seconds10 = argc >= 7 ? (int)(_wtof(argv[6]) * 10) : 15;
@@ -216,7 +410,47 @@ int screenshotMode() {
             for (int i = 0; i < seconds10; ++i) g_engine->render(buf.data(), 4800);
         }
         if (argc >= 8) g_screen.setViewMode(_wtoi(argv[7]));
-        if (w && h && g_gfx.initOffscreen(w, h)) {
+        if (argc >= 9) {  // simulated key presses, e.g. "SPACE DOWN Z X S+DOWN"
+            drawFrame();  // establishes the layout
+            struct Named {
+                const wchar_t* name;
+                unsigned vk;
+            } names[] = {{L"SPACE", VK_SPACE}, {L"UP", VK_UP},       {L"DOWN", VK_DOWN},   {L"LEFT", VK_LEFT},
+                         {L"RIGHT", VK_RIGHT}, {L"TAB", VK_TAB},     {L"DEL", VK_DELETE},  {L"INS", VK_INSERT},
+                         {L"BACK", VK_BACK},   {L"ESC", VK_ESCAPE},  {L"F1", VK_F1},       {L"F2", VK_F2},
+                         {L"F3", VK_F3},       {L"F4", VK_F4},       {L"F5", VK_F5},       {L"STOP", 0xFFFF}};
+            wchar_t* ctx = nullptr;
+            for (wchar_t* tok = wcstok_s(argv[8], L" ", &ctx); tok; tok = wcstok_s(nullptr, L" ", &ctx)) {
+                bool shift = false, ctrl = false, alt = false;
+                for (;;) {
+                    if (!wcsncmp(tok, L"S+", 2)) shift = true;
+                    else if (!wcsncmp(tok, L"C+", 2)) ctrl = true;
+                    else if (!wcsncmp(tok, L"A+", 2)) alt = true;
+                    else break;
+                    tok += 2;
+                }
+                if (!wcsncmp(tok, L"T:", 2)) {  // theme index
+                    setCurrentTheme(_wtoi(tok + 2));
+                    drawFrame();
+                    continue;
+                }
+                if (!wcsncmp(tok, L"P:", 2)) {
+                    const wchar_t* pn = tok + 2;
+                    Panel p = !lstrcmpiW(pn, L"DISKOP") ? Panel::DiskOp : !lstrcmpiW(pn, L"SAMPLER") ? Panel::Sampler
+                            : !lstrcmpiW(pn, L"EDITOP") ? Panel::EditOp : !lstrcmpiW(pn, L"SETUP") ? Panel::Setup : Panel::Help;
+                    g_screen.openPanel(p);
+                    drawFrame();
+                    continue;
+                }
+                unsigned vk = tok[1] ? 0 : (unsigned)towupper(tok[0]);
+                for (const Named& n : names)
+                    if (!lstrcmpiW(tok, n.name)) vk = n.vk;
+                if (vk == 0xFFFF) g_engine->stop();
+                else if (vk) g_screen.onKey(vk, shift, ctrl, alt, false, false, *g_engine);
+                drawFrame();  // refresh the screen's view of the engine between keys
+            }
+        }
+        if (gfxOk) {
             drawFrame();
             result = g_gfx.savePng(argv[2]) ? 0 : 1;
         }
@@ -238,7 +472,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     wc.style = CS_DBLCLKS;
     wc.lpfnWndProc = wndProc;
     wc.hInstance = inst;
-    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hCursor = nullptr;  // Amiga cursor set in WM_SETCURSOR
     wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(1));
     wc.lpszClassName = L"FatTrackerWnd";
     RegisterClassExW(&wc);
@@ -252,11 +486,15 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
                                 CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top, nullptr, nullptr,
                                 inst, nullptr);
     g_hwnd = hwnd;
+    if (hwnd) g_cursors.build(GetDpiForWindow(hwnd));
     if (!hwnd || !g_gfx.init(hwnd)) {
         MessageBoxW(nullptr, L"Direct2D initialization failed.", L"FatTracker", MB_ICONERROR);
         return 1;
     }
     if (!g_engine->startAudio()) g_screen.setStatus(g_engine->audioStatus());
+    g_screen.loadSettings(iniPath().c_str(), *g_engine);
+    g_engine->setSong(std::make_unique<Song>(makeEmptySong(g_screen.defaultChannels())));
+    g_screen.songChanged();
     SetTimer(hwnd, kTimerAudio, 2000, nullptr);
     SetTimer(hwnd, kTimerClock, 1000, nullptr);
     {  // FatTracker.exe <module>  (also used by "Open with")

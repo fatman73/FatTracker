@@ -69,6 +69,13 @@ public:
     double periodToHz(int32_t period) const;
     void setMute(int ch, bool m);
     void songEdited();  // call after changing the song in place (e.g. channel count)
+    double noteHz(int sample, int note) const;  // playback rate of `sample` at `note` (1..96)
+    void previewNote(int sample, int note, uint32_t offset = 0);  // jam a note on preview voice 32
+    void previewStop();
+    void setMetronome(bool on, int everyRows) {
+        metroOn_ = on;
+        metroEvery_ = everyRows < 1 ? 1 : everyRows;
+    }
     const ChannelState& channel(int ch) const { return ch_[ch < 0 ? 0 : (ch >= kMaxChannels ? kMaxChannels - 1 : ch)]; }
     const Song* song() const { return song_; }
 
@@ -110,6 +117,9 @@ private:
     uint8_t patDelay_ = 0;
     bool repeatingRow_ = false;
     bool pendingStop_ = false;  // F00 seen on the current row
+    bool metroOn_ = false;
+    int metroEvery_ = 4;
+    Sample click_;  // metronome click, generated on first use
     bool posJump_ = false, break_ = false, loopJump_ = false;
     uint16_t jumpOrder_ = 0, breakRow_ = 0, loopTarget_ = 0;
     uint32_t visited_[8] = {};
