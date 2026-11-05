@@ -5,13 +5,14 @@
 
 #include <cstring>
 
+#include "core/floppy.h"
 #include "core/mixer.h"
 #include "core/player.h"
 
 static_assert(sizeof(SRWLOCK) == sizeof(void*), "SRWLOCK storage");
 #define SRW reinterpret_cast<PSRWLOCK>(const_cast<void**>(&srw_))
 
-Engine::Engine() : srw_(nullptr), mixer_(new Mixer(48000)), player_(new Player(*mixer_)) {
+Engine::Engine() : srw_(nullptr), mixer_(new Mixer(48000)), player_(new Player(*mixer_)), floppy_(new Floppy) {
     InitializeSRWLock(SRW);
     tel_.rate = 48000;
 }
@@ -24,6 +25,7 @@ Engine::~Engine() {
     audio_.close();
     delete player_;
     delete mixer_;
+    delete floppy_;
 }
 
 bool Engine::startAudio() {
@@ -60,6 +62,7 @@ void Engine::audioCallback(void* user, float* out, uint32_t frames, uint32_t rat
     if (e->mixer_->rate() != rate) {
         AcquireSRWLockExclusive(reinterpret_cast<PSRWLOCK>(&e->srw_));
         e->mixer_->setRate(rate);
+        e->floppy_->setRate(rate);
         ReleaseSRWLockExclusive(reinterpret_cast<PSRWLOCK>(&e->srw_));
     }
     e->render(out, frames);
@@ -112,6 +115,48 @@ void Engine::previewNote(int sample, int note, uint32_t offset) {
     unlock();
 }
 
+void Engine::setPure(int model) {
+    lock();
+    const int m = model < 0 || model > 2 ? 0 : model;
+    if (m && !pure_) floppy_->insert();
+    pure_ = m;
+    mixer_->setPaula(m == 1 ? PaulaModel::A500 : m == 2 ? PaulaModel::A1200 : PaulaModel::None);
+    unlock();
+}
+
+void Engine::setDriveVolume(float v01) {
+    lock();
+    driveGain_ = v01 < 0 ? 0 : (v01 > 1 ? 1 : v01);
+    unlock();
+}
+
+void Engine::setFloppySounds(const Sample* motor, const Sample* step, const Sample* insert) {
+    lock();
+    floppy_->setSounds(motor, step, insert);
+    unlock();
+}
+
+double Engine::floppyRead(uint32_t bytes) {
+    lock();
+    const double t = pure_ ? floppy_->read(bytes) : 0.0;
+    unlock();
+    return t;
+}
+
+double Engine::floppyWrite(uint32_t bytes) {
+    lock();
+    const double t = pure_ ? floppy_->write(bytes) : 0.0;
+    unlock();
+    return t;
+}
+
+double Engine::floppyDir() {
+    lock();
+    const double t = pure_ ? floppy_->dir() : 0.0;
+    unlock();
+    return t;
+}
+
 void Engine::previewStop() {
     lock();
     player_->previewStop();
@@ -148,6 +193,7 @@ void Engine::render(float* out, uint32_t frames) {
     } else {
         std::memset(out, 0, sizeof(float) * 2 * frames);
     }
+    if (pure_) floppy_->mix(out, frames, driveGain_);  // mechanical noise: not through Paula's filters
     publish();
     unlock();
 }
@@ -166,6 +212,7 @@ void Engine::publish() {
     tel_.playFrames = playFrames_;
     tel_.rate = mixer_->rate();
     tel_.numChannels = song_ ? song_->numChannels : 0;
+    tel_.led = mixer_->led();
     for (int c = 0; c < 32; ++c) {
         tel_.ch[c].vu = mixer_->vu(c);
         tel_.ch[c].active = mixer_->active(c);

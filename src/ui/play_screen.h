@@ -182,6 +182,8 @@ private:
     UiAction setupMouse(float x, float y, bool right, Engine& e);
     RectF setupRect(int id) const;
     int interp_ = 2, separationPct_ = 100, gainPct_ = 100, defaultChannels_ = 4;
+    int pure_ = 0, drivePct_ = 70, themeBeforePure_ = 0;  // Pure mode: 0 off, 1 A500, 2 A1200
+    bool dirRead_ = false;
     int selColor_ = 0;
     int patternRowsCache_ = 64;
 
@@ -190,4 +192,6 @@ public:
     void loadSettings(const wchar_t* ini, Engine& e);
     void saveSettings(const wchar_t* ini) const;
     int defaultChannels() const { return defaultChannels_; }
+    void setPure(int mode, Engine& e);  // switches the classic theme too
+    bool takeDirRead() { const bool r = dirRead_; dirRead_ = false; return r; }  // DISK OP. listed a folder
 };

@@ -366,8 +366,12 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     }
     if (bottomPattern) pattern_.drawMeters(g, f, t, L_.pattern, pc);
     g.endGlow(7.f, t.glow);
-    if (topMain) tx.draw(g, {L_.logo.x, L_.logo.y + 72, L_.logo.w, 30}, "32 CHANNELS   \xB7   16 BIT   \xB7   V0.3", 14.f,
-            t.panelDark, Align::Center);
+    if (topMain) {
+        const char* sub = "32 CHANNELS   \xB7   16 BIT   \xB7   V0.3";
+        if (pure_ == 1) sub = last_.led ? "PURE   \xB7   AMIGA 500   \xB7   LED ON" : "PURE   \xB7   AMIGA 500   \xB7   LED OFF";
+        if (pure_ == 2) sub = last_.led ? "PURE   \xB7   AMIGA 1200   \xB7   LED ON" : "PURE   \xB7   AMIGA 1200   \xB7   LED OFF";
+        tx.draw(g, {L_.logo.x, L_.logo.y + 72, L_.logo.w, 30}, sub, 14.f, t.panelDark, Align::Center);
+    }
 
     if (bottomPattern) pattern_.drawText(g, f, t, L_.pattern, pc);
     drawDialog(g, tx, t);

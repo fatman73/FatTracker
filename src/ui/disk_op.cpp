@@ -76,6 +76,7 @@ void PlayScreen::setCurrentPath(const std::wstring& p) {
 }
 
 void PlayScreen::diskRefresh() {
+    dirRead_ = true;
     entries_.clear();
     if (dir_.empty()) {
         wchar_t buf[MAX_PATH];
