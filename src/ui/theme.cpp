@@ -10,7 +10,7 @@ Color withAlpha(Color c, float a) { return {c.r, c.g, c.b, a}; }
 // rendered as a modern UI: rounded soft-gradient panels, sunken fields, smooth fonts, glow.
 const Theme& themeHybrid() {
     static const Theme t = {
-        rgb(0x1B1F26),  // background
+        rgb(0x8A929E),  // background (grey; only the pattern stays dark)
         rgb(0xB9C0CB),  // panel
         rgb(0xF3F6FA),  // panelLight
         rgb(0x5B6372),  // panelDark
@@ -30,7 +30,7 @@ const Theme& themeHybrid() {
         rgb(0x2FE06A),  // vuLow
         rgb(0xF5E14A),  // vuMid
         rgb(0xFF4A3D),  // vuHigh
-        rgb(0x05080D),  // scopeBg
+        rgb(0x323945),  // scopeBg (dark grey)
         rgb(0x46FF72),  // scopeLine
         rgb(0x1B1F27),  // status
         1.0f,           // bevelGradient

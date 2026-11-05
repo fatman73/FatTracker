@@ -248,6 +248,12 @@ void Gfx::strokeRect(RectF r, Color c, float width) {
 void Gfx::fillGradientV(RectF r, Color top, Color bottom) { fillRoundGradientV(r, 0.f, top, bottom); }
 
 void Gfx::fillRoundGradientV(RectF r, float radius, Color top, Color bottom) {
+    fillGradient(r, radius, top, bottom, false);
+}
+
+void Gfx::fillGradientH(RectF r, Color left, Color right) { fillGradient(r, 0.f, left, right, true); }
+
+void Gfx::fillGradient(RectF r, float radius, Color top, Color bottom, bool horizontal) {
     uint32_t k0 = pack(top), k1 = pack(bottom);
     ID2D1GradientStopCollection* stops = nullptr;
     for (auto& g : grad_)
@@ -261,7 +267,8 @@ void Gfx::fillRoundGradientV(RectF r, float radius, Color top, Color bottom) {
         e = {{k0, k1}, stops};
     }
     ID2D1LinearGradientBrush* lb = nullptr;
-    if (SUCCEEDED(dc_->CreateLinearGradientBrush({{r.x, r.y}, {r.x, r.y + r.h}}, stops, &lb))) {
+    const D2D1_POINT_2F end = horizontal ? D2D1_POINT_2F{r.x + r.w, r.y} : D2D1_POINT_2F{r.x, r.y + r.h};
+    if (SUCCEEDED(dc_->CreateLinearGradientBrush({{r.x, r.y}, end}, stops, &lb))) {
         if (radius > 0)
             dc_->FillRoundedRectangle({drect(r), radius, radius}, lb);
         else

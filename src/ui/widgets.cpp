@@ -30,6 +30,8 @@ void drawCounter(Ui& u, RectF r, const char* label, const char* value, bool edit
     }
 }
 
+// ProTracker-style VU bar: a flat bar whose colour depends on the height
+// (green at the bottom, yellow, red at the top).
 void drawVu(Gfx& g, const Theme& t, RectF r, float level, float alpha) {
     if (level <= 0.001f) return;
     if (level > 1.f) level = 1.f;
@@ -37,11 +39,11 @@ void drawVu(Gfx& g, const Theme& t, RectF r, float level, float alpha) {
     struct Seg {
         float from, to;
         Color lo, hi;
-    } segs[3] = {{0.f, 0.6f, t.vuLow, mixColor(t.vuLow, t.vuMid, 0.5f)},
-                 {0.6f, 0.85f, mixColor(t.vuLow, t.vuMid, 0.5f), t.vuMid},
-                 {0.85f, 1.f, t.vuMid, t.vuHigh}};
-    // fixed gradients per segment (cached by the renderer), clipped to the level
-    g.pushClip({r.x, bottom - level * r.h, r.w, level * r.h});
+    } segs[3] = {{0.f, 0.55f, mixColor(t.vuLow, {0, 0, 0, 1}, 0.2f), t.vuLow},
+                 {0.55f, 0.8f, t.vuLow, t.vuMid},
+                 {0.8f, 1.f, t.vuMid, t.vuHigh}};
+    const RectF lit = {r.x, bottom - level * r.h, r.w, level * r.h};
+    g.pushClip(lit);
     for (const Seg& s : segs) {
         float y0 = bottom - s.to * r.h, y1 = bottom - s.from * r.h;
         g.fillRoundGradientV({r.x, y0, r.w, y1 - y0}, 0.f, withAlpha(s.hi, alpha), withAlpha(s.lo, alpha));

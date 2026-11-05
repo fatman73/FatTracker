@@ -36,6 +36,14 @@ void PatternView::drawBack(Gfx& g, Text& tx, Font& f, const Theme& t, RectF area
     for (int k = 0; k < o.l.visible; ++k) {
         const int ch = o.l.firstChannel + k;
         RectF hr = {o.x0 + o.l.rowNumW + k * o.l.chanW + 3, hy, o.l.chanW - 6, o.headerH};
+        const int songCh = c.song ? c.song->numChannels : 0;
+        if (ch >= songCh) {  // column beyond the song's channels: shown empty
+            g.fillRoundGradientV(hr, t.corner, withAlpha(t.panel, 0.25f), withAlpha(t.panel, 0.15f));
+            char buf[8];
+            std::snprintf(buf, sizeof buf, "%02d", ch + 1);
+            tx.draw(g, hr, buf, hs, withAlpha(t.rowNumber, 0.6f), Align::Center);
+            continue;
+        }
         const bool muted = c.tel && c.tel->ch[ch].muted;
         g.panel(hr, t, muted ? Gfx::PanelState::Pressed : Gfx::PanelState::Normal);
         char buf[24];
@@ -72,11 +80,12 @@ void PatternView::drawMeters(Gfx& g, Font& f, const Theme& t, RectF area, const 
     const float h = o.centerY - o.bodyTop - 6.f;
     for (int k = 0; k < o.l.visible; ++k) {
         const int ch = o.l.firstChannel + k;
+        if (ch >= kMaxChannels || !c.song || ch >= c.song->numChannels) continue;
         const ChannelTelemetry& ct = c.tel->ch[ch];
         if (ct.muted) continue;
-        const float w = o.l.chanW * 0.2f;
+        const float w = o.l.chanW * 0.3f;
         const float x = o.x0 + o.l.rowNumW + k * o.l.chanW + (o.l.chanW - w) * 0.5f;
-        drawVu(g, t, {x, o.bodyTop + 6.f, w, h}, ct.vu, 0.55f);
+        drawVu(g, t, {x, o.bodyTop + 6.f, w, h}, ct.vu, 0.9f);
     }
 }
 
@@ -136,5 +145,7 @@ int PatternView::headerHit(Font& f, RectF area, const PatternCtx& c, float x, fl
     float rel = x - (o.x0 + o.l.rowNumW);
     if (rel < 0) return -1;
     int k = (int)(rel / o.l.chanW);
-    return k < o.l.visible ? o.l.firstChannel + k : -1;
+    const int ch = o.l.firstChannel + k;
+    const int songCh = c.song ? c.song->numChannels : 0;
+    return (k < o.l.visible && ch < songCh) ? ch : -1;
 }
