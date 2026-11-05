@@ -47,6 +47,9 @@ struct Dialog {
     std::function<void(int)> onAnswer;  // index of the clicked button
 };
 
+// RENAME helper (disk_op.cpp): the typed name with the file's extension or Amiga prefix kept
+std::wstring renameTarget(const std::wstring& from, std::wstring typed);
+
 class PlayScreen {
 public:
     void draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e);

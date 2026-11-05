@@ -197,7 +197,10 @@ double sampleDetectPitch(const Sample& s, uint32_t a, uint32_t b) {
     const uint32_t n = std::min<uint32_t>(b - a, 16384);
     if (n < 64) return 0;
     std::vector<float> x(n);
-    for (uint32_t i = 0; i < n; ++i) x[i] = (float)get(s, a + i) / maxValue(s);
+    double mean = 0;
+    for (uint32_t i = 0; i < n; ++i) mean += get(s, a + i);
+    mean /= n;  // a DC offset would hide the zero crossings
+    for (uint32_t i = 0; i < n; ++i) x[i] = (float)((get(s, a + i) - mean) / maxValue(s));
     const int maxLag = (int)std::min<uint32_t>(n / 2, 8192);
     auto corr = [&](int lag) {
         double acc = 0;
@@ -228,8 +231,8 @@ double sampleDetectPitch(const Sample& s, uint32_t a, uint32_t b) {
     return 1.0 / (best + std::clamp(shift, -0.5, 0.5));
 }
 
-bool sampleTuneToC(Sample& s) {
-    const double cycles = sampleDetectPitch(s, 0, s.length);
+bool sampleTuneToC(Sample& s, uint32_t a, uint32_t b) {
+    const double cycles = sampleDetectPitch(s, a, b);
     if (cycles <= 0) return false;
     sampleSetRate(s, 261.6256 / cycles);  // rate / period = C-4
     return true;
@@ -269,13 +272,21 @@ void sampleHighPass(Sample& s, uint32_t a, uint32_t b) {
 void sampleEcho(Sample& s, uint32_t a, uint32_t b) {
     wholeIfEmpty(s, a, b);
     const uint32_t d = (uint32_t)std::max(1.0, sampleRateHz(s) / 8.0);
-    std::vector<long> y(b - a);
-    for (uint32_t i = a; i < b; ++i) {
-        long v = get(s, i);
-        if (i - a >= d) v += std::lround(0.4 * y[i - a - d]);
-        y[i - a] = std::clamp(v, (long)-maxValue(s) - 1, (long)maxValue(s));
-        put(s, i, y[i - a]);
+    // e = the selected sound with its own echoes; it is added from `a` to the end of the sample
+    std::vector<double> e(s.length - a);
+    for (uint32_t i = a; i < s.length; ++i) {
+        const double x = i < b ? get(s, i) : 0.0;
+        const double fb = i - a >= d ? 0.4 * e[i - a - d] : 0.0;
+        e[i - a] = x + fb;
+        if (fb != 0) put(s, i, std::lround(get(s, i) + fb));
     }
+}
+
+void sampleBakeRate(Sample& s) {
+    const double r = sampleRateHz(s);
+    if (s.length && std::fabs(r - 8363.0) > 0.5) sampleResample(s, 8363.0 / r);
+    s.relativeNote = 0;
+    s.finetune = 0;
 }
 
 void sampleBoost(Sample& s, uint32_t a, uint32_t b) {

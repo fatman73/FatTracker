@@ -197,6 +197,7 @@ bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smp
 // The sampler's SAMPLE button: first press records, second press puts the recording in the slot.
 void finishRecording() {
     const uint32_t rate = g_capture.rate();
+    const bool lost = g_capture.lost(), full = g_capture.full();
     std::vector<float> rec = g_capture.take();
     g_screen.setRecording(false);
     if (rec.size() < rate / 50) {
@@ -206,12 +207,13 @@ void finishRecording() {
     const double secs = (double)rec.size() / rate;
     g_screen.sampleLoaded(*g_engine, sampleFromRecording(rec.data(), rec.size(), rate), L"RECORDING");
     static char msg[48];
-    wsprintfA(msg, "RECORDED %d.%d S", (int)secs, (int)(secs * 10) % 10);
+    wsprintfA(msg, lost ? "INPUT LOST - KEPT %d.%d S" : full ? "60 S LIMIT - RECORDED %d.%d S" : "RECORDED %d.%d S",
+              (int)secs, (int)(secs * 10) % 10);
     g_screen.setStatus(msg);
 }
 
 void toggleRecording() {
-    if (g_capture.running()) return finishRecording();
+    if (g_screen.recording()) return finishRecording();  // also right after the time limit stopped it
     if (!g_capture.start()) {
         g_screen.setStatus("NO AUDIO INPUT TO RECORD FROM");
         return;

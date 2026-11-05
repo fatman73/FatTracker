@@ -180,6 +180,7 @@ void PlayScreen::samplerOp(int op, Engine& e) {
             break;
         case S_STOP:
             e.previewStop();
+            if (sampling_) recordRequested_ = true;  // STOP also ends a recording
             break;
         case S_CUT:
             if (!hasSel) return setStatus("SELECT A RANGE FIRST");
@@ -260,6 +261,8 @@ void PlayScreen::samplerOp(int op, Engine& e) {
             panel_ = Panel::Main;
             break;
         case S_RESAMPLE:
+            if (s->quirks == Quirks::PT23)  // ProTracker plays every sample at one rate: no room for a resample
+                return setStatus("RESAMPLE NEEDS AN XM SONG (MOD PLAYS ONE RATE)");
             ask("RESAMPLE THE SAMPLE (PITCH STAYS)", {"HALF", "DOUBLE", "CANCEL"}, [this, &e, idx](int k) {
                 if (k == 2) return;
                 const Song* song = e.song();
@@ -275,9 +278,15 @@ void PlayScreen::samplerOp(int op, Engine& e) {
             });
             break;
         case S_TUNE: {
-            bool ok = false;
-            modify([&](Sample& sm) { ok = sampleTuneToC(sm); }, "TUNED: C-4 PLAYS C");
-            if (!ok) setStatus("NO CLEAR PITCH FOUND");
+            Sample probe = s->samples[idx];  // the pitch search runs outside the audio lock
+            if (!sampleTuneToC(probe, hasSel ? a : 0, hasSel ? b : 0)) return setStatus("NO CLEAR PITCH FOUND");
+            const int8_t rel = probe.relativeNote, ft = probe.finetune;
+            const bool pt = s->quirks == Quirks::PT23;
+            modify([&](Sample& sm) {
+                sm.relativeNote = rel;
+                sm.finetune = ft;
+                if (pt) sampleBakeRate(sm);  // MOD: the tuning goes into the data
+            }, "TUNED: C-4 PLAYS C");
             break;
         }
         case S_MIX:
@@ -383,6 +392,8 @@ void PlayScreen::sampleLoaded(Engine& e, Sample&& s, const std::wstring& fileNam
     s.name[n] = 0;
     const Song* cur = e.song();
     if (!cur) return;
+    nameEdit_ = 0;  // a name being typed belonged to the old sample
+    if (cur->quirks == Quirks::PT23) sampleBakeRate(s);  // ProTracker ignores the relative note
     // the slot under the SAMPLE counter; an XM instrument without a sample gets a new one mapped to all notes
     int idx = curSampleIndex(*cur);
     const bool inst = !cur->instruments.empty();

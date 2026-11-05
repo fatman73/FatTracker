@@ -24,6 +24,7 @@ bool AudioCapture::start() {
     data_.clear();
     frames_ = 0;
     full_ = false;
+    lost_ = false;
     stop_ = false;
     initOk_ = false;
     readyEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -91,10 +92,11 @@ void AudioCapture::run() {
             isFloat = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(fmt)->SubFormat.Data1 == WAVE_FORMAT_IEEE_FLOAT;
         if (!(isFloat && bits == 32) && !(!isFloat && (bits == 16 || bits == 24 || bits == 32))) hr = E_FAIL;
     }
-    if (SUCCEEDED(hr)) hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 200000, 0, fmt, nullptr);
+    // 1 s of device buffer (units of 100 ns): the 10 ms polling never lets it overflow
+    if (SUCCEEDED(hr)) hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 10000000, 0, fmt, nullptr);
     if (SUCCEEDED(hr)) hr = client->GetService(__uuidof(IAudioCaptureClient), (void**)&cap);
     if (SUCCEEDED(hr)) {
-        data_.reserve((size_t)(rate_ * 10));
+        data_.reserve((size_t)(kMaxSeconds * rate_) + rate_);  // no reallocation while recording
         hr = client->Start();
     }
     initOk_ = SUCCEEDED(hr);
@@ -105,11 +107,21 @@ void AudioCapture::run() {
     while (initOk_ && !stop_) {
         Sleep(10);
         UINT32 packet = 0;
-        while (SUCCEEDED(cap->GetNextPacketSize(&packet)) && packet > 0) {
+        for (;;) {
+            if (FAILED(cap->GetNextPacketSize(&packet))) {  // device unplugged / invalidated
+                lost_ = true;
+                stop_ = true;
+                break;
+            }
+            if (!packet) break;
             BYTE* buf = nullptr;
             UINT32 frames = 0;
             DWORD flags = 0;
-            if (FAILED(cap->GetBuffer(&buf, &frames, &flags, nullptr, nullptr))) break;
+            if (FAILED(cap->GetBuffer(&buf, &frames, &flags, nullptr, nullptr))) {
+                lost_ = true;
+                stop_ = true;
+                break;
+            }
             float peak = 0;
             for (UINT32 f = 0; f < frames && data_.size() < maxFrames; ++f) {
                 float sum = 0;

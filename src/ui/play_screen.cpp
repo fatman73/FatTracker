@@ -131,6 +131,7 @@ void PlayScreen::clearStatusIf(const char* prefix) {
 }
 
 void PlayScreen::songChanged() {
+    nameEdit_ = 0;
     viewRow_ = viewPattern_ = viewOrder_ = sample_ = firstChannel_ = 0;
     curCh_ = curCol_ = 0;
     blockOn_ = false;

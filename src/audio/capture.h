@@ -18,6 +18,7 @@ public:
     void stop();       // waits for the worker thread
     bool running() const { return running_.load(); }
     bool full() const { return full_.load(); }   // reached kMaxSeconds
+    bool lost() const { return lost_.load(); }   // the input device went away
     float level() const { return level_.load(); }  // recent peak 0..1 (for the status line)
     double seconds() const;
     uint32_t rate() const { return rate_; }
@@ -29,7 +30,7 @@ private:
 
     void* thread_ = nullptr;
     void* readyEvent_ = nullptr;
-    std::atomic<bool> stop_{false}, running_{false}, full_{false};
+    std::atomic<bool> stop_{false}, running_{false}, full_{false}, lost_{false};
     std::atomic<float> level_{0.f};
     std::atomic<size_t> frames_{0};
     bool initOk_ = false;

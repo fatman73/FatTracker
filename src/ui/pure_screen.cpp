@@ -199,7 +199,7 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     for (char& ch : name)
         if (ch == ' ') ch = '_';
     c.text(smr.x + 106, smr.y + 3, name, kValueInk, kMedium);
-    if (nameEdit_ == 2) c.fill(smr.x + 106 + (int)line_.cursor * 8, smr.y + 9, 7, 1, kCursor);
+    if (nameEdit_ == 2) c.fill(smr.x + 106 + (int)std::min<size_t>(line_.cursor, 21) * 8, smr.y + 9, 7, 1, kCursor);
     box(c, pure::loadButton());
     label(c, pure::loadButton(), "LOAD");
 

@@ -131,3 +131,30 @@ TEST(sample_tools_on_empty_sample) {
     sampleDraw(e, 0, 0, 5, 5);
     CHECK_EQ(e.length, 0u);
 }
+
+TEST(sample_bake_rate_for_protracker) {
+    // ProTracker songs ignore the relative note: the rate has to live in the data
+    Sample s = sine8(1000, 50);
+    sampleSetRate(s, 16726);  // one octave up
+    sampleBakeRate(s);
+    CHECK_EQ(s.relativeNote, 0);
+    CHECK_EQ(s.finetune, 0);
+    CHECK_NEAR(s.length, 500, 2);  // half as many samples per second at 8363 Hz: same pitch
+    CHECK_NEAR(sampleDetectPitch(s, 0, s.length), 1.0 / 25, 0.001);
+}
+
+TEST(sample_tune_uses_the_selection) {
+    // silence first, then the note: tuning the selected note must work
+    Sample s = flat8(30000, 0);
+    for (uint32_t i = 20000; i < 30000; ++i) s.data8[i] = (int8_t)std::lround(100 * std::sin(2 * kPi * i / 40.0));
+    CHECK(sampleTuneToC(s, 20000, 30000));
+    CHECK_NEAR(sampleRateHz(s) / 40.0, 261.63, 261.63 * 0.01);
+}
+
+TEST(sample_echo_tail_runs_to_the_end) {
+    Sample s = flat8(4000, 0);
+    sampleSetRate(s, 8000);
+    s.data8[0] = 100;
+    sampleEcho(s, 0, 10);  // only the hit is selected: the echoes still ring out
+    CHECK_NEAR(s.data8[1000], 40, 2);
+}
