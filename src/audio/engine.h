@@ -10,6 +10,7 @@
 class Mixer;
 class Player;
 class Floppy;
+class TfmxPlayer;
 struct Sample;
 
 struct ChannelTelemetry {
@@ -61,6 +62,10 @@ public:
     double floppyWrite(uint32_t bytes);
     double floppyDir();
     void floppyCancel();  // the user skipped a simulated load
+    // TFMX (Huelsbeck) songs have their own player; the Song becomes an empty placeholder.
+    bool loadTfmx(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl, size_t smplSize, const char* name);
+    bool tfmx() const { return tfmxOn_; }
+    const char* tfmxFormat() const;
 
     void lock();    // exclusive, for edits from the UI
     void unlock();
@@ -104,6 +109,8 @@ private:
     Mixer* mixer_;
     Player* player_;
     Floppy* floppy_;
+    TfmxPlayer* tfmx_;
+    bool tfmxOn_ = false, tfmxPlaying_ = false;
     int pure_ = 0;
     float driveGain_ = 0.7f;
     AudioOut audio_;

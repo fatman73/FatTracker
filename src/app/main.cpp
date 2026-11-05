@@ -9,6 +9,7 @@
 #include "formats/writers.h"
 #include "audio/engine.h"
 #include "formats/formats.h"
+#include "core/tfmx_player.h"
 #include "formats/sample_io.h"
 #include "ui/cursor.h"
 #include "ui/font.h"
@@ -117,6 +118,53 @@ void loadFloppySounds() {
     for (Sample& s : snd) s = Sample{};
 }
 
+// TFMX songs are two files: mdat.<name> (song) and smpl.<name> (samples), or .mdat/.smpl, .tfx/.sam.
+// Either one may be chosen; returns false when this is not TFMX at all.
+bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
+    const size_t slash = path.find_last_of(L"\\/");
+    const std::wstring dir = slash == std::wstring::npos ? L"" : path.substr(0, slash + 1);
+    const std::wstring file = slash == std::wstring::npos ? path : path.substr(slash + 1);
+    std::wstring mdatPath = path, smplPath;
+    auto swapPrefix = [&](const wchar_t* from, const wchar_t* to) {
+        return dir + to + file.substr(wcslen(from));
+    };
+    auto swapExt = [&](const std::wstring& p, size_t extLen, const wchar_t* to) { return p.substr(0, p.size() - extLen) + to; };
+    auto hasSuffix = [&](const wchar_t* s) {
+        const size_t n = wcslen(s);
+        return file.size() > n && _wcsicmp(file.c_str() + file.size() - n, s) == 0;
+    };
+    if (!_wcsnicmp(file.c_str(), L"smpl.", 5)) mdatPath = swapPrefix(L"smpl.", L"mdat.");
+    else if (hasSuffix(L".smpl")) mdatPath = swapExt(path, 5, L".mdat");
+    else if (hasSuffix(L".sam")) mdatPath = swapExt(path, 4, L".tfx");
+    if (mdatPath != path && readFileW(mdatPath.c_str(), data)) return false;
+    if (!TfmxPlayer::detect(data.data(), data.size())) return false;
+    const std::wstring mfile = mdatPath.substr(slash == std::wstring::npos ? 0 : slash + 1);
+    if (!_wcsnicmp(mfile.c_str(), L"mdat.", 5)) smplPath = dir + L"smpl." + mfile.substr(5);
+    else if (mfile.size() > 5 && !_wcsicmp(mfile.c_str() + mfile.size() - 5, L".mdat")) smplPath = swapExt(mdatPath, 5, L".smpl");
+    else if (mfile.size() > 4 && !_wcsicmp(mfile.c_str() + mfile.size() - 4, L".tfx")) smplPath = swapExt(mdatPath, 4, L".sam");
+    std::vector<uint8_t> smpl;
+    if (smplPath.empty() || readFileW(smplPath.c_str(), smpl)) {
+        g_screen.setStatus("TFMX: SMPL FILE NOT FOUND NEXT TO MDAT");
+        return true;
+    }
+    char name[21] = {};
+    const std::wstring shown = !_wcsnicmp(mfile.c_str(), L"mdat.", 5) ? mfile.substr(5) : mfile;
+    for (size_t i = 0; i < 20 && i < shown.size(); ++i) name[i] = shown[i] < 127 ? (char)towupper(shown[i]) : '_';
+    if (!g_engine->loadTfmx(data.data(), data.size(), smpl.data(), smpl.size(), name)) {
+        g_screen.setStatus("TFMX: CANNOT PLAY THIS FILE");
+        return true;
+    }
+    g_engine->floppyRead((uint32_t)(data.size() + smpl.size()));
+    g_screen.songChanged();
+    static char msg[64];
+    wsprintfA(msg, "%s - PLAYBACK ONLY", g_engine->tfmxFormat());
+    g_screen.setStatus(msg);
+    g_path.clear();  // nothing to save over
+    g_screen.setCurrentPath(mdatPath);
+    updateTitle();
+    return true;
+}
+
 bool loadModuleFile(const wchar_t* path) {
     finishPendingLoad();  // a load in progress lands first
     std::vector<uint8_t> data;
@@ -124,6 +172,7 @@ bool loadModuleFile(const wchar_t* path) {
         g_screen.setStatus(err);
         return false;
     }
+    if (loadTfmxPair(path, data)) return true;
     auto r = loadModule(data.data(), data.size());
     if (!r.ok()) {
         static char msg[96];
@@ -184,6 +233,11 @@ void confirmDiscard(HWND hwnd, std::function<void()> then);
 bool saveAsDialog(HWND hwnd, DWORD filter = 1);  // 1 XM, 2 MOD, 3 WAV
 
 bool saveTo(const std::wstring& path, SaveKind kind) {
+    if (g_engine->tfmx()) {  // the TFMX display song is not the music: nothing to save
+        g_screen.setStatus("TFMX: PLAYBACK ONLY - NOTHING TO SAVE");
+        g_dirty = true;
+        return false;
+    }
     g_busy = true;
     SetCursor(g_cursors.busy());
     SaveResult r = saveSong(*g_engine, path, kind);
@@ -202,6 +256,10 @@ bool saveTo(const std::wstring& path, SaveKind kind) {
 
 // MOD export first lists what the format cannot keep and asks; other kinds save directly.
 void exportChecked(const std::wstring& path, SaveKind kind) {
+    if (g_engine->tfmx()) {  // playback only: saveTo explains
+        saveTo(path, kind);
+        return;
+    }
     if (kind == SaveKind::Mod) {
         g_engine->lock();
         const ModExport m = exportMod(*g_engine->song());
@@ -234,6 +292,7 @@ bool saveCurrent(HWND hwnd) {
 }
 
 bool saveAsDialog(HWND hwnd, DWORD filter) {
+    if (g_engine->tfmx()) return saveTo(L"", SaveKind::Xm);  // says why nothing is saved
     wchar_t file[MAX_PATH] = {};
     std::wstring def = g_path.empty() ? L"untitled.xm" : withExtension(g_path, L".xm");
     lstrcpynW(file, def.c_str(), MAX_PATH);
@@ -276,7 +335,8 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules (*.mod;*.xm;*.stk)\0*.mod;*.xm;*.stk;mod.*\0All files (*.*)\0*.*\0";
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+                          L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;
         ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
@@ -533,6 +593,11 @@ int screenshotMode() {
                     else if (!wcsncmp(tok, L"A+", 2)) alt = true;
                     else break;
                     tok += 2;
+                }
+                if (!wcsncmp(tok, L"FX:", 3)) {  // logo box demo effect
+                    g_screen.setDemoEffect(_wtoi(tok + 3));
+                    drawFrame();
+                    continue;
                 }
                 if (!wcsncmp(tok, L"PURE:", 5)) {  // Pure mode 0/1/2
                     g_screen.setPure(_wtoi(tok + 5), *g_engine);

@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "core/reader.h"
+#include "formats/formats_internal.h"
 
 namespace {
 // Sets relative note / finetune so the sample keeps its pitch at C-4 (8363 Hz reference).
@@ -262,4 +263,17 @@ std::vector<uint8_t> saveSample8svx(const Sample& s) {
     b.insert(b.end(), body.begin(), body.end());
     if (s.length & 1) b.push_back(0);
     return b;
+}
+
+void samplePitchFromRate(Sample& s, double rateHz) {
+    if (rateHz <= 0) return;
+    const double semis = 12.0 * std::log2(rateHz / 8363.0);
+    int rel = (int)std::floor(semis + 1e-9);
+    int ft = (int)std::lround((semis - rel) * 128.0);
+    if (ft >= 128) {
+        ++rel;
+        ft -= 128;
+    }
+    s.relativeNote = (int8_t)(rel < -96 ? -96 : (rel > 95 ? 95 : rel));
+    s.finetune = (int8_t)(ft > 127 ? 127 : ft);
 }

@@ -159,3 +159,5 @@ bool stDetect(const uint8_t* data, size_t size) {
 }
 
 Result<Song> stLoad(const uint8_t* data, size_t size) { return loadCommon(data, size, {15, 4, 600}); }
+
+uint8_t modPeriodToNote(int period) { return periodToNote(period); }

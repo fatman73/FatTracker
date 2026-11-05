@@ -6,13 +6,15 @@
 #include <cstring>
 
 #include "core/floppy.h"
+#include "core/song.h"
+#include "core/tfmx_player.h"
 #include "core/mixer.h"
 #include "core/player.h"
 
 static_assert(sizeof(SRWLOCK) == sizeof(void*), "SRWLOCK storage");
 #define SRW reinterpret_cast<PSRWLOCK>(const_cast<void**>(&srw_))
 
-Engine::Engine() : srw_(nullptr), mixer_(new Mixer(48000)), player_(new Player(*mixer_)), floppy_(new Floppy) {
+Engine::Engine() : srw_(nullptr), mixer_(new Mixer(48000)), player_(new Player(*mixer_)), floppy_(new Floppy), tfmx_(new TfmxPlayer) {
     InitializeSRWLock(SRW);
     tel_.rate = 48000;
 }
@@ -26,6 +28,7 @@ Engine::~Engine() {
     delete player_;
     delete mixer_;
     delete floppy_;
+    delete tfmx_;
 }
 
 bool Engine::startAudio() {
@@ -63,6 +66,7 @@ void Engine::audioCallback(void* user, float* out, uint32_t frames, uint32_t rat
         AcquireSRWLockExclusive(reinterpret_cast<PSRWLOCK>(&e->srw_));
         e->mixer_->setRate(rate);
         e->floppy_->setRate(rate);
+        e->tfmx_->setRate(rate);
         ReleaseSRWLockExclusive(reinterpret_cast<PSRWLOCK>(&e->srw_));
     }
     e->render(out, frames);
@@ -74,6 +78,7 @@ void Engine::unlock() { ReleaseSRWLockExclusive(SRW); }
 void Engine::setSong(std::unique_ptr<Song> s) {
     lock();
     player_->setSong(nullptr);
+    tfmxOn_ = tfmxPlaying_ = false;  // a pattern song replaces a TFMX song
     song_ = static_cast<std::unique_ptr<Song>&&>(s);
     player_->setSong(song_.get());
     playFrames_ = 0;
@@ -85,7 +90,12 @@ void Engine::play() { play(0); }
 
 void Engine::play(uint16_t order) {
     lock();
-    player_->play(order);
+    if (tfmxOn_) {
+        tfmx_->restart();
+        tfmxPlaying_ = true;
+    } else {
+        player_->play(order);
+    }
     playFrames_ = 0;
     publish();
     unlock();
@@ -114,6 +124,30 @@ void Engine::previewNote(int sample, int note, uint32_t offset) {
     player_->previewNote(sample, note, offset);
     unlock();
 }
+
+bool Engine::loadTfmx(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl, size_t smplSize, const char* name) {
+    TfmxPlayer* p = new TfmxPlayer;
+    if (!p->load(mdat, mdatSize, smpl, smplSize)) {
+        delete p;
+        return false;
+    }
+    auto song = std::make_unique<Song>(makeEmptySong(4));
+    p->buildDisplay(*song);  // the TFMX tracks as patterns for the screen (playback only)
+    for (int i = 0; i < 20 && name && name[i]; ++i) song->name[i] = name[i];
+    setSong(static_cast<std::unique_ptr<Song>&&>(song));
+    lock();
+    p->setRate(mixer_->rate());  // under the lock: the audio thread may have changed the rate meanwhile
+    delete tfmx_;
+    tfmx_ = p;
+    tfmxOn_ = true;
+    tfmxPlaying_ = true;
+    playFrames_ = 0;
+    publish();
+    unlock();
+    return true;
+}
+
+const char* Engine::tfmxFormat() const { return tfmxOn_ ? tfmx_->format() : ""; }
 
 void Engine::setPure(int model) {
     lock();
@@ -172,7 +206,12 @@ void Engine::previewStop() {
 
 void Engine::playPattern(uint16_t pattern) {
     lock();
-    player_->playPattern(pattern);
+    if (tfmxOn_) {
+        tfmx_->restart();
+        tfmxPlaying_ = true;
+    } else {
+        player_->playPattern(pattern);
+    }
     playFrames_ = 0;
     publish();
     unlock();
@@ -180,6 +219,8 @@ void Engine::playPattern(uint16_t pattern) {
 
 void Engine::stop() {
     lock();
+    tfmxPlaying_ = false;
+    tfmx_->clearMeters();  // nothing renders while stopped: let the meters fall
     player_->stop();
     publish();
     unlock();
@@ -194,7 +235,14 @@ void Engine::setMute(int ch, bool m) {
 
 void Engine::render(float* out, uint32_t frames) {
     lock();
-    if (song_) {
+    if (tfmxOn_) {
+        if (tfmxPlaying_) {
+            tfmx_->render(out, frames, 0.45f);
+            playFrames_ += frames;
+        } else {
+            std::memset(out, 0, sizeof(float) * 2 * frames);
+        }
+    } else if (song_) {
         player_->render(out, frames);
         if (player_->playing()) playFrames_ += frames;
     } else {
@@ -224,8 +272,18 @@ void Engine::publish() {
     tel_.numChannels = song_ ? song_->numChannels : 0;
     tel_.led = mixer_->led();
     tel_.drive = pure_ && floppy_->busySeconds() > 0;
+    if (tfmxOn_) {
+        tel_.playing = tfmxPlaying_;
+        // the display song has one 64-row pattern per 64 ticks, in order
+        const int tick = tfmx_->tick();
+        const int pats = song_ && !song_->patterns.empty() ? (int)song_->patterns.size() : 1;
+        int pat = tick / TfmxPlayer::kDisplayRows;
+        if (pat >= pats) pat = pats - 1;
+        tel_.order = tel_.pattern = (uint16_t)pat;
+        tel_.row = (uint16_t)(tick / TfmxPlayer::kDisplayRows >= pats ? TfmxPlayer::kDisplayRows - 1 : tick % TfmxPlayer::kDisplayRows);
+    }
     for (int c = 0; c < 32; ++c) {
-        tel_.ch[c].vu = mixer_->vu(c);
+        tel_.ch[c].vu = tfmxOn_ ? (c < TfmxPlayer::kMaxVoices ? tfmx_->vu(c) : 0.f) : mixer_->vu(c);
         tel_.ch[c].active = mixer_->active(c);
         tel_.ch[c].muted = player_->channel(c).muted;
     }
@@ -248,6 +306,7 @@ void Engine::snapshot(Telemetry& out) const {
 
 void Engine::scope(int ch, float* dst, int n) const {
     AcquireSRWLockShared(SRW);
-    mixer_->scope(ch, dst, n);
+    if (tfmxOn_) tfmx_->scope(ch, dst, n);
+    else mixer_->scope(ch, dst, n);
     ReleaseSRWLockShared(SRW);
 }

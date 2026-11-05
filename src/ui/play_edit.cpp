@@ -43,8 +43,9 @@ void PlayScreen::ensureCursorVisible(const Song& s) {
     if (curCh_ >= s.numChannels) curCh_ = s.numChannels - 1;
     if (curCh_ < 0) curCh_ = 0;
     if (curCh_ < firstChannel_) firstChannel_ = curCh_;
-    if (curCh_ >= firstChannel_ + viewMode_) firstChannel_ = curCh_ - viewMode_ + 1;
-    firstChannel_ = computePatternLayout(viewMode_, s.numChannels, firstChannel_, 1.f).firstChannel;
+    const int visible = viewCount(s.numChannels);
+    if (curCh_ >= firstChannel_ + visible) firstChannel_ = curCh_ - visible + 1;
+    firstChannel_ = computePatternLayout(visible, s.numChannels, firstChannel_, 1.f).firstChannel;
 }
 
 void PlayScreen::moveCursor(int rows, int cols, Engine& e) {
@@ -76,6 +77,10 @@ void PlayScreen::advance(Engine& e) {
 UiAction PlayScreen::editKey(unsigned vk, bool shift, bool ctrl, bool alt, bool repeat, Engine& e) {
     const Song* s = e.song();
     if (!s || s->patterns.empty()) return UiAction::None;
+    if (e.tfmx() && editMode_) {  // the TFMX tracks are shown, not edited
+        editMode_ = recordMode_ = false;
+        setStatus("TFMX: PLAYBACK ONLY");
+    }
     const int pat = editPattern(), row = editRow();
     auto extend = [&]() {
         if (!blockOn_) {
