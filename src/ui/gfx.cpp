@@ -377,3 +377,12 @@ void Gfx::endGlow(float radiusLogical, float strength) {
 void Gfx::pushClip(RectF r) { dc_->PushAxisAlignedClip(drect(r), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE); }
 
 void Gfx::popClip() { dc_->PopAxisAlignedClip(); }
+
+void Gfx::pushRoundedClip(RectF r, float radius) {
+    ID2D1RoundedRectangleGeometry* geo = nullptr;
+    factory_->CreateRoundedRectangleGeometry({drect(r), radius, radius}, &geo);
+    dc_->PushLayer(D2D1::LayerParameters1(D2D1::InfiniteRect(), geo), nullptr);
+    if (geo) geo->Release();  // the layer keeps its own reference while pushed
+}
+
+void Gfx::popLayer() { dc_->PopLayer(); }

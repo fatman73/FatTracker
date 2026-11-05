@@ -1,4 +1,4 @@
-﻿#include "ui/pattern_view.h"
+#include "ui/pattern_view.h"
 
 #include <cmath>
 #include <cstdio>
@@ -84,9 +84,9 @@ void PatternView::drawMeters(Gfx& g, Font& f, const Theme& t, RectF area, const 
         if (ch >= kMaxChannels || !c.song || ch >= c.song->numChannels) continue;
         const ChannelTelemetry& ct = c.tel->ch[ch];
         if (ct.muted) continue;
-        const float w = o.l.chanW * 0.3f;
+        const float w = o.l.chanW * 0.17f;
         const float x = o.x0 + o.l.rowNumW + k * o.l.chanW + (o.l.chanW - w) * 0.5f;
-        drawVu(g, t, {x, o.bodyTop + 6.f, w, h}, ct.vu, 0.9f);
+        drawVu(g, t, {x, o.bodyTop + 6.f, w, h}, ct.vu, 1.f);
     }
 }
 
