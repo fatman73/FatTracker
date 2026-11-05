@@ -196,43 +196,93 @@ void DemoFx::glenz(double t) {
         const uint32_t c = rgbOf(0, 10 + y / 3, 40 + y);
         for (int x = 0; x < W; ++x) px_[(size_t)y * W + x] = c;
     }
-    // octahedron with every face split in 4 (the classic glenz checker look)
-    static const float kV[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-    static const int kF[8][3] = {{0, 2, 4}, {2, 1, 4}, {1, 3, 4}, {3, 0, 4}, {2, 0, 5}, {1, 2, 5}, {3, 1, 5}, {0, 3, 5}};
-    const double ax = t * 0.9, ay = t * 1.3, az = t * 0.4;
-    auto rot = [&](const float* p, float* o) {
-        double x = p[0], y = p[1], z = p[2];
-        double y1 = y * std::cos(ax) - z * std::sin(ax), z1 = y * std::sin(ax) + z * std::cos(ax);
-        double x2 = x * std::cos(ay) + z1 * std::sin(ay), z2 = -x * std::sin(ay) + z1 * std::cos(ay);
-        double x3 = x2 * std::cos(az) - y1 * std::sin(az), y3 = x2 * std::sin(az) + y1 * std::cos(az);
-        const double s = 26.0 + 4.0 * std::sin(t * 2.0);
-        const double persp = 3.2 / (3.2 + z2);
-        o[0] = (float)(W / 2 + std::sin(t * 0.7) * 90 + x3 * s * persp * 1.6);
-        o[1] = (float)(H / 2 + y3 * s * persp);
-        o[2] = (float)z2;
+    // Two see-through objects: a blue / white glenz octahedron and a red / white checkered cube.
+    // They swing towards each other every ~13 s and pass through one another; all faces of both
+    // are drawn together from far to near so the interpenetration looks right.
+    struct Tri {
+        float p[3][3];
+        float z;
+        uint32_t color;
+        int alpha;
     };
-    float P[6][3];
-    for (int i = 0; i < 6; ++i) rot(kV[i], P[i]);
-    for (int pass = 0; pass < 2; ++pass)  // back faces first, then the front ones over them
+    std::vector<Tri> tris;
+    tris.reserve(96);
+    const double swing = std::cos(t * 0.48);              // 1 apart ... -1 apart on the other side
+    const double apart = 95.0 * swing;                     // horizontal distance from the centre
+    const double depthOff = 0.7 * std::sin(t * 0.48);      // they pass at slightly different depths
+    auto transform = [&](const float* v, double ax, double ay, double az, double scale, double cx, double cz, float* o) {
+        const double x = v[0], y = v[1], z = v[2];
+        const double y1 = y * std::cos(ax) - z * std::sin(ax), z1 = y * std::sin(ax) + z * std::cos(ax);
+        const double x2 = x * std::cos(ay) + z1 * std::sin(ay), z2 = -x * std::sin(ay) + z1 * std::cos(ay);
+        const double x3 = x2 * std::cos(az) - y1 * std::sin(az), y3 = x2 * std::sin(az) + y1 * std::cos(az);
+        const double zz = z2 + cz;
+        const double persp = 7.0 / (7.0 + zz);  // camera far enough that no corner comes too close
+        o[0] = (float)(W / 2 + cx + x3 * scale * persp * 1.6);
+        o[1] = (float)(H / 2 + y3 * scale * persp);
+        o[2] = (float)zz;
+    };
+    auto addTri = [&](const float* a, const float* b, const float* c, uint32_t frontColor, uint32_t backColor) {
+        const float cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        const bool front = cross < 0;
+        Tri tr;
+        std::memcpy(tr.p[0], a, sizeof tr.p[0]);
+        std::memcpy(tr.p[1], b, sizeof tr.p[1]);
+        std::memcpy(tr.p[2], c, sizeof tr.p[2]);
+        tr.z = (a[2] + b[2] + c[2]) / 3;
+        tr.color = front ? frontColor : backColor;
+        tr.alpha = front ? 150 : 200;
+        tris.push_back(tr);
+    };
+
+    // ---- object 1: octahedron, every face split in 4 (blue / white)
+    {
+        static const float kV[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        static const int kF[8][3] = {{0, 2, 4}, {2, 1, 4}, {1, 3, 4}, {3, 0, 4}, {2, 0, 5}, {1, 2, 5}, {3, 1, 5}, {0, 3, 5}};
+        const double s = 24.0 + 3.0 * std::sin(t * 2.0);
+        float P[6][3];
+        for (int i = 0; i < 6; ++i) transform(kV[i], t * 0.9, t * 1.3, t * 0.4, s, -apart, depthOff, P[i]);
         for (int f = 0; f < 8; ++f) {
             const float *a = P[kF[f][0]], *b = P[kF[f][1]], *c = P[kF[f][2]];
-            const float cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-            const bool front = cross < 0;
-            if ((pass == 1) != front) continue;
-            float m[3][3];  // edge midpoints
-            for (int k = 0; k < 3; ++k) {
-                const float* p = P[kF[f][k]];
-                const float* q = P[kF[f][(k + 1) % 3]];
-                for (int d = 0; d < 3; ++d) m[k][d] = (p[d] + q[d]) / 2;
-            }
-            const uint32_t c1 = front ? rgbOf(90, 160, 255) : rgbOf(40, 30, 120);
-            const uint32_t c2 = front ? rgbOf(255, 255, 255) : rgbOf(80, 60, 160);
-            const int al = front ? 150 : 200;
-            triangle(a, m[0], m[2], (f & 1) ? c1 : c2, al);
-            triangle(m[0], b, m[1], (f & 1) ? c2 : c1, al);
-            triangle(m[2], m[1], c, (f & 1) ? c2 : c1, al);
-            triangle(m[0], m[1], m[2], (f & 1) ? c1 : c2, al);
+            float m[3][3];
+            for (int k = 0; k < 3; ++k)
+                for (int d = 0; d < 3; ++d) m[k][d] = (P[kF[f][k]][d] + P[kF[f][(k + 1) % 3]][d]) / 2;
+            const uint32_t blue = rgbOf(90, 160, 255), white = rgbOf(255, 255, 255);
+            const uint32_t bBlue = rgbOf(40, 30, 120), bWhite = rgbOf(80, 60, 160);
+            const bool odd = f & 1;
+            addTri(a, m[0], m[2], odd ? blue : white, odd ? bBlue : bWhite);
+            addTri(m[0], b, m[1], odd ? white : blue, odd ? bWhite : bBlue);
+            addTri(m[2], m[1], c, odd ? white : blue, odd ? bWhite : bBlue);
+            addTri(m[0], m[1], m[2], odd ? blue : white, odd ? bBlue : bWhite);
         }
+    }
+    // ---- object 2: cube, every face a 2 x 2 red / white checkerboard
+    {
+        const double s = 13.0 + 1.5 * std::cos(t * 1.7);
+        const uint32_t red = rgbOf(255, 40, 40), white = rgbOf(255, 235, 235);
+        const uint32_t bRed = rgbOf(110, 10, 30), bWhite = rgbOf(120, 70, 90);
+        for (int axis = 0; axis < 3; ++axis)
+            for (int side = -1; side <= 1; side += 2)
+                for (int qy = 0; qy < 2; ++qy)
+                    for (int qx = 0; qx < 2; ++qx) {
+                        // quad corners on this face, in face coordinates u, v (-1..1)
+                        float q[4][3];
+                        const float u0 = -1.f + qx, v0 = -1.f + qy;
+                        const float uv[4][2] = {{u0, v0}, {u0 + 1, v0}, {u0 + 1, v0 + 1}, {u0, v0 + 1}};
+                        for (int k = 0; k < 4; ++k) {
+                            float v[3];
+                            v[axis] = (float)side;
+                            v[(axis + 1) % 3] = uv[k][side > 0 ? 0 : 1];
+                            v[(axis + 2) % 3] = uv[k][side > 0 ? 1 : 0];
+                            transform(v, -t * 0.7, t * 1.1, -t * 0.55, s, apart, -depthOff, q[k]);
+                        }
+                        const bool checker = ((qx + qy + axis + (side > 0)) & 1) != 0;
+                        addTri(q[0], q[1], q[2], checker ? red : white, checker ? bRed : bWhite);
+                        addTri(q[0], q[2], q[3], checker ? red : white, checker ? bRed : bWhite);
+                    }
+    }
+    // far to near across both objects (larger z = farther away)
+    std::sort(tris.begin(), tris.end(), [](const Tri& a, const Tri& b) { return a.z > b.z; });
+    for (const Tri& tr : tris) triangle(tr.p[0], tr.p[1], tr.p[2], tr.color, tr.alpha);
     flyingText(t);
 }
 

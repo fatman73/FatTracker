@@ -594,6 +594,11 @@ int screenshotMode() {
                     else break;
                     tok += 2;
                 }
+                if (!wcsncmp(tok, L"FXT:", 4)) {  // logo box demo time in seconds
+                    g_screen.setDemoTime(_wtof(tok + 4));
+                    drawFrame();
+                    continue;
+                }
                 if (!wcsncmp(tok, L"FX:", 3)) {  // logo box demo effect
                     g_screen.setDemoEffect(_wtoi(tok + 3));
                     drawFrame();

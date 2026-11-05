@@ -271,7 +271,7 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     {  // Amiga demo effects in the logo box
         static const auto t0 = std::chrono::steady_clock::now();
         const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-        demo_.render(secs);
+        demo_.render(demoTime_ >= 0 ? demoTime_ : secs);
         const float sc = vpScale_, inset = 5.f;
         g.drawPixels(demo_.pixels(), DemoFx::W, DemoFx::H, (L_.logo.x + inset) * sc, (L_.logo.y + inset) * sc,
                      (L_.logo.w - 2 * inset) * sc, (L_.logo.h - 2 * inset) * sc);

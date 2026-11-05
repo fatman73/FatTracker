@@ -104,6 +104,7 @@ private:
     int pureFirstChannel(int numChannels);
     std::unique_ptr<PixelCanvas> canvas_;
     DemoFx demo_;  // effects in the logo box (click = next)
+    double demoTime_ = -1;
     int pureFirst_ = 0;
     float vpScale_ = 1.f;
     static constexpr int kPureExitHover = 7000;
@@ -212,5 +213,6 @@ public:
     int defaultChannels() const { return defaultChannels_; }
     void setPure(int mode, Engine& e);  // switches the classic theme too
     void setDemoEffect(int fx) { demo_.setEffect(fx); }  // logo box effect (dev screenshots)
+    void setDemoTime(double s) { demoTime_ = s; }       // fixed demo time (dev screenshots), < 0 = clock
     bool takeDirRead() { const bool r = dirRead_; dirRead_ = false; return r; }  // DISK OP. listed a folder
 };
