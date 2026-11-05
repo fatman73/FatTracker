@@ -30,7 +30,7 @@ enum class UiAction {
     Quit
 };
 
-enum class Panel { Main, DiskOp, EditOp, Setup, Sampler, Help };
+enum class Panel { Main, DiskOp, EditOp, Setup, Sampler, Help, PosEd };  // PosEd: Pure mode only
 
 struct DirEntry {
     std::wstring name;
@@ -106,6 +106,13 @@ private:
     void pureGeometry(float& ox, float& oy, float& sx, float& sy) const;  // device pixels
     void pureToAmiga(float lx, float ly, int& ax, int& ay) const;          // logical -> Amiga pixel
     int pureFirstChannel(int numChannels);
+    int pureView() const;  // pure::View of the open panel
+    void pureOpDraw(PixelCanvas& c, Engine& e);
+    void purePosDraw(PixelCanvas& c, Engine& e);
+    void pureSamplerDraw(PixelCanvas& c, Engine& e);
+    UiAction pureOpClick(int item, bool right, Engine& e);
+    void pat2smp(Engine& e);
+    int editOpScreen_ = 0;  // Pure EDIT OP.: 0 transpose, 1 options, 2 sample ops
     std::unique_ptr<PixelCanvas> canvas_;
     DemoFx demo_;  // effects in the logo box (click = next)
     double demoTime_ = -1;
@@ -182,6 +189,14 @@ private:
     UiAction samplerMouse(float x, float y, bool right, Engine& e);
     UiAction samplerKey(unsigned vk, bool shift, bool ctrl, Engine& e);
     void samplerOp(int op, Engine& e);
+    UiAction samplerWaveMouse(float x, float y, bool right, Engine& e);  // selection, loop handles, pencil
+    void syncSelection(Engine& e);  // a selection belongs to one sample: forget it when the sample changes
+    int selSample_ = -1;
+    // EDIT OP. actions (edit_op.cpp), shared with the Pure screen; row: skip, octave, quantize, metronome, length
+    void opStep(int row, int d, bool big, Engine& e);
+    void opNewPattern(bool clone, Engine& e);
+    void opTranspose(int semis, Engine& e);
+    void opExchange(bool swap, Engine& e);
     RectF samplerWave() const;
     RectF samplerButton(int i) const;
     uint32_t xToSample(float x) const;
@@ -234,6 +249,7 @@ public:
     void startNameEdit(int which, Engine& e);  // 1 song name, 2 sample name
     bool takeRecordRequest() { const bool r = recordRequested_; recordRequested_ = false; return r; }
     void setRecording(bool on) { sampling_ = on; }
+    void setEditOpScreen(int s) { editOpScreen_ = s < 0 ? 0 : s % 3; }  // dev screenshots
     bool recording() const { return sampling_; }       // fixed demo time (dev screenshots), < 0 = clock
     bool takeDirRead() { const bool r = dirRead_; dirRead_ = false; return r; }  // DISK OP. listed a folder
 };

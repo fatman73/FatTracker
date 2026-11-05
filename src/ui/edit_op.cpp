@@ -96,32 +96,10 @@ UiAction PlayScreen::editOpMouse(float x, float y, bool right, Engine& e) {
     const RectF a = panelArea();
     const Song* s = e.song();
     if (!s) return UiAction::None;
-    const int pat = editPattern();
     for (int r = 0; r < R_ROWS; ++r)
         for (int k = 0; k < 2; ++k) {
             if (!editOpCell(r, k == 0 ? 1 : 3).contains(x, y)) continue;
-            const int d = k == 0 ? -1 : 1;
-            switch (r) {
-                case R_SKIP: editSkip_ = std::clamp(editSkip_ + d, 0, 16); break;
-                case R_OCTAVE: octave_ = std::clamp(octave_ + d, 0, 6); break;
-                case R_QUANT: {
-                    int i = 0;
-                    while (i < 4 && kQuant[i] != quantize_) ++i;
-                    quantize_ = kQuant[std::clamp(i + d, 0, 4)];
-                    break;
-                }
-                case R_METRO:
-                    if (!metronome_ && d > 0) metronome_ = true;
-                    else if (metronome_ && metroEvery_ + d < 1) metronome_ = false;
-                    else metroEvery_ = std::clamp(metroEvery_ + d, 1, 16);
-                    applyMetronome(e);
-                    break;
-                case R_PATLEN: {
-                    const int rows = s->patterns[pat].rows + d * (right ? 16 : 1);
-                    e.edit([&](Song& song) { editor_.setPatternRows(song, pat, rows); });
-                    break;
-                }
-            }
+            opStep(r, k == 0 ? -1 : 1, right, e);
             return UiAction::Redraw;
         }
     if (editOpCell(R_METRO, 2).contains(x, y)) {
@@ -133,55 +111,96 @@ UiAction PlayScreen::editOpMouse(float x, float y, bool right, Engine& e) {
         if (!opButton(a, i).contains(x, y)) continue;
         switch (i) {
             case B_NEWPAT:
-            case B_CLONEPAT: {
-                int p = -1;
-                e.edit([&](Song& song) {
-                    p = editor_.newPattern(song, song.patterns[pat].rows);
-                    if (p >= 0 && i == B_CLONEPAT) {
-                        Clip c = editor_.copy(song, Block{pat, 0, 255, 0, kMaxChannels - 1});
-                        editor_.paste(song, p, 0, 0, c);
-                    }
-                });
-                if (p < 0) {
-                    setStatus("ERROR: 256 PATTERNS MAXIMUM");
-                } else {
-                    char m[40];
-                    std::snprintf(m, sizeof m, "PATTERN %02d %s", p, i == B_NEWPAT ? "CREATED" : "CLONED");
-                    setStatus(m);
-                    if (!last_.playing) viewPattern_ = p;
-                }
+            case B_CLONEPAT:
+                opNewPattern(i == B_CLONEPAT, e);
                 break;
-            }
             case B_TR_TRACK: case B_TR_PATTERN: case B_TR_SONG: case B_TR_BLOCK:
                 transposeScope_ = i - B_TR_TRACK;
                 break;
             case B_TR_ONLY:
                 transposeOnlySample_ = !transposeOnlySample_;
                 break;
-            case B_TR_M12: case B_TR_M1: case B_TR_P1: case B_TR_P12: {
-                const int semis = i == B_TR_M12 ? -12 : i == B_TR_M1 ? -1 : i == B_TR_P1 ? 1 : 12;
-                const int only = transposeOnlySample_ ? sample_ + 1 : 0;
-                e.edit([&](Song& song) {
-                    if (transposeScope_ == 2) editor_.transposeSong(song, semis, only);
-                    else if (transposeScope_ == 3 && blockOn_) editor_.transpose(song, currentBlock(false), semis, only);
-                    else if (transposeScope_ == 1) editor_.transpose(song, Block{pat, 0, 255, 0, kMaxChannels - 1}, semis, only);
-                    else editor_.transpose(song, Block{pat, 0, 255, curCh_, curCh_}, semis, only);
-                });
-                setStatus("TRANSPOSED");
+            case B_TR_M12: case B_TR_M1: case B_TR_P1: case B_TR_P12:
+                opTranspose(i == B_TR_M12 ? -12 : i == B_TR_M1 ? -1 : i == B_TR_P1 ? 1 : 12, e);
                 break;
-            }
             case B_EX_PREV: exchangeTo_ = exchangeTo_ > 1 ? exchangeTo_ - 1 : 255; break;
             case B_EX_NEXT: exchangeTo_ = exchangeTo_ < 255 ? exchangeTo_ + 1 : 1; break;
             case B_EX_REPLACE:
             case B_EX_SWAP:
-                e.edit([&](Song& song) { editor_.exchangeInstrument(song, sample_ + 1, exchangeTo_, i == B_EX_SWAP); });
-                setStatus(i == B_EX_SWAP ? "SAMPLE NUMBERS SWAPPED" : "SAMPLE NUMBERS REPLACED");
+                opExchange(i == B_EX_SWAP, e);
                 break;
             case B_EXIT: panel_ = Panel::Main; break;
         }
         return UiAction::Redraw;
     }
     return UiAction::None;
+}
+
+// ---- EDIT OP. actions shared by the normal panel and the Pure screen
+void PlayScreen::opStep(int row, int d, bool big, Engine& e) {
+    const Song* s = e.song();
+    switch (row) {
+        case R_SKIP: editSkip_ = std::clamp(editSkip_ + d, 0, 16); break;
+        case R_OCTAVE: octave_ = std::clamp(octave_ + d, 0, 6); break;
+        case R_QUANT: {
+            int i = 0;
+            while (i < 4 && kQuant[i] != quantize_) ++i;
+            quantize_ = kQuant[std::clamp(i + d, 0, 4)];
+            break;
+        }
+        case R_METRO:
+            if (!metronome_ && d > 0) metronome_ = true;
+            else if (metronome_ && metroEvery_ + d < 1) metronome_ = false;
+            else metroEvery_ = std::clamp(metroEvery_ + d, 1, 16);
+            applyMetronome(e);
+            break;
+        case R_PATLEN: {
+            if (!s) break;
+            const int pat = editPattern();
+            const int rows = s->patterns[pat].rows + d * (big ? 16 : 1);
+            e.edit([&](Song& song) { editor_.setPatternRows(song, pat, rows); });
+            break;
+        }
+    }
+}
+
+void PlayScreen::opNewPattern(bool clone, Engine& e) {
+    if (!e.song()) return;
+    const int pat = editPattern();
+    int p = -1;
+    e.edit([&](Song& song) {
+        p = editor_.newPattern(song, song.patterns[pat].rows);
+        if (p >= 0 && clone) {
+            Clip c = editor_.copy(song, Block{pat, 0, 255, 0, kMaxChannels - 1});
+            editor_.paste(song, p, 0, 0, c);
+        }
+    });
+    if (p < 0) {
+        setStatus("ERROR: 256 PATTERNS MAXIMUM");
+    } else {
+        char m[40];
+        std::snprintf(m, sizeof m, "PATTERN %02d %s", p, clone ? "CLONED" : "CREATED");
+        setStatus(m);
+        if (!last_.playing) viewPattern_ = p;
+    }
+}
+
+void PlayScreen::opTranspose(int semis, Engine& e) {
+    if (!e.song()) return;
+    const int pat = editPattern();
+    const int only = transposeOnlySample_ ? sample_ + 1 : 0;
+    e.edit([&](Song& song) {
+        if (transposeScope_ == 2) editor_.transposeSong(song, semis, only);
+        else if (transposeScope_ == 3 && blockOn_) editor_.transpose(song, currentBlock(false), semis, only);
+        else if (transposeScope_ == 1) editor_.transpose(song, Block{pat, 0, 255, 0, kMaxChannels - 1}, semis, only);
+        else editor_.transpose(song, Block{pat, 0, 255, curCh_, curCh_}, semis, only);
+    });
+    setStatus("TRANSPOSED");
+}
+
+void PlayScreen::opExchange(bool swap, Engine& e) {
+    e.edit([&](Song& song) { editor_.exchangeInstrument(song, sample_ + 1, exchangeTo_, swap); });
+    setStatus(swap ? "SAMPLE NUMBERS SWAPPED" : "SAMPLE NUMBERS REPLACED");
 }
 
 int PlayScreen::editOpHit(float x, float y) const {

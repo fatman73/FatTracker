@@ -580,10 +580,10 @@ bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
     if (pure_ && !dialog_.open) {
         int ax, ay;
         pureToAmiga(x, y, ax, ay);
-        const int h = pure::hitTest(ax, ay) == pure::kExit ? kPureExitHover : -1;
+        const int h = pure::hitTest(ax, ay, (pure::View)pureView(), editOpScreen_) == pure::kExit ? kPureExitHover : -1;
         const bool changed = h != hover_;
         hover_ = h;
-        return changed;
+        if (!(drag_ && leftDown && panel_ == Panel::Sampler)) return changed;
     }
     bool redraw = false;
     if (drag_ && leftDown && panel_ == Panel::Sampler) {
@@ -615,6 +615,7 @@ bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
         }
         redraw = true;
     }
+    if (pure_ && !dialog_.open) return redraw;
     const int h = hitId(x, y);
     if (h != hover_) {
         hover_ = h;
@@ -631,8 +632,8 @@ UiAction PlayScreen::onMouseUp(float, float, Engine&) {
 
 UiAction PlayScreen::onWheel(float x, float y, int delta, Engine& e) {
     const int notches = delta / 120 != 0 ? delta / 120 : (delta > 0 ? 1 : -1);
-    if (pure_) {
-        if (!last_.playing) moveCursor(-notches, 0, e);
+    if (pure_ && !(panel_ == Panel::Sampler && samplerWave().contains(x, y))) {
+        if (!last_.playing && panel_ != Panel::Sampler) moveCursor(-notches, 0, e);
         return UiAction::Redraw;
     }
     if (panel_ == Panel::Sampler && samplerWave().contains(x, y) && viewEnd_ > viewStart_) {

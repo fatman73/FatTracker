@@ -2,6 +2,7 @@
 #include <cmath>
 #include <vector>
 
+#include "core/render.h"
 #include "core/sample_edit.h"
 #include "test.h"
 
@@ -157,4 +158,28 @@ TEST(sample_echo_tail_runs_to_the_end) {
     s.data8[0] = 100;
     sampleEcho(s, 0, 10);  // only the hit is selected: the echoes still ring out
     CHECK_NEAR(s.data8[1000], 40, 2);
+}
+
+TEST(pattern_renders_to_a_sample) {
+    // PAT2SMP: one pass through a 4 row pattern at speed 6 / 125 BPM, mono 16 bit at the asked rate
+    Song s = makeEmptySong(4);
+    s.patterns[0] = makePattern(4, 4);
+    s.order = {0};
+    s.samples.resize(1);
+    s.samples[0] = sine8(64, 16);
+    s.samples[0].loop = LoopType::Forward;
+    s.samples[0].loopStart = 0;
+    s.samples[0].loopLength = 64;
+    s.patterns[0].at(0, 0) = {49, 1, 0, 0, 0};
+    const Sample out = renderPatternSample(s, 0, 16726);
+    CHECK(out.is16);
+    const double frames = 4 * 6 * 16726 * 2.5 / 125;
+    CHECK_NEAR((double)out.length, frames, 16.0);  // ends where the pattern ends: no blip of the next pass
+    CHECK(peak(out, 0, out.length) > 1000);
+    CHECK_EQ(out.relativeNote, 0);
+    // the tempo in effect at the pattern (e.g. after an Fxx earlier in the song) can be given
+    const Sample fast = renderPatternSample(s, 0, 16726, 3, 125);
+    CHECK_NEAR((double)fast.length, frames / 2, 16.0);
+    Song empty = makeEmptySong(4);
+    CHECK_EQ(renderPatternSample(empty, 5, 16726).length, 0u);  // no such pattern
 }

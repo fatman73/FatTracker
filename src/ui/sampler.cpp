@@ -6,6 +6,7 @@
 #include "core/keymap.h"
 #include "core/sample_edit.h"
 #include "ui/play_screen.h"
+#include "ui/pure_layout.h"
 #include "ui/widgets.h"
 
 namespace {
@@ -24,6 +25,12 @@ constexpr int kHitSampler = 700;
 }  // namespace
 
 RectF PlayScreen::samplerWave() const {
+    if (pure_) {  // the Pure sampler's wave box, in logical units
+        float ox, oy, sx, sy;
+        pureGeometry(ox, oy, sx, sy);
+        const pure::Box b = pure::samplerWave();
+        return {(ox + b.x * sx) / vpScale_, (oy + b.y * sy) / vpScale_, b.w * sx / vpScale_, b.h * sy / vpScale_};
+    }
     const RectF a = bottomArea();
     return {a.x + 8, a.y + 44, a.w - 16, a.h - 44 - 3 * 46 - 12};
 }
@@ -54,7 +61,15 @@ uint32_t PlayScreen::xToSample(float x) const {
     return viewStart_ + (uint32_t)std::lround(t * (viewEnd_ - viewStart_));
 }
 
+void PlayScreen::syncSelection(Engine& e) {
+    const int idx = e.song() ? curSampleIndex(*e.song()) : -1;
+    if (idx == selSample_) return;
+    selSample_ = idx;
+    viewStart_ = viewEnd_ = selA_ = selB_ = 0;
+}
+
 void PlayScreen::samplerDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
+    syncSelection(e);
     const RectF a = bottomArea();
     Ui u{g, tx, t};
     g.panel(a, t, Gfx::PanelState::Normal);
@@ -136,6 +151,7 @@ void PlayScreen::samplerDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
 }
 
 void PlayScreen::samplerOp(int op, Engine& e) {
+    syncSelection(e);
     const Song* s = e.song();
     if (op == S_NEW) {  // a 64 byte looped sine tuned to C: a start for drawing chip sounds
         Sample n;
@@ -318,6 +334,11 @@ UiAction PlayScreen::samplerMouse(float x, float y, bool right, Engine& e) {
             samplerOp(i, e);
             return UiAction::Redraw;
         }
+    return samplerWaveMouse(x, y, right, e);
+}
+
+UiAction PlayScreen::samplerWaveMouse(float x, float y, bool right, Engine& e) {
+    syncSelection(e);
     const RectF w = samplerWave();
     if (!w.contains(x, y)) return UiAction::None;
     const Song* s = e.song();

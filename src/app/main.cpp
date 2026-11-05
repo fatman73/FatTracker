@@ -701,6 +701,11 @@ int screenshotMode() {
                     drawFrame();
                     continue;
                 }
+                if (!wcsncmp(tok, L"OP:", 3)) {  // Pure EDIT OP. screen 0..2
+                    g_screen.setEditOpScreen(_wtoi(tok + 3));
+                    drawFrame();
+                    continue;
+                }
                 if (!wcsncmp(tok, L"T:", 2)) {  // theme index
                     setCurrentTheme(_wtoi(tok + 2));
                     drawFrame();
@@ -709,7 +714,8 @@ int screenshotMode() {
                 if (!wcsncmp(tok, L"P:", 2)) {
                     const wchar_t* pn = tok + 2;
                     Panel p = !lstrcmpiW(pn, L"DISKOP") ? Panel::DiskOp : !lstrcmpiW(pn, L"SAMPLER") ? Panel::Sampler
-                            : !lstrcmpiW(pn, L"EDITOP") ? Panel::EditOp : !lstrcmpiW(pn, L"SETUP") ? Panel::Setup : Panel::Help;
+                            : !lstrcmpiW(pn, L"EDITOP") ? Panel::EditOp : !lstrcmpiW(pn, L"SETUP") ? Panel::Setup
+                            : !lstrcmpiW(pn, L"POSED") ? Panel::PosEd : Panel::Help;
                     g_screen.openPanel(p);
                     drawFrame();
                     continue;
