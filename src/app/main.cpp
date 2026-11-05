@@ -2,6 +2,9 @@
 #include <memory>
 #include <vector>
 
+#include <functional>
+
+#include "app/document.h"
 #include "audio/engine.h"
 #include "formats/formats.h"
 #include "ui/font.h"
@@ -54,22 +57,16 @@ bool drawFrame() {
     return true;
 }
 
-// Reads a whole file (max 256 MB). Returns an error string or nullptr.
-const char* readFileW(const wchar_t* path, std::vector<uint8_t>& out) {
-    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return "ERROR: CANNOT OPEN FILE";
-    LARGE_INTEGER sz;
-    const char* err = nullptr;
-    if (!GetFileSizeEx(h, &sz)) err = "ERROR: CANNOT READ FILE";
-    else if (sz.QuadPart > 256ll * 1024 * 1024) err = "ERROR: FILE TOO BIG";
-    if (!err) {
-        out.resize((size_t)sz.QuadPart);
-        DWORD got = 0;
-        if (!out.empty() && (!ReadFile(h, out.data(), (DWORD)out.size(), &got, nullptr) || got != out.size()))
-            err = "ERROR: CANNOT READ FILE";
-    }
-    CloseHandle(h);
-    return err;
+std::wstring g_path;  // file of the current song ("" = untitled)
+
+void updateTitle() {
+    if (!g_hwnd) return;
+    const wchar_t* name = g_path.empty() ? L"untitled" : g_path.c_str();
+    for (const wchar_t* p = name; *p; ++p)
+        if (*p == L'\\' || *p == L'/') name = p + 1;
+    wchar_t title[300];
+    wsprintfW(title, L"FatTracker \x2014 %s%s", name, g_screen.dirty() ? L" *" : L"");
+    SetWindowTextW(g_hwnd, title);
 }
 
 bool loadModuleFile(const wchar_t* path) {
@@ -80,8 +77,14 @@ bool loadModuleFile(const wchar_t* path) {
     }
     auto r = loadModule(data.data(), data.size());
     if (!r.ok()) {
-        static char msg[64];
-        wsprintfA(msg, "ERROR: %s", r.error());
+        static char msg[96];
+        const wchar_t* name = path;
+        for (const wchar_t* p = path; *p; ++p)
+            if (*p == L'\\' || *p == L'/') name = p + 1;
+        if (!_wcsnicmp(name, L"smpl.", 5))
+            wsprintfA(msg, "THIS IS A TFMX SAMPLE FILE - LOAD THE MDAT FILE");
+        else
+            wsprintfA(msg, "ERROR: %s", r.error());
         g_screen.setStatus(msg);
         return false;
     }
@@ -89,34 +92,94 @@ bool loadModuleFile(const wchar_t* path) {
     g_engine->setSong(std::make_unique<Song>(static_cast<Song&&>(r.value())));
     g_screen.songChanged();
     g_screen.setStatus(truncated ? "LOADED: FILE TRUNCATED" : "ALL RIGHT");
-    if (g_hwnd) {
-        const wchar_t* name = path;
-        for (const wchar_t* p = path; *p; ++p)
-            if (*p == L'\\' || *p == L'/') name = p + 1;
-        wchar_t title[300];
-        wsprintfW(title, L"FatTracker \x2014 %s", name);
-        SetWindowTextW(g_hwnd, title);
-    }
+    g_path = path;
+    updateTitle();
     return true;
 }
 
-void openFileDialog(HWND hwnd) {
+// Runs `then` right away, or after asking to save unsaved changes.
+void confirmDiscard(HWND hwnd, std::function<void()> then);
+
+bool saveAsDialog(HWND hwnd);
+
+bool saveTo(const std::wstring& path, SaveKind kind) {
+    SetCursor(LoadCursorW(nullptr, IDC_WAIT));
+    SaveResult r = saveSong(*g_engine, path, kind);
+    g_screen.setStatus(r.message);
+    if (r.ok && kind == SaveKind::Xm) {
+        g_path = path;
+        g_screen.editor().setClean();
+    }
+    if (r.ok && !r.warnings.empty()) {
+        static char text[96];
+        wsprintfA(text, "MOD SAVED. %d LOSSES, E.G.: %s", (int)r.warnings.size(), r.warnings[0]);
+        g_screen.ask(text, {"OK"}, nullptr);
+    }
+    updateTitle();
+    g_dirty = true;
+    return r.ok;
+}
+
+bool saveCurrent(HWND hwnd) {
+    if (!g_path.empty() && kindFromPath(g_path) == SaveKind::Xm) return saveTo(g_path, SaveKind::Xm);
+    return saveAsDialog(hwnd);
+}
+
+bool saveAsDialog(HWND hwnd) {
     wchar_t file[MAX_PATH] = {};
+    std::wstring def = g_path.empty() ? L"untitled.xm" : withExtension(g_path, L".xm");
+    lstrcpynW(file, def.c_str(), MAX_PATH);
     OPENFILENAMEW ofn = {sizeof ofn};
     ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = L"Modules (*.mod;*.xm;*.stk)\0*.mod;*.xm;*.stk;mod.*\0All files (*.*)\0*.*\0";
+    ofn.lpstrFilter = L"FastTracker 2 module (*.xm)\0*.xm\0ProTracker module (*.mod)\0*.mod\0WAV audio (*.wav)\0*.wav\0";
     ofn.lpstrFile = file;
     ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameW(&ofn)) loadModuleFile(file);
+    ofn.lpstrDefExt = L"xm";
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (!GetSaveFileNameW(&ofn)) return false;
+    const SaveKind kind = ofn.nFilterIndex == 2 ? SaveKind::Mod : ofn.nFilterIndex == 3 ? SaveKind::Wav : SaveKind::Xm;
+    const wchar_t* ext = kind == SaveKind::Mod ? L".mod" : kind == SaveKind::Wav ? L".wav" : L".xm";
+    std::wstring path = file;
+    if (kindFromPath(path) != kind) path = withExtension(path, ext);
+    return saveTo(path, kind);
+}
+
+void confirmDiscard(HWND hwnd, std::function<void()> then) {
+    if (!g_screen.dirty()) {
+        then();
+        return;
+    }
+    g_screen.ask("THE SONG HAS UNSAVED CHANGES", {"SAVE", "DISCARD", "CANCEL"},
+                 [hwnd, then](int a) {
+                     if (a == 2) return;
+                     if (a == 0 && !saveCurrent(hwnd)) return;
+                     then();
+                 });
     g_dirty = true;
+}
+
+void openFileDialog(HWND hwnd) {
+    confirmDiscard(hwnd, [hwnd]() {
+        wchar_t file[MAX_PATH] = {};
+        OPENFILENAMEW ofn = {sizeof ofn};
+        ofn.hwndOwner = hwnd;
+        ofn.lpstrFilter = L"Modules (*.mod;*.xm;*.stk)\0*.mod;*.xm;*.stk;mod.*\0All files (*.*)\0*.*\0";
+        ofn.lpstrFile = file;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if (GetOpenFileNameW(&ofn)) loadModuleFile(file);
+        g_dirty = true;
+    });
 }
 
 void handle(UiAction a, HWND hwnd) {
     if (a == UiAction::OpenFile) openFileDialog(hwnd);
-    if (a != UiAction::None) g_dirty = true;
+    if (a == UiAction::SaveFile) saveCurrent(hwnd);
+    if (a != UiAction::None) {
+        g_dirty = true;
+        updateTitle();
+    }
 }
-
 void mouse(HWND hwnd, LPARAM lp, bool right) {
     float lx, ly;
     deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
@@ -174,7 +237,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_DROPFILES: {
             HDROP drop = (HDROP)wp;
             wchar_t file[MAX_PATH];
-            if (DragQueryFileW(drop, 0, file, MAX_PATH)) loadModuleFile(file);
+            if (DragQueryFileW(drop, 0, file, MAX_PATH)) {
+                std::wstring path = file;
+                confirmDiscard(hwnd, [path]() { loadModuleFile(path.c_str()); });
+            }
             DragFinish(drop);
             g_dirty = true;
             return 0;
@@ -194,6 +260,9 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_PAINT:
             ValidateRect(hwnd, nullptr);
             g_dirty = true;
+            return 0;
+        case WM_CLOSE:
+            confirmDiscard(hwnd, [hwnd]() { DestroyWindow(hwnd); });
             return 0;
         case WM_DESTROY:
             PostQuitMessage(0);
