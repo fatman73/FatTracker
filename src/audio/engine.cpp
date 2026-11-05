@@ -125,7 +125,8 @@ void Engine::previewNote(int sample, int note, uint32_t offset) {
     unlock();
 }
 
-bool Engine::loadTfmx(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl, size_t smplSize, const char* name) {
+bool Engine::loadTfmx(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl, size_t smplSize, const char* name,
+                      bool play) {
     TfmxPlayer* p = new TfmxPlayer;
     if (!p->load(mdat, mdatSize, smpl, smplSize)) {
         delete p;
@@ -140,7 +141,8 @@ bool Engine::loadTfmx(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl,
     delete tfmx_;
     tfmx_ = p;
     tfmxOn_ = true;
-    tfmxPlaying_ = true;
+    tfmxPlaying_ = play;
+    if (!play) tfmx_->clearMeters();
     playFrames_ = 0;
     publish();
     unlock();

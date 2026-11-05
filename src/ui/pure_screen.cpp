@@ -213,7 +213,7 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     c.textShadow(pure::tempoArrow(0).x + 8, pure::tempoArrow(0).y + 1, "TEMPO", kLabelInk, kLabelShadow, kSmall);
     c.textShadow(pure::tempoArrow(1).x, pure::tempoArrow(1).y + 1, "\x02", kLabelInk, kLabelShadow, kSmall);
     c.textShadow(90, info.y + 7, "STATUS:", kLabelInk, kLabelShadow, kSmall);
-    std::snprintf(buf, sizeof buf, "%.15s", status_);
+    std::snprintf(buf, sizeof buf, "%.10s", status_);  // 10 characters fit before TUNE / TIMING
     c.text(148, info.y + 7, buf, kValueInk, kMedium);
     size_t bytes = 0;
     if (s)

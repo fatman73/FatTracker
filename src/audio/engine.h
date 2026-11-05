@@ -63,7 +63,8 @@ public:
     double floppyDir();
     void floppyCancel();  // the user skipped a simulated load
     // TFMX (Huelsbeck) songs have their own player; the Song becomes an empty placeholder.
-    bool loadTfmx(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl, size_t smplSize, const char* name);
+    bool loadTfmx(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl, size_t smplSize, const char* name,
+                  bool play);  // play = start at once (else PLAY starts it)
     bool tfmx() const { return tfmxOn_; }
     const char* tfmxFormat() const;
 

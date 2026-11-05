@@ -86,6 +86,13 @@ void updateTitle() {
 std::unique_ptr<Song> g_pending;  // Pure mode: loaded song waiting for the floppy
 std::wstring g_pendingPath;
 bool g_pendingTruncated = false;
+// Pure mode: a TFMX pair waiting for the floppy (it has its own player, so it is kept as files)
+bool g_pendingTfmx = false;
+std::vector<uint8_t> g_pendingMdat, g_pendingSmpl;
+char g_pendingName[21] = {};
+bool loadPending() { return g_pending || g_pendingTfmx; }
+bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
+               const std::wstring& mdatPath);
 void applyLoaded(std::unique_ptr<Song> song, const std::wstring& path, bool truncated);
 void finishPendingLoad();
 
@@ -150,11 +157,30 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
     char name[21] = {};
     const std::wstring shown = !_wcsnicmp(mfile.c_str(), L"mdat.", 5) ? mfile.substr(5) : mfile;
     for (size_t i = 0; i < 20 && i < shown.size(); ++i) name[i] = shown[i] < 127 ? (char)towupper(shown[i]) : '_';
-    if (!g_engine->loadTfmx(data.data(), data.size(), smpl.data(), smpl.size(), name)) {
-        g_screen.setStatus("TFMX: CANNOT PLAY THIS FILE");
+    // Pure mode: the drive reads both files first; the music waits for PLAY
+    const double wait = g_engine->floppyRead((uint32_t)(data.size() + smpl.size()));
+    if (wait > 0.05) {
+        g_pendingTfmx = true;
+        g_pendingMdat = data;
+        g_pendingSmpl = static_cast<std::vector<uint8_t>&&>(smpl);
+        std::memcpy(g_pendingName, name, sizeof g_pendingName);
+        g_pendingPath = mdatPath;
+        g_busy = true;
+        SetCursor(g_cursors.busy());
+        g_screen.setStatus("LOADING...");
+        SetTimer(g_hwnd, kTimerFloppy, (UINT)(wait * 1000), nullptr);
         return true;
     }
-    g_engine->floppyRead((uint32_t)(data.size() + smpl.size()));
+    applyTfmx(data, smpl, name, mdatPath);
+    return true;
+}
+
+bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
+               const std::wstring& mdatPath) {
+    if (!g_engine->loadTfmx(mdat.data(), mdat.size(), smpl.data(), smpl.size(), name, false)) {
+        g_screen.setStatus("TFMX: CANNOT PLAY THIS FILE");
+        return false;
+    }
     g_screen.songChanged();
     static char msg[64];
     wsprintfA(msg, "%s - PLAYBACK ONLY", g_engine->tfmxFormat());
@@ -167,6 +193,7 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
 
 bool loadModuleFile(const wchar_t* path) {
     finishPendingLoad();  // a load in progress lands first
+    g_engine->stop();     // a file was chosen: the music that plays now stops
     std::vector<uint8_t> data;
     if (const char* err = readFileW(path, data)) {
         g_screen.setStatus(err);
@@ -218,12 +245,19 @@ bool g_dropChar = false;  // the key that skipped a load must not also type
 
 void finishPendingLoad() {
     KillTimer(g_hwnd, kTimerFloppy);
-    if (!g_pending) return;
+    if (!loadPending()) return;
     g_engine->floppyCancel();
     g_busy = false;
     SetCursor(g_cursors.arrow());
-    applyLoaded(static_cast<std::unique_ptr<Song>&&>(g_pending), g_pendingPath, g_pendingTruncated);
-    g_pending.reset();
+    if (g_pendingTfmx) {
+        g_pendingTfmx = false;
+        applyTfmx(g_pendingMdat, g_pendingSmpl, g_pendingName, g_pendingPath);
+        g_pendingMdat.clear();
+        g_pendingSmpl.clear();
+    } else {
+        applyLoaded(static_cast<std::unique_ptr<Song>&&>(g_pending), g_pendingPath, g_pendingTruncated);
+        g_pending.reset();
+    }
     g_dirty = true;
 }
 
@@ -441,7 +475,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             [[fallthrough]];  // Alt+F4 copies the pattern like in ProTracker; close with the window button
         case WM_KEYDOWN: {
             g_dropChar = false;
-            if (g_pending) {  // any key skips the simulated floppy read (and types nothing)
+            if (loadPending()) {  // any key skips the simulated floppy read (and types nothing)
                 finishPendingLoad();
                 g_dropChar = true;
                 return 0;
@@ -463,7 +497,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_SYSCHAR:
             return 0;  // no menu beep on Alt combinations
         case WM_LBUTTONDOWN:
-            if (g_pending) {
+            if (loadPending()) {
                 finishPendingLoad();
                 return 0;
             }
@@ -477,7 +511,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_MOUSEWHEEL: {
-            if (g_pending) {
+            if (loadPending()) {
                 finishPendingLoad();
                 return 0;
             }
@@ -496,7 +530,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             handle(g_screen.onChar((wchar_t)wp, *g_engine), hwnd);
             return 0;
         case WM_RBUTTONDOWN:
-            if (g_pending) {
+            if (loadPending()) {
                 finishPendingLoad();
                 return 0;
             }
@@ -537,9 +571,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_dirty = true;
             return 0;
         case WM_CLOSE:
-            if (g_pending) {  // closing during a simulated load: the half-read song is dropped
+            if (loadPending()) {  // closing during a simulated load: the half-read song is dropped
                 KillTimer(hwnd, kTimerFloppy);
                 g_pending.reset();
+                g_pendingTfmx = false;
                 g_busy = false;
             }
             confirmDiscard(hwnd, [hwnd]() { DestroyWindow(hwnd); });
@@ -688,7 +723,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     {  // FatTracker.exe <module>  (also used by "Open with")
         int argc = 0;
         LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-        if (argv && argc >= 2) loadModuleFile(argv[1]);
+        // a module named on the command line starts at once, unless Pure mode is still "reading" it
+        if (argv && argc >= 2 && loadModuleFile(argv[1]) && !loadPending()) g_engine->play();
         if (argv) LocalFree(argv);
     }
     ShowWindow(hwnd, show);
