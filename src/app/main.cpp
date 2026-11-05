@@ -30,7 +30,7 @@ HWND g_hwnd = nullptr;
 bool g_dirty = true;
 bool g_fullscreen = false;
 WINDOWPLACEMENT g_placement = {sizeof(WINDOWPLACEMENT)};
-constexpr UINT_PTR kTimerAudio = 1, kTimerClock = 2;
+constexpr UINT_PTR kTimerAudio = 1, kTimerClock = 2, kTimerFloppy = 3;
 
 void toggleFullscreen(HWND hwnd) {
     DWORD style = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
@@ -81,7 +81,43 @@ void updateTitle() {
     SetWindowTextW(g_hwnd, title);
 }
 
+std::unique_ptr<Song> g_pending;  // Pure mode: loaded song waiting for the floppy
+std::wstring g_pendingPath;
+bool g_pendingTruncated = false;
+void applyLoaded(std::unique_ptr<Song> song, const std::wstring& path, bool truncated);
+void finishPendingLoad();
+
+// Size of a file on disk (0 if unknown) - drives the floppy write sound.
+uint32_t fileSize(const wchar_t* path) {
+    WIN32_FILE_ATTRIBUTE_DATA a;
+    return GetFileAttributesExW(path, GetFileExInfoStandard, &a) ? a.nFileSizeLow : 0;
+}
+
+// Pure mode floppy sounds supplied by the user: sounds/floppy_*.wav next to the exe or in the working folder.
+void loadFloppySounds() {
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    const std::wstring exeDir = std::wstring(exe).substr(0, std::wstring(exe).find_last_of(L'\\') + 1);
+    const std::wstring dirs[2] = {exeDir + L"sounds\\", L"sounds\\"};
+    static Sample snd[3];
+    const Sample* use[3] = {};
+    const wchar_t* names[3] = {L"floppy_motor.wav", L"floppy_step.wav", L"floppy_insert.wav"};
+    for (int i = 0; i < 3; ++i)
+        for (const std::wstring& d : dirs) {
+            std::vector<uint8_t> data;
+            if (readFileW((d + names[i]).c_str(), data)) continue;
+            auto r = loadSampleFile(data.data(), data.size());
+            if (!r.ok()) continue;
+            snd[i] = static_cast<Sample&&>(r.value());
+            use[i] = &snd[i];
+            break;
+        }
+    g_engine->setFloppySounds(use[0], use[1], use[2]);  // copies (trimmed) what it uses
+    for (Sample& s : snd) s = Sample{};
+}
+
 bool loadModuleFile(const wchar_t* path) {
+    finishPendingLoad();  // a load in progress lands first
     std::vector<uint8_t> data;
     if (const char* err = readFileW(path, data)) {
         g_screen.setStatus(err);
@@ -98,27 +134,59 @@ bool loadModuleFile(const wchar_t* path) {
         else
             wsprintfA(msg, "ERROR: %s", r.error());
         g_screen.setStatus(msg);
+        g_engine->floppyDir();  // the drive still looked at it
         return false;
     }
     const bool truncated = (r.value().loadFlags & LOAD_TRUNCATED) != 0;
-    g_engine->setSong(std::make_unique<Song>(static_cast<Song&&>(r.value())));
+    auto song = std::make_unique<Song>(static_cast<Song&&>(r.value()));
+    // Pure mode: the song arrives when the simulated floppy has read it (a key or click skips the wait)
+    const double wait = g_engine->floppyRead((uint32_t)data.size());
+    if (wait > 0.05) {
+        g_pending = static_cast<std::unique_ptr<Song>&&>(song);
+        g_pendingPath = path;
+        g_pendingTruncated = truncated;
+        g_busy = true;
+        SetCursor(g_cursors.busy());
+        g_screen.setStatus("LOADING...");
+        SetTimer(g_hwnd, kTimerFloppy, (UINT)(wait * 1000), nullptr);
+        return true;
+    }
+    applyLoaded(static_cast<std::unique_ptr<Song>&&>(song), path, truncated);
+    return true;
+}
+
+void applyLoaded(std::unique_ptr<Song> song, const std::wstring& path, bool truncated) {
+    g_engine->setSong(static_cast<std::unique_ptr<Song>&&>(song));
     g_screen.songChanged();
     g_screen.setStatus(truncated ? "LOADED: FILE TRUNCATED" : "ALL RIGHT");
     g_path = path;
     g_screen.setCurrentPath(path);
     updateTitle();
-    return true;
+}
+
+bool g_dropChar = false;  // the key that skipped a load must not also type
+
+void finishPendingLoad() {
+    KillTimer(g_hwnd, kTimerFloppy);
+    if (!g_pending) return;
+    g_engine->floppyCancel();
+    g_busy = false;
+    SetCursor(g_cursors.arrow());
+    applyLoaded(static_cast<std::unique_ptr<Song>&&>(g_pending), g_pendingPath, g_pendingTruncated);
+    g_pending.reset();
+    g_dirty = true;
 }
 
 // Runs `then` right away, or after asking to save unsaved changes.
 void confirmDiscard(HWND hwnd, std::function<void()> then);
 
-bool saveAsDialog(HWND hwnd);
+bool saveAsDialog(HWND hwnd, DWORD filter = 1);  // 1 XM, 2 MOD, 3 WAV
 
 bool saveTo(const std::wstring& path, SaveKind kind) {
     g_busy = true;
     SetCursor(g_cursors.busy());
     SaveResult r = saveSong(*g_engine, path, kind);
+    if (r.ok) g_engine->floppyWrite(fileSize(path.c_str()));
     g_busy = false;
     SetCursor(g_cursors.arrow());
     g_screen.setStatus(r.message);
@@ -164,7 +232,7 @@ bool saveCurrent(HWND hwnd) {
     return saveAsDialog(hwnd);
 }
 
-bool saveAsDialog(HWND hwnd) {
+bool saveAsDialog(HWND hwnd, DWORD filter) {
     wchar_t file[MAX_PATH] = {};
     std::wstring def = g_path.empty() ? L"untitled.xm" : withExtension(g_path, L".xm");
     lstrcpynW(file, def.c_str(), MAX_PATH);
@@ -174,6 +242,7 @@ bool saveAsDialog(HWND hwnd) {
     ofn.lpstrFile = file;
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = L"xm";
+    ofn.nFilterIndex = filter;
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (!GetSaveFileNameW(&ofn)) return false;
     const SaveKind kind = ofn.nFilterIndex == 2 ? SaveKind::Mod : ofn.nFilterIndex == 3 ? SaveKind::Wav : SaveKind::Xm;
@@ -222,6 +291,7 @@ void openFileDialog(HWND hwnd) {
 }
 
 void loadAnyFile(const std::wstring& path) {
+    finishPendingLoad();
     std::vector<uint8_t> data;
     if (const char* err = readFileW(path.c_str(), data)) {
         g_screen.setStatus(err);
@@ -245,6 +315,7 @@ void loadAnyFile(const std::wstring& path) {
 void handle(UiAction a, HWND hwnd) {
     if (a == UiAction::OpenFile) openFileDialog(hwnd);
     if (a == UiAction::SaveFile) saveCurrent(hwnd);
+    if (a == UiAction::ExportWav) saveAsDialog(hwnd, 3);
     const std::wstring path = g_screen.actionPath();
     if (a == UiAction::LoadPath) loadAnyFile(path);
     if (a == UiAction::SaveXmPath) saveFromDiskOp(path, SaveKind::Xm);
@@ -259,12 +330,17 @@ void handle(UiAction a, HWND hwnd) {
             if (idx >= 0 && s->samples[idx].length) bytes = saveSampleWav(s->samples[idx]);
             g_engine->unlock();
             if (bytes.empty()) g_screen.setStatus("ERROR: THE SAMPLE IS EMPTY");
-            else g_screen.setStatus(writeFileAtomic(path.c_str(), bytes) ? "SAMPLE SAVED (WAV)" : "ERROR: CANNOT WRITE FILE");
+            else if (!writeFileAtomic(path.c_str(), bytes)) g_screen.setStatus("ERROR: CANNOT WRITE FILE");
+            else {
+                g_screen.setStatus("SAMPLE SAVED (WAV)");
+                g_engine->floppyWrite((uint32_t)bytes.size());
+            }
             g_dirty = true;
         };
         if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) save();
         else g_screen.ask("FILE EXISTS. OVERWRITE?", {"OVERWRITE", "CANCEL"}, [save](int r) { if (r == 0) save(); });
     }
+    if (g_screen.takeDirRead()) g_engine->floppyDir();
     if (a != UiAction::None) {
         g_dirty = true;
         updateTitle();
@@ -303,6 +379,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             [[fallthrough]];  // Alt+F4 copies the pattern like in ProTracker; close with the window button
         case WM_KEYDOWN: {
+            g_dropChar = false;
+            if (g_pending) {  // any key skips the simulated floppy read (and types nothing)
+                finishPendingLoad();
+                g_dropChar = true;
+                return 0;
+            }
             const bool ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0;
             const bool alt = (lp & (1 << 29)) != 0, ext = (lp & (1 << 24)) != 0;
             const bool repeat = (lp & (1 << 30)) != 0;  // keyboard auto-repeat
@@ -320,6 +402,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_SYSCHAR:
             return 0;  // no menu beep on Alt combinations
         case WM_LBUTTONDOWN:
+            if (g_pending) {
+                finishPendingLoad();
+                return 0;
+            }
             mouse(hwnd, lp, false);
             return 0;
         case WM_LBUTTONUP: {
@@ -330,6 +416,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_MOUSEWHEEL: {
+            if (g_pending) {
+                finishPendingLoad();
+                return 0;
+            }
             POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ScreenToClient(hwnd, &pt);
             float lx, ly;
@@ -338,9 +428,17 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_CHAR:
+            if (g_dropChar) {
+                g_dropChar = false;
+                return 0;
+            }
             handle(g_screen.onChar((wchar_t)wp, *g_engine), hwnd);
             return 0;
         case WM_RBUTTONDOWN:
+            if (g_pending) {
+                finishPendingLoad();
+                return 0;
+            }
             mouse(hwnd, lp, true);
             return 0;
         case WM_MOUSEMOVE: {
@@ -361,6 +459,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_TIMER:
+            if (wp == kTimerFloppy) finishPendingLoad();
             if (wp == kTimerAudio) {
                 g_engine->pollAudio();
                 if (const char* st = g_engine->audioStatus())
@@ -377,6 +476,11 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_dirty = true;
             return 0;
         case WM_CLOSE:
+            if (g_pending) {  // closing during a simulated load: the half-read song is dropped
+                KillTimer(hwnd, kTimerFloppy);
+                g_pending.reset();
+                g_busy = false;
+            }
             confirmDiscard(hwnd, [hwnd]() { DestroyWindow(hwnd); });
             return 0;
         case WM_DESTROY:
@@ -428,6 +532,13 @@ int screenshotMode() {
                     else if (!wcsncmp(tok, L"A+", 2)) alt = true;
                     else break;
                     tok += 2;
+                }
+                if (!wcsncmp(tok, L"PURE:", 5)) {  // Pure mode 0/1/2
+                    g_screen.setPure(_wtoi(tok + 5), *g_engine);
+                    std::vector<float> pb(4800 * 2);
+                    for (int i = 0; i < 5; ++i) g_engine->render(pb.data(), 4800);
+                    drawFrame();
+                    continue;
                 }
                 if (!wcsncmp(tok, L"T:", 2)) {  // theme index
                     setCurrentTheme(_wtoi(tok + 2));
@@ -492,6 +603,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
         return 1;
     }
     if (!g_engine->startAudio()) g_screen.setStatus(g_engine->audioStatus());
+    loadFloppySounds();
     g_screen.loadSettings(iniPath().c_str(), *g_engine);
     g_engine->setSong(std::make_unique<Song>(makeEmptySong(g_screen.defaultChannels())));
     g_screen.songChanged();

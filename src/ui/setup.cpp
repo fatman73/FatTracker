@@ -13,10 +13,13 @@ enum : int {
     ID_RGB = 40,       // + channel*2 + (0 down, 1 up), channel 0..2
     ID_RGBBAR = 50,    // + channel
     ID_INTERP = 60,    // + 0..2
-    ID_VALUE = 70,     // + row*2 + dir (rows: 0 separation, 1 volume, 2 default channels)
+    ID_VALUE = 70,     // + row*2 + dir (rows: 0 separation, 1 volume, 2 default channels, 3 drive volume)
+    ID_PURE = 80,      // + 0 off, 1 A500, 2 A1200
     ID_EXIT = 90
 };
 const char* const kInterp[3] = {"NONE", "LINEAR", "CUBIC"};
+const char* const kPure[3] = {"OFF", "A500", "A1200"};
+constexpr int kValueRows = 4;
 }  // namespace
 
 RectF PlayScreen::setupRect(int id) const {
@@ -33,10 +36,14 @@ RectF PlayScreen::setupRect(int id) const {
     }
     if (id >= ID_RGBBAR && id < ID_RGBBAR + 3) return {px + 28 + 38, py + (id - ID_RGBBAR) * 38.f, 436, 32};
     const float ax = a.x + 840, aw = a.w - 840 - 14;
-    if (id >= ID_INTERP && id < ID_INTERP + 3) return {ax + (id - ID_INTERP) * (aw / 3), a.y + 44, aw / 3 - 6, 40};
-    if (id >= ID_VALUE && id < ID_VALUE + 6) {
+    if (id >= ID_INTERP && id < ID_INTERP + 3) return {ax + (id - ID_INTERP) * (aw / 3), a.y + 40, aw / 3 - 6, 34};
+    if (id >= ID_VALUE && id < ID_VALUE + kValueRows * 2) {
         const int row = (id - ID_VALUE) / 2, dir = (id - ID_VALUE) % 2;
-        return {dir ? ax + aw - 36 : ax + aw - 36 - 6 - 90 - 6 - 36, a.y + 130 + row * 50.f, 36, 36};
+        return {dir ? ax + aw - 36 : ax + aw - 36 - 6 - 90 - 6 - 36, a.y + 86 + row * 42.f, 36, 34};
+    }
+    if (id >= ID_PURE && id < ID_PURE + 3) {
+        const float bx = ax + 128, bw = (aw - 128) / 3;
+        return {bx + (id - ID_PURE) * bw, a.y + 86 + kValueRows * 42.f, bw - 6, 34};
     }
     if (id == ID_EXIT) return {a.x + 14, a.y + a.h - 54, 190, 40};
     return {};
@@ -89,8 +96,8 @@ void PlayScreen::setupDraw(Gfx& g, Text& tx, const Theme& t) {
         drawButton(u, setupRect(ID_INTERP + i), kInterp[i],
                    interp_ == i ? Gfx::PanelState::Active : hov(ID_INTERP + i) ? Gfx::PanelState::Hover : Gfx::PanelState::Normal,
                    14.f);
-    const char* labels[3] = {"STEREO SEPARATION", "MASTER VOLUME", "NEW SONG CH."};
-    for (int row = 0; row < 3; ++row) {
+    const char* labels[kValueRows] = {"STEREO SEPARATION", "MASTER VOLUME", "NEW SONG CH.", "DRIVE VOLUME"};
+    for (int row = 0; row < kValueRows; ++row) {
         RectF dn = setupRect(ID_VALUE + row * 2), up = setupRect(ID_VALUE + row * 2 + 1);
         tx.draw(g, {ax, dn.y, dn.x - ax - 6, dn.h}, labels[row], 14.f, t.label, Align::Left);
         RectF val = {dn.x + dn.w + 6, dn.y, up.x - dn.x - dn.w - 12, dn.h};
@@ -99,13 +106,36 @@ void PlayScreen::setupDraw(Gfx& g, Text& tx, const Theme& t) {
         if (row == 0) std::snprintf(v, sizeof v, "%d%%", separationPct_);
         if (row == 1) std::snprintf(v, sizeof v, "%d%%", gainPct_);
         if (row == 2) std::snprintf(v, sizeof v, "%d", defaultChannels_);
+        if (row == 3) std::snprintf(v, sizeof v, "%d%%", drivePct_);
         tx.draw(g, val, v, 15.f, t.digits, Align::Center, FontRole::Mono);
         drawButton(u, dn, "\x03", hov(ID_VALUE + row * 2) ? Gfx::PanelState::Hover : Gfx::PanelState::Normal, 12.f);
         drawButton(u, up, "\x04", hov(ID_VALUE + row * 2 + 1) ? Gfx::PanelState::Hover : Gfx::PanelState::Normal, 12.f);
     }
+    const RectF p0 = setupRect(ID_PURE);
+    tx.draw(g, {ax, p0.y, 124, p0.h}, "PURE MODE", 14.f, t.label, Align::Left);
+    for (int i = 0; i < 3; ++i)
+        drawButton(u, setupRect(ID_PURE + i), kPure[i],
+                   pure_ == i ? Gfx::PanelState::Active : hov(ID_PURE + i) ? Gfx::PanelState::Hover : Gfx::PanelState::Normal,
+                   14.f);
 }
 
-void PlayScreen::applyMixing(Engine& e) { e.setMixing(interp_, separationPct_ / 100.f, gainPct_ / 100.f); }
+void PlayScreen::setPure(int mode, Engine& e) {
+    mode = std::clamp(mode, 0, 2);
+    if (mode && !pure_) {
+        themeBeforePure_ = currentThemeIndex();
+        setCurrentTheme(1);  // CLASSIC PT 2.3
+    } else if (!mode && pure_) {
+        setCurrentTheme(themeBeforePure_);
+    }
+    pure_ = mode;
+    e.setPure(mode);
+    setStatus(mode == 0 ? "PURE MODE OFF" : mode == 1 ? "PURE MODE: AMIGA 500" : "PURE MODE: AMIGA 1200");
+}
+
+void PlayScreen::applyMixing(Engine& e) {
+    e.setMixing(interp_, separationPct_ / 100.f, gainPct_ / 100.f);
+    e.setDriveVolume(drivePct_ / 100.f);
+}
 
 UiAction PlayScreen::setupMouse(float x, float y, bool right, Engine& e) {
     auto hit = [&](int id) { return setupRect(id).contains(x, y); };
@@ -154,13 +184,19 @@ UiAction PlayScreen::setupMouse(float x, float y, bool right, Engine& e) {
             applyMixing(e);
             return UiAction::Redraw;
         }
-    for (int row = 0; row < 3; ++row)
+    for (int i = 0; i < 3; ++i)
+        if (hit(ID_PURE + i)) {
+            if (i != pure_) setPure(i, e);
+            return UiAction::Redraw;
+        }
+    for (int row = 0; row < kValueRows; ++row)
         for (int d = 0; d < 2; ++d)
             if (hit(ID_VALUE + row * 2 + d)) {
                 const int s = (d ? 1 : -1) * (right ? 10 : (row == 2 ? 1 : 5));
                 if (row == 0) separationPct_ = std::clamp(separationPct_ + s, 0, 100);
                 if (row == 1) gainPct_ = std::clamp(gainPct_ + s, 10, 400);
                 if (row == 2) defaultChannels_ = std::clamp(defaultChannels_ + (d ? 1 : -1) * (right ? 4 : 1), 4, 32);
+                if (row == 3) drivePct_ = std::clamp(drivePct_ + s, 0, 100);
                 applyMixing(e);
                 return UiAction::Redraw;
             }
@@ -196,6 +232,7 @@ void PlayScreen::loadSettings(const wchar_t* ini, Engine& e) {
     separationPct_ = std::clamp(readInt(ini, L"StereoSeparation", 100), 0, 100);
     gainPct_ = std::clamp(readInt(ini, L"MasterVolume", 100), 10, 400);
     defaultChannels_ = std::clamp(readInt(ini, L"NewSongChannels", 4), 4, 32);
+    drivePct_ = std::clamp(readInt(ini, L"DriveVolume", 70), 0, 100);
     setViewMode(readInt(ini, L"View", 8));
     octave_ = std::clamp(readInt(ini, L"Octave", 4), 0, 6);
     editSkip_ = std::clamp(readInt(ini, L"EditSkip", 1), 0, 16);
@@ -207,6 +244,12 @@ void PlayScreen::loadSettings(const wchar_t* ini, Engine& e) {
     if (dir[0]) dir_ = dir;
     applyMixing(e);
     applyMetronome(e);
+    const int pure = std::clamp(readInt(ini, L"PureMode", 0), 0, 2);
+    if (pure) {
+        pure_ = pure;  // the saved theme already is the Pure one
+        themeBeforePure_ = std::clamp(readInt(ini, L"ThemeBeforePure", 0), 0, themeCount());
+        e.setPure(pure);
+    }
 }
 
 void PlayScreen::saveSettings(const wchar_t* ini) const {
@@ -215,6 +258,9 @@ void PlayScreen::saveSettings(const wchar_t* ini) const {
     writeInt(ini, L"StereoSeparation", separationPct_);
     writeInt(ini, L"MasterVolume", gainPct_);
     writeInt(ini, L"NewSongChannels", defaultChannels_);
+    writeInt(ini, L"DriveVolume", drivePct_);
+    writeInt(ini, L"PureMode", pure_);
+    writeInt(ini, L"ThemeBeforePure", themeBeforePure_);
     writeInt(ini, L"View", viewMode_);
     writeInt(ini, L"Octave", octave_);
     writeInt(ini, L"EditSkip", editSkip_);

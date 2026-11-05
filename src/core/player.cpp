@@ -8,6 +8,7 @@
 Player::Player(Mixer& m) : mixer_(m) {}
 
 void Player::setSong(const Song* s) {
+    mixer_.setLed(false);  // every song starts with the filter LED off
     playing_ = false;
     mixer_.reset();  // voices may point at samples of the song being replaced
     song_ = s;
@@ -16,6 +17,7 @@ void Player::setSong(const Song* s) {
 
 void Player::start(uint16_t order, uint16_t row, bool patternMode, uint16_t pattern) {
     if (!song_ || song_->order.empty() || song_->patterns.empty()) return;
+    if (order == 0 && row == 0) mixer_.setLed(false);  // a fresh start, like PT: filter LED off
     for (int c = 0; c < kMaxChannels; ++c) {
         bool m = ch_[c].muted;
         ch_[c] = ChannelState{};

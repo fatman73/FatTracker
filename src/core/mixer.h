@@ -2,6 +2,7 @@
 #pragma once
 #include <cstdint>
 
+#include "core/paula.h"
 #include "core/song.h"
 
 enum class Interp : uint8_t { None, Linear, Cubic };
@@ -19,6 +20,11 @@ public:
     void setMasterGain(float g) { master_ = g; }
     void setSeparation(float s) { separation_ = s < 0 ? 0 : (s > 1 ? 1 : s); }  // 1 = full stereo
     void setNumChannels(int n);
+    // Pure mode: Paula sound (sample-and-hold, 8-bit DAC, hard L-R-R-L, no ramps) + Amiga analog filters
+    void setPaula(PaulaModel m);
+    PaulaModel paula() const { return paula_; }
+    void setLed(bool on) { filter_.setLed(on); }
+    bool led() const { return filter_.led(); }
 
     void trigger(int v, const Sample* s, uint32_t offset);
     void stopVoice(int v);
@@ -50,6 +56,7 @@ private:
     void mixVoice(Voice& v, int idx, const T* data, float norm, float* out, uint32_t frames, float& peak);
     static int64_t mapIndex(const Voice& v, int64_t vi);
     void setTargets(Voice& v);
+    bool ramping() const { return ramp_ && paula_ == PaulaModel::None; }
     void startRamp(Voice& v);
 
     uint32_t rate_;
@@ -59,6 +66,8 @@ private:
     float master_ = 1.f;
     float separation_ = 1.f;
     float autoScale_ = 1.f;
+    PaulaModel paula_ = PaulaModel::None;
+    PaulaFilter filter_;
     Voice voices_[kMaxVoices];
     Voice ghosts_[kMaxVoices];  // fading-out copies of retriggered voices
     float vu_[kMaxVoices] = {};

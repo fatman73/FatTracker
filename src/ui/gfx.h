@@ -51,6 +51,8 @@ public:
     void pushRoundedClip(RectF r, float radius);  // anti-aliased rounded mask (layer)
     void popLayer();
     ID2D1SolidColorBrush* brush(Color c);
+    // Pure mode: a 32-bit pixel image drawn in device pixels with an integer scale, no smoothing.
+    void drawPixels(const uint32_t* argb, uint32_t w, uint32_t h, float devX, float devY, float scale);
 
 private:
     bool createDevice();
@@ -71,6 +73,8 @@ private:
     ID2D1Bitmap1* target_ = nullptr;
     ID2D1Bitmap1* glowTarget_ = nullptr;
     ID2D1SolidColorBrush* brush_ = nullptr;
+    ID2D1Bitmap* pix_ = nullptr;
+    uint32_t pixW_ = 0, pixH_ = 0;
     bool inGlow_ = false;
     bool deviceLost_ = false;
     struct GradEntry {

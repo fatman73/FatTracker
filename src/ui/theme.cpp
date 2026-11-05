@@ -14,9 +14,9 @@ const Theme kPresets[] = {
      rgb(0x0A0E15), rgb(0x4F7DF0), rgb(0xEEF3FB), rgb(0x7FB0FF), rgb(0x6EE0A0), rgb(0xFFC56B), rgb(0x7D879A),
      rgb(0xDCE6F5), rgb(0x143FB8), rgb(0xFF5A5A), rgb(0x2FE06A), rgb(0xF5E14A), rgb(0xFF4A3D), rgb(0x323945),
      rgb(0x46FF72), rgb(0x1B1F27), 1.0f, 0.55f, 7.f},
-    // 1 Classic ProTracker 2.3: flat grey bevels, magenta pattern text, no glow
+    // 1 Classic ProTracker 2.3: flat grey bevels, blue pattern text (user wish), no glow
     {rgb(0x9DA3AC), rgb(0xBBBBBB), rgb(0xFFFFFF), rgb(0x666666), rgb(0x000000), rgb(0x0000BB), rgb(0x222222),
-     rgb(0x000000), rgb(0xBB66CC), rgb(0xFFFFFF), rgb(0x8888FF), rgb(0x66DD88), rgb(0xFFDD66), rgb(0x888888),
+     rgb(0x000000), rgb(0x6F8FFF), rgb(0xFFFFFF), rgb(0x8888FF), rgb(0x66DD88), rgb(0xFFDD66), rgb(0x888888),
      rgb(0xDDDDDD), rgb(0x0000BB), rgb(0xFF3333), rgb(0x22CC44), rgb(0xEEDD22), rgb(0xEE2222), rgb(0x000000),
      rgb(0x33FF55), rgb(0x000000), 0.f, 0.f, 0.f},
     // 2 ProTracker 3.61 blue

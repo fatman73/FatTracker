@@ -57,6 +57,7 @@ void PlayScreen::moveCursor(int rows, int cols, Engine& e) {
     }
     if (cols) {
         curCol_ += cols;
+        while (pure_ && (curCol_ == kColVolHi || curCol_ == kColVolLo)) curCol_ += cols > 0 ? 1 : -1;  // no volume column in Pure
         if (curCol_ < 0) {
             curCol_ = kColCount - 1;
             curCh_ = curCh_ > 0 ? curCh_ - 1 : s->numChannels - 1;
