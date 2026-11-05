@@ -7,6 +7,7 @@
 
 #include "audio/engine.h"
 #include "core/edit.h"
+#include "core/text_edit.h"
 #include "ui/font.h"
 #include "ui/gfx.h"
 #include "ui/pattern_view.h"
@@ -45,6 +46,9 @@ struct Dialog {
     int count = 0;
     std::function<void(int)> onAnswer;  // index of the clicked button
 };
+
+// RENAME helper (disk_op.cpp): the typed name with the file's extension or Amiga prefix kept
+std::wstring renameTarget(const std::wstring& from, std::wstring typed);
 
 class PlayScreen {
 public:
@@ -181,6 +185,19 @@ private:
     RectF samplerWave() const;
     RectF samplerButton(int i) const;
     uint32_t xToSample(float x) const;
+    int yToValue(float y, bool is16) const;  // pencil height -> sample value
+    bool drawMode_ = false;                  // DRAW: dragging in the wave draws
+    uint32_t drawLastX_ = 0;
+    int drawLastV_ = 0;
+    bool recordRequested_ = false;           // SAMPLE pressed: the app starts / stops recording
+    bool sampling_ = false;                  // recording from the audio input
+    // name editing: 0 none, 1 song name, 2 sample name
+    int nameEdit_ = 0;
+    LineEdit line_;
+    RectF nameField(int which) const;  // SONGNAME / SAMPLENAME fields of the main screen
+    void finishNameEdit(Engine& e, bool keep);
+    bool nameEditKey(unsigned vk, Engine& e);  // true when the key was used by the edit
+    void drawLineEdit(Gfx& g, Text& tx, const Theme& t, RectF r, const LineEdit& le);
     float sampleToX(uint32_t i) const;
     // EDIT OP.
     int quantize_ = 1;
@@ -213,6 +230,10 @@ public:
     int defaultChannels() const { return defaultChannels_; }
     void setPure(int mode, Engine& e);  // switches the classic theme too
     void setDemoEffect(int fx) { demo_.setEffect(fx); }  // logo box effect (dev screenshots)
-    void setDemoTime(double s) { demoTime_ = s; }       // fixed demo time (dev screenshots), < 0 = clock
+    void setDemoTime(double s) { demoTime_ = s; }
+    void startNameEdit(int which, Engine& e);  // 1 song name, 2 sample name
+    bool takeRecordRequest() { const bool r = recordRequested_; recordRequested_ = false; return r; }
+    void setRecording(bool on) { sampling_ = on; }
+    bool recording() const { return sampling_; }       // fixed demo time (dev screenshots), < 0 = clock
     bool takeDirRead() { const bool r = dirRead_; dirRead_ = false; return r; }  // DISK OP. listed a folder
 };

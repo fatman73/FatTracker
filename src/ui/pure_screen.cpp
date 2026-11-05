@@ -184,20 +184,22 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     box(c, sr);
     c.textShadow(sr.x + 18, sr.y + 3, "SONGNAME:", kLabelInk, kLabelShadow, kSmall);
     char name[23];
-    std::snprintf(name, sizeof name, "%-20.20s", s ? s->name : "");
+    std::snprintf(name, sizeof name, "%-20.20s", nameEdit_ == 1 ? line_.text.c_str() : (s ? s->name : ""));
     for (char& ch : name)
         if (ch == ' ') ch = '_';
     c.text(sr.x + 106, sr.y + 3, name, kValueInk, kMedium);
+    if (nameEdit_ == 1) c.fill(sr.x + 106 + (int)line_.cursor * 8, sr.y + 9, 7, 1, kCursor);  // text cursor
     const unsigned secs = tel.rate ? (unsigned)(tel.playFrames / tel.rate) : 0;
     std::snprintf(buf, sizeof buf, "%02u:%02u", (secs / 60) % 100, secs % 60);
     value(c, sr, buf);
     const pure::Box smr = pure::sampleRow();
     box(c, smr);
     c.textShadow(smr.x + 10, smr.y + 3, "SAMPLENAME:", kLabelInk, kLabelShadow, kSmall);
-    std::snprintf(name, sizeof name, "%-22.22s", smp ? smp->name : "");
+    std::snprintf(name, sizeof name, "%-22.22s", nameEdit_ == 2 ? line_.text.c_str() : (smp ? smp->name : ""));
     for (char& ch : name)
         if (ch == ' ') ch = '_';
     c.text(smr.x + 106, smr.y + 3, name, kValueInk, kMedium);
+    if (nameEdit_ == 2) c.fill(smr.x + 106 + (int)std::min<size_t>(line_.cursor, 21) * 8, smr.y + 9, 7, 1, kCursor);
     box(c, pure::loadButton());
     label(c, pure::loadButton(), "LOAD");
 
@@ -330,6 +332,10 @@ UiAction PlayScreen::pureMouse(float lx, float ly, bool right, Engine& e) {
         return UiAction::Redraw;
     }
     if (h == pure::kLoad) return UiAction::OpenFile;
+    if (h == pure::kSongName || h == pure::kSampleName) {
+        startNameEdit(h == pure::kSongName ? 1 : 2, e);
+        return UiAction::Redraw;
+    }
     if (h == pure::kExit) {
         setPure(0, e);
         return UiAction::Redraw;

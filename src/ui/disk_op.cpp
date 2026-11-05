@@ -8,11 +8,11 @@
 namespace {
 enum {
     D_MODULES, D_SAMPLES, D_ALL, D_PARENT, D_HOME, D_DRIVES,
-    D_LOAD, D_SAVEXM, D_EXPMOD, D_EXPWAV, D_SAVESMP, D_DELETE, D_EXIT, D_COUNT
+    D_LOAD, D_SAVEXM, D_EXPMOD, D_EXPWAV, D_SAVESMP, D_RENAME, D_DELETE, D_EXIT, D_COUNT
 };
 const char* const kDiskButtons[D_COUNT] = {"MODULES", "SAMPLES", "ALL FILES", "PARENT",     "HOME",
                                           "DRIVES",  "LOAD",    "SAVE XM",   "EXPORT MOD", "EXPORT WAV",
-                                          "SAVE SAMPLE", "DELETE", "EXIT"};
+                                          "SAVE SAMPLE", "RENAME", "DELETE", "EXIT"};
 constexpr float kRowH = 26.f;
 
 bool hasExt(const std::wstring& n, std::initializer_list<const wchar_t*> exts) {
@@ -44,6 +44,29 @@ RectF PlayScreen::panelArea() const { return {L_.counters.x, L_.counters.y, L_.s
 
 RectF PlayScreen::bottomArea() const {
     return {L_.pattern.x, L_.pattern.y, L_.side.x + L_.side.w - L_.pattern.x, L_.pattern.h};
+}
+
+// New file name for RENAME: the typed name keeps the file's kind - its extension, or the Amiga
+// prefix ("mod.", "mdat.", "smpl.") - unless the typed name already ends in a known extension.
+std::wstring renameTarget(const std::wstring& from, std::wstring typed) {
+    while (!typed.empty() && (typed.back() == L'.' || typed.back() == L' ')) typed.pop_back();
+    while (!typed.empty() && typed.front() == L' ') typed.erase(typed.begin());
+    if (typed.empty()) return typed;
+    static const wchar_t* const kPrefixes[] = {L"mod.", L"mdat.", L"smpl."};
+    for (const wchar_t* p : kPrefixes) {
+        const size_t n = wcslen(p);
+        if (from.size() > n && !_wcsnicmp(from.c_str(), p, n))
+            return _wcsnicmp(typed.c_str(), p, n) ? from.substr(0, n) + typed : typed;
+    }
+    static const wchar_t* const kExts[] = {L".mod", L".xm", L".s3m", L".it", L".mtm", L".669", L".med", L".mmd0",
+                                           L".mmd1", L".mmd2", L".mmd3", L".dbm", L".digi", L".symmod", L".wav",
+                                           L".iff", L".8svx", L".aiff", L".mdat", L".smpl", L".tfx", L".sam"};
+    for (const wchar_t* x : kExts) {
+        const size_t n = wcslen(x);
+        if (typed.size() > n && !_wcsicmp(typed.c_str() + typed.size() - n, x)) return typed;
+    }
+    const size_t dot = from.find_last_of(L'.');
+    return dot == std::wstring::npos ? typed : typed + from.substr(dot);
 }
 
 RectF PlayScreen::diskButton(int i) const {
@@ -227,8 +250,33 @@ UiAction PlayScreen::diskMouse(float x, float y, bool, Engine& e) {
             case D_SAVESMP:
                 actionPath_ = target(L".wav");
                 return UiAction::SaveSamplePath;
+            case D_RENAME: {  // the selected file gets the name typed in the NAME field
+                if (diskSel_ < 0 || diskSel_ >= (int)entries_.size() || entries_[diskSel_].dir || dir_ == L"::drives")
+                    return setStatus("SELECT A FILE FIRST"), UiAction::Redraw;
+                const std::wstring from = entries_[diskSel_].name;
+                const std::wstring to = renameTarget(from, fileName_);
+                if (to.empty()) return setStatus("TYPE THE NEW NAME IN THE NAME FIELD"), UiAction::Redraw;
+                const std::wstring src = dir_ + L"\\" + from, dst = dir_ + L"\\" + to;
+                if (to == from) return setStatus("THE FILE ALREADY HAS THIS NAME"), UiAction::Redraw;
+                auto doRename = [this, src, dst](bool replace) {
+                    const bool ok = MoveFileExW(src.c_str(), dst.c_str(), replace ? MOVEFILE_REPLACE_EXISTING : 0) != 0;
+                    setStatus(ok ? "FILE RENAMED" : "ERROR: CANNOT RENAME FILE");
+                    diskRefresh();
+                };
+                // another file of that name: ask, naming it, with CANCEL first (Enter keeps the file)
+                if (_wcsicmp(to.c_str(), from.c_str()) != 0 && GetFileAttributesW(dst.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                    char text[96];
+                    std::snprintf(text, sizeof text, "REPLACE THE EXISTING %s ?", narrow(to, 40).c_str());
+                    ask(text, {"CANCEL", "REPLACE"}, [doRename](int a) {
+                        if (a == 1) doRename(true);
+                    });
+                } else {
+                    doRename(false);  // a new name, or only its case changes
+                }
+                return UiAction::Redraw;
+            }
             case D_DELETE: {
-                if (diskSel_ >= (int)entries_.size() || entries_[diskSel_].dir) return UiAction::None;
+                if (diskSel_ < 0 || diskSel_ >= (int)entries_.size() || entries_[diskSel_].dir) return UiAction::None;
                 const std::wstring path = dir_ + L"\\" + entries_[diskSel_].name;
                 char text[96];
                 std::snprintf(text, sizeof text, "DELETE %s ?", narrow(entries_[diskSel_].name, 40).c_str());
@@ -265,17 +313,18 @@ UiAction PlayScreen::diskKey(unsigned vk, bool, Engine& e) {
     const int n = (int)entries_.size();
     switch (vk) {
         case VK_UP:
-            diskSel_ = std::max(0, diskSel_ - 1);
-            return UiAction::Redraw;
         case VK_DOWN:
-            diskSel_ = std::min(n - 1, diskSel_ + 1);
-            return UiAction::Redraw;
         case VK_PRIOR:
-            diskSel_ = std::max(0, diskSel_ - diskRows());
+        case VK_NEXT: {
+            const int step = vk == VK_UP ? -1 : vk == VK_DOWN ? 1 : vk == VK_PRIOR ? -diskRows() : diskRows();
+            diskSel_ = n ? std::clamp(diskSel_ + step, 0, n - 1) : 0;
+            if (n && !entries_[diskSel_].dir) {  // the NAME field follows the selection, like a click
+                const std::wstring& nm = entries_[diskSel_].name;
+                const size_t dot = nm.find_last_of(L'.');
+                fileName_ = dot == std::wstring::npos ? nm : nm.substr(0, dot);
+            }
             return UiAction::Redraw;
-        case VK_NEXT:
-            diskSel_ = std::min(n - 1, diskSel_ + diskRows());
-            return UiAction::Redraw;
+        }
         case VK_RETURN:
             return diskActivate(diskSel_, e);
         case VK_BACK:
@@ -289,6 +338,10 @@ UiAction PlayScreen::diskKey(unsigned vk, bool, Engine& e) {
 }
 
 UiAction PlayScreen::onChar(wchar_t c, Engine&) {
+    if (nameEdit_) {  // song / sample name being typed
+        if (c >= 32 && c < 127) line_.insert((char)c);
+        return UiAction::Redraw;
+    }
     if (panel_ != Panel::DiskOp || dialog_.open) return UiAction::None;
     const wchar_t* bad = L"\\/:*?\"<>|";
     if (c < 32 || wcschr(bad, c) || fileName_.size() >= 60) return UiAction::None;

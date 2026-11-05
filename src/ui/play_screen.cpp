@@ -1,4 +1,5 @@
 #include "ui/play_screen.h"
+#include "core/sample_edit.h"
 #include "ui/pure_layout.h"
 
 #include <algorithm>
@@ -130,6 +131,7 @@ void PlayScreen::clearStatusIf(const char* prefix) {
 }
 
 void PlayScreen::songChanged() {
+    nameEdit_ = 0;
     viewRow_ = viewPattern_ = viewOrder_ = sample_ = firstChannel_ = 0;
     curCh_ = curCol_ = 0;
     blockOn_ = false;
@@ -314,9 +316,10 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     for (char& ch : name)
         if (ch && (ch < 32 || ch > 126)) ch = ' ';
     tx.draw(g, {L_.info.x + 6, y1, 140, rowH}, "SONGNAME", 15.f, t.label, Align::Left);
-    RectF nameField = {L_.info.x + 150, y1 + 3, 380, rowH - 6};
-    g.well(nameField, t, mixColor(t.panelLight, t.panel, 0.25f));
-    tx.draw(g, nameField, name[0] ? name : "untitled", 16.f, t.digits, Align::Left, FontRole::Mono);
+    const RectF nameRect = nameField(1);
+    g.well(nameRect, t, nameEdit_ == 1 ? t.panelLight : mixColor(t.panelLight, t.panel, 0.25f));
+    if (nameEdit_ == 1) drawLineEdit(g, tx, t, nameRect, line_);
+    else tx.draw(g, nameRect, name[0] ? name : "untitled", 16.f, t.digits, Align::Left, FontRole::Mono);
     std::snprintf(buf, sizeof buf, "TEMPO %02u  BPM %03u  OCT %d  SKIP %d%s", tel.speed, tel.bpm, octave_, editSkip_,
                   editor_.dirty() ? "  *" : "");
     tx.draw(g, {L_.info.x + 560, y1, 560, rowH}, buf, 16.f, t.label, Align::Left, FontRole::Mono);
@@ -334,9 +337,10 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     for (char& ch : sname)
         if (ch && (ch < 32 || ch > 126)) ch = ' ';
     tx.draw(g, {L_.info.x + 6, y2, 140, rowH}, "SAMPLENAME", 15.f, t.label, Align::Left);
-    RectF snField = {L_.info.x + 150, y2 + 3, 380, rowH - 6};
-    g.well(snField, t, mixColor(t.panelLight, t.panel, 0.25f));
-    tx.draw(g, snField, sname, 16.f, t.digits, Align::Left, FontRole::Mono);
+    const RectF snField = nameField(2);
+    g.well(snField, t, nameEdit_ == 2 ? t.panelLight : mixColor(t.panelLight, t.panel, 0.25f));
+    if (nameEdit_ == 2) drawLineEdit(g, tx, t, snField, line_);
+    else tx.draw(g, snField, sname, 16.f, t.digits, Align::Left, FontRole::Mono);
     tx.draw(g, {L_.info.x + 560, y2, 90, rowH}, "STATUS", 15.f, t.label, Align::Left);
     RectF stField = {L_.info.x + 650, y2 + 3, L_.info.w - 650 - 220, rowH - 6};
     g.well(stField, t, mixColor(t.panelLight, t.panel, 0.25f));
@@ -511,6 +515,7 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
         }
         return UiAction::Redraw;
     }
+    if (nameEdit_ && nameEditKey(vk, e)) return UiAction::Redraw;
     const bool typing = panel_ == Panel::DiskOp;
     if ((vk == VK_MENU && extended && !ctrl && !typing) || (vk == VK_F5 && !shift && !ctrl && !alt)) {
         if (repeat) return UiAction::None;
@@ -585,6 +590,15 @@ bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
         const uint32_t pos = xToSample(x);
         if (drag_ == 1) {
             selB_ = pos;
+        } else if (drag_ == 4 && e.song() && curSampleIndex(*e.song()) >= 0) {  // pencil stroke
+            const int idx = curSampleIndex(*e.song());
+            const int v = yToValue(y, e.song()->samples[idx].is16);
+            const uint32_t x0 = drawLastX_;
+            const int v0 = drawLastV_;
+            e.edit([&](Song& song) { sampleDraw(song.samples[idx], x0, v0, pos, v); });
+            drawLastX_ = pos;
+            drawLastV_ = v;
+            editor_.markDirty();
         } else if (e.song() && curSampleIndex(*e.song()) >= 0) {
             const int idx = curSampleIndex(*e.song());
             const int which = drag_;
@@ -729,7 +743,14 @@ UiAction PlayScreen::pressButton(int b, Engine& e) {
 }
 
 UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
+    if (nameEdit_ && !dialog_.open) finishNameEdit(e, true);
     if (pure_ && !dialog_.open) return pureMouse(x, y, right, e);
+    if (!dialog_.open && !right)
+        for (int which = 1; which <= 2; ++which)
+            if (nameField(which).contains(x, y)) {
+                startNameEdit(which, e);
+                return UiAction::Redraw;
+            }
     const int h = hitId(x, y);
     if (dialog_.open) {
         if (h >= H_DIALOG && h < H_DIALOG + dialog_.count) {
@@ -807,4 +828,88 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
         }
     }
     return UiAction::None;
+}
+
+// ---------------------------------------------------------------- name editing
+
+RectF PlayScreen::nameField(int which) const {
+    const float rowH = (kInfoH - 10) / 2;
+    const float y = L_.info.y + 5 + (which == 2 ? rowH : 0);
+    return {L_.info.x + 150, y + 3, 380, rowH - 6};
+}
+
+void PlayScreen::startNameEdit(int which, Engine& e) {
+    const Song* s = e.song();
+    if (!s) return;
+    if (e.tfmx()) {
+        setStatus("TFMX: PLAYBACK ONLY");
+        return;
+    }
+    if (which == 2) {
+        const int idx = curSampleIndex(*s);
+        if (idx < 0) {
+            setStatus("NO SAMPLE IN THIS SLOT");
+            return;
+        }
+        line_.begin(s->samples[idx].name, 22);
+    } else {
+        line_.begin(s->name, 20);
+    }
+    nameEdit_ = which;
+    setStatus("TYPE THE NAME - ENTER KEEPS IT, ESC CANCELS");
+}
+
+void PlayScreen::finishNameEdit(Engine& e, bool keep) {
+    const int which = nameEdit_;
+    nameEdit_ = 0;
+    if (!keep || !e.song()) {
+        setStatus("ALL RIGHT");
+        return;
+    }
+    const std::string text = line_.text;
+    if (which == 1) {
+        e.edit([&](Song& song) {
+            std::memset(song.name, 0, sizeof song.name);
+            std::memcpy(song.name, text.data(), std::min(text.size(), sizeof song.name - 1));
+        });
+    } else {
+        const int idx = curSampleIndex(*e.song());
+        if (idx < 0) return;
+        const int ins = sample_;
+        e.edit([&](Song& song) {
+            Sample& sm = song.samples[idx];
+            std::memset(sm.name, 0, sizeof sm.name);
+            std::memcpy(sm.name, text.data(), std::min(text.size(), sizeof sm.name - 1));
+            if (ins < (int)song.instruments.size()) {  // XM: the instrument carries the name shown in FT2
+                Instrument& in = song.instruments[ins];
+                std::memset(in.name, 0, sizeof in.name);
+                std::memcpy(in.name, text.data(), std::min(text.size(), sizeof in.name - 1));
+            }
+        });
+    }
+    editor_.markDirty();
+    setStatus(which == 1 ? "SONG NAME SET" : "SAMPLE NAME SET");
+}
+
+bool PlayScreen::nameEditKey(unsigned vk, Engine& e) {
+    switch (vk) {
+        case VK_RETURN: finishNameEdit(e, true); return true;
+        case VK_ESCAPE: finishNameEdit(e, false); return true;
+        case VK_BACK: line_.backspace(); return true;
+        case VK_DELETE: line_.del(); return true;
+        case VK_LEFT: line_.left(); return true;
+        case VK_RIGHT: line_.right(); return true;
+        case VK_HOME: line_.home(); return true;
+        case VK_END: line_.end(); return true;
+        case VK_SHIFT: case VK_CONTROL: case VK_MENU: case VK_CAPITAL: return true;
+        default: return true;  // letters arrive as characters (onChar); no key plays a note meanwhile
+    }
+}
+
+void PlayScreen::drawLineEdit(Gfx& g, Text& tx, const Theme& t, RectF r, const LineEdit& le) {
+    tx.draw(g, r, le.text.c_str(), 16.f, t.digits, Align::Left, FontRole::Mono);
+    // caret after the characters before the cursor (monospace: measure a run of the same length)
+    const std::string before = le.text.substr(0, le.cursor);
+    const float x = r.x + tx.measure(before.empty() ? "" : before.c_str(), 16.f, FontRole::Mono) + 4;
+    g.fillRect({x, r.y + 4, 2, r.h - 8}, t.cursor);
 }
