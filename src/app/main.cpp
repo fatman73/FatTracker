@@ -1,4 +1,4 @@
-﻿// FatTracker entry point: window, message loop, file loading, input routing.
+// FatTracker entry point: window, message loop, file loading, input routing.
 #include <memory>
 #include <vector>
 
@@ -153,6 +153,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             handle(g_screen.onKey((unsigned)wp, shift, ctrl, alt, ext, repeat, *g_engine), hwnd);
             return 0;
         }
+        case WM_KEYUP:
+        case WM_SYSKEYUP:
+            handle(g_screen.onKeyUp((unsigned)wp, *g_engine), hwnd);
+            break;
         case WM_SYSCHAR:
             return 0;  // no menu beep on Alt combinations
         case WM_LBUTTONDOWN:
@@ -209,6 +213,7 @@ int screenshotMode() {
         uint32_t h = argc >= 5 ? (uint32_t)_wtoi(argv[4]) : 1080;
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         result = 1;
+        const bool gfxOk = w && h && g_gfx.initOffscreen(w, h);  // one device for the whole run
         if (argc >= 6 && loadModuleFile(argv[5])) {
             g_engine->play();
             const int seconds10 = argc >= 7 ? (int)(_wtof(argv[6]) * 10) : 15;
@@ -216,7 +221,34 @@ int screenshotMode() {
             for (int i = 0; i < seconds10; ++i) g_engine->render(buf.data(), 4800);
         }
         if (argc >= 8) g_screen.setViewMode(_wtoi(argv[7]));
-        if (w && h && g_gfx.initOffscreen(w, h)) {
+        if (argc >= 9) {  // simulated key presses, e.g. "SPACE DOWN Z X S+DOWN"
+            drawFrame();  // establishes the layout
+            struct Named {
+                const wchar_t* name;
+                unsigned vk;
+            } names[] = {{L"SPACE", VK_SPACE}, {L"UP", VK_UP},       {L"DOWN", VK_DOWN},   {L"LEFT", VK_LEFT},
+                         {L"RIGHT", VK_RIGHT}, {L"TAB", VK_TAB},     {L"DEL", VK_DELETE},  {L"INS", VK_INSERT},
+                         {L"BACK", VK_BACK},   {L"ESC", VK_ESCAPE},  {L"F1", VK_F1},       {L"F2", VK_F2},
+                         {L"F3", VK_F3},       {L"F4", VK_F4},       {L"F5", VK_F5},       {L"STOP", 0xFFFF}};
+            wchar_t* ctx = nullptr;
+            for (wchar_t* tok = wcstok_s(argv[8], L" ", &ctx); tok; tok = wcstok_s(nullptr, L" ", &ctx)) {
+                bool shift = false, ctrl = false, alt = false;
+                for (;;) {
+                    if (!wcsncmp(tok, L"S+", 2)) shift = true;
+                    else if (!wcsncmp(tok, L"C+", 2)) ctrl = true;
+                    else if (!wcsncmp(tok, L"A+", 2)) alt = true;
+                    else break;
+                    tok += 2;
+                }
+                unsigned vk = tok[1] ? 0 : (unsigned)towupper(tok[0]);
+                for (const Named& n : names)
+                    if (!lstrcmpiW(tok, n.name)) vk = n.vk;
+                if (vk == 0xFFFF) g_engine->stop();
+                else if (vk) g_screen.onKey(vk, shift, ctrl, alt, false, false, *g_engine);
+                drawFrame();  // refresh the screen's view of the engine between keys
+            }
+        }
+        if (gfxOk) {
             drawFrame();
             result = g_gfx.savePng(argv[2]) ? 0 : 1;
         }

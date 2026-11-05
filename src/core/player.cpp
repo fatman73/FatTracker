@@ -67,6 +67,33 @@ void Player::setMute(int c, bool m) {
     mixer_.setVolume(c, m ? 0.f : ch_[c].outVol01, ch_[c].outPan01);
 }
 
+double Player::noteHz(int sample, int note) const {
+    if (!song_ || sample < 0 || sample >= (int)song_->samples.size() || note < 1 || note > 96) return 0;
+    const Sample& sm = song_->samples[sample];
+    if (!isFT2()) {
+        const int ft = ptFinetuneIndex(sm.finetune);
+        const int idx = xmNoteToPt(note);
+        const double period =
+            idx >= 0 ? kPtPeriods[ft][idx] : kPtPeriods[ft][12] * std::pow(2.0, (49 - note) / 12.0);
+        return periodToHz((int32_t)std::lround(period));
+    }
+    int n0 = note - 1 + sm.relativeNote;
+    n0 = n0 < 0 ? 0 : (n0 > 118 ? 118 : n0);
+    return song_->freqMode == FreqMode::Linear ? xmLinearHz(xmLinearPeriod(n0, sm.finetune))
+                                               : xmAmigaHz(xmAmigaPeriod(n0, sm.finetune));
+}
+
+void Player::previewNote(int sample, int note) {
+    const double hz = noteHz(sample, note);
+    if (hz <= 0) return;
+    const Sample& sm = song_->samples[sample];
+    mixer_.trigger(32, &sm, 0);
+    mixer_.setFrequency(32, hz);
+    mixer_.setVolume(32, sm.volume / 64.f, 0.5f);
+}
+
+void Player::previewStop() { mixer_.stopVoice(32); }
+
 void Player::songEdited() {
     if (!song_) return;
     mixer_.setNumChannels(song_->numChannels);

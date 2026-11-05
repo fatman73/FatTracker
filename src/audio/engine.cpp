@@ -90,6 +90,20 @@ void Engine::play(uint16_t order) {
 
 void Engine::songEdited() { player_->songEdited(); }
 
+void Engine::resetPlayer() { player_->setSong(song_.get()); }
+
+void Engine::previewNote(int sample, int note) {
+    lock();
+    player_->previewNote(sample, note);
+    unlock();
+}
+
+void Engine::previewStop() {
+    lock();
+    player_->previewStop();
+    unlock();
+}
+
 void Engine::playPattern(uint16_t pattern) {
     lock();
     player_->playPattern(pattern);
