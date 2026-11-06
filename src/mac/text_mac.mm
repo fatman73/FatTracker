@@ -1,6 +1,8 @@
 // Text and Font on Core Text (macOS). Bahnschrift and Cascadia Mono do not exist on the Mac:
 //   Ui   - DIN Alternate Bold (a DIN face like Bahnschrift), else the system font semibold
-//   Mono - the system monospaced font (SF Mono) semibold, else Menlo Bold
+//   Mono - the system monospaced font (SF Mono) semibold, else Menlo Bold, narrowed horizontally to the
+//          digit advance of Cascadia Mono (1200/2048 em) so the pattern layout (em, row height) is the
+//          same as on Windows
 // Text is drawn with CTLine (font fallback for the arrow codes), the pattern glyphs with CTFontDrawGlyphs
 // at whole device pixels, grouped by color.
 #include "ui/font.h"
@@ -9,10 +11,13 @@
 #import <AppKit/AppKit.h>
 #import <CoreText/CoreText.h>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
 namespace {
+constexpr double kCascadiaAdvance = 1200.0 / 2048.0;  // Cascadia Mono digit advance / em (Windows layout)
+
 CGColorSpaceRef srgb() {
     static CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     return cs;
@@ -74,7 +79,7 @@ Text::~Text() {
 bool Text::init() {
     base_[0] = createBase(FontRole::Ui);
     base_[1] = createBase(FontRole::Mono);
-    // advance of a monospace digit relative to the em size (like the Windows measure of "0000000000")
+    // advance of a monospace digit relative to the em size; the mono font is narrowed to Cascadia's
     CTFontRef mono = (CTFontRef)base_[1];
     if (mono) {
         UniChar zero = '0';
@@ -82,7 +87,8 @@ bool Text::init() {
         if (CTFontGetGlyphsForCharacters(mono, &zero, &g, 1)) {
             CGSize adv;
             CTFontGetAdvancesForGlyphs(mono, kCTFontOrientationHorizontal, &g, &adv, 1);
-            if (adv.width > 0) monoAdvance_ = (float)adv.width / 100.f;
+            if (adv.width > 0) monoScaleX_ = (float)std::min(1.0, kCascadiaAdvance * 100.0 / adv.width);
+            monoAdvance_ = (float)(adv.width / 100.0 * monoScaleX_);
         }
     }
     return base_[0] && base_[1];
@@ -94,7 +100,8 @@ const void* Text::font(FontRole role, float size) {
         if (e.font && e.role == role && e.size10 == s10) return e.font;
     CTFontRef base = (CTFontRef)base_[role == FontRole::Mono ? 1 : 0];
     if (!base) return nullptr;
-    CTFontRef f = CTFontCreateCopyWithAttributes(base, s10 / 10.0, nullptr, nullptr);
+    const CGAffineTransform narrow = CGAffineTransformMakeScale(role == FontRole::Mono ? monoScaleX_ : 1.0, 1.0);
+    CTFontRef f = CTFontCreateCopyWithAttributes(base, s10 / 10.0, &narrow, nullptr);
     Entry& slot = cache_[cacheNext_];
     cacheNext_ = (cacheNext_ + 1) % 48;
     if (slot.font) CFRelease((CTFontRef)slot.font);

@@ -58,6 +58,7 @@ private:
     };
     const void* base_[2] = {};  // CTFontRef at size 100: Ui, Mono
     float monoAdvance_ = 0.6f;
+    float monoScaleX_ = 1.f;    // horizontal scale of the mono font (to Cascadia Mono's advance)
     Entry cache_[48] = {};
     int cacheNext_ = 0;
 #endif
