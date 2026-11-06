@@ -70,10 +70,34 @@ struct Song {
     Quirks quirks = Quirks::FT2;
     uint8_t channelPan[kMaxChannels] = {};
     uint8_t loadFlags = 0;
+    // Symphonie continuous slides: effects U/V (volume up / down) and W/Y (pitch up / down) set a
+    // slide that runs every tick until changed (see symVolumeStep and Player::symphonieSlideTick). Off for every
+    // other format, where those effect letters do nothing.
+    bool symphonieSlides = false;
+    // Symphonie DSP echo settings: effect Q xx switches to symEcho[xx]. Empty: no echo, Q does nothing.
+    struct SymEcho {
+        uint8_t type = 0;      // 0 off, 1 echo, 2 cross echo, 3 cross echo 2, 4 center echo
+        uint8_t delay = 0;     // in ticks
+        uint8_t feedback = 0;  // level: the echo feeds back 2^-feedback of itself
+    };
+    std::vector<SymEcho> symEcho;
     std::vector<Pattern> patterns;
     std::vector<Sample> samples;
     std::vector<Instrument> instruments;
 };
+
+// One tick of a Symphonie volume slide (rate: signed slide parameter): the original adds rate/16 to
+// its 0..100 volume, rate/25 on our 0..64 scale, and stops the slide at either end.
+inline void symVolumeStep(float& vol, int& rate) {
+    vol += (float)rate * 0.04f;
+    if (vol > 64.f) {
+        vol = 64.f;
+        rate = 0;
+    } else if (vol < 0.f) {
+        vol = 0.f;
+        rate = 0;
+    }
+}
 
 Pattern makePattern(int rows, int channels);
 void setDefaultPanning(Song& s);  // L-R-R-L with 75% separation (0x40 / 0xC0)

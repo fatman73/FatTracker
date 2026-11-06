@@ -47,6 +47,7 @@ void Player::start(uint16_t order, uint16_t row, bool patternMode, uint16_t patt
     posJump_ = break_ = loopJump_ = false;
     samplesLeft_ = 0;
     tickFrac_ = 0;
+    echoReset();
     playing_ = true;
 }
 
@@ -197,6 +198,7 @@ void Player::noteStart(int c) {
         return;
     }
     if (!cell.note) return;
+    ch.symPitchRate = 0;  // any note stops a Symphonie pitch slide
 
     if (useInstruments && ch.instrument >= 0 && !cell.instr) {
         uint16_t m = s.instruments[ch.instrument].sampleMap[cell.note - 1];
@@ -289,6 +291,7 @@ void Player::processRow() {
         }
         if (isFT2() && !ch.delayPending) volumeColumn(c, true);
         rowEffects(c);
+        if (song_->symphonieSlides) symphonieSlideTick(c);
         updateOutputs(c);
     }
     if (pendingStop_) {
@@ -330,6 +333,7 @@ void Player::tick() {
             }
             if (isFT2()) volumeColumn(c, false);
             tickEffects(c);
+            if (song_->symphonieSlides) symphonieSlideTick(c);
             updateOutputs(c);
         }
     }
@@ -392,6 +396,7 @@ void Player::render(float* out, uint32_t frames) {
         }
         uint32_t n = frames < samplesLeft_ ? frames : samplesLeft_;
         mixer_.mix(out, n);
+        if (!song_->symEcho.empty()) echoProcess(out, n);
         out += n * 2;
         frames -= n;
         samplesLeft_ -= n;

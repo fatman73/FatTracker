@@ -1,16 +1,31 @@
 // Symphonie / Symphonie Pro ("SymM") loader.
 // Chunk parsing, sample decoding, instrument processing and the position -> pattern expansion follow
-// the OpenMPT SymMOD loader by Devin Acker and the OpenMPT Devs (BSD licence).
+// the OpenMPT SymMOD loader by Devin Acker and the OpenMPT Devs (BSD licence); effect details were
+// checked against the Symphonie Pro assembler source (github.com/MastaTabs/Symphonie).
 // The module becomes an FT2-style Song (linear frequencies, no XM instruments):
 // - every Symphonie position (pattern, start row, length, transpose, speed) becomes its own pattern
 //   (split into 256-row pieces when longer), repeated in the order list as often as it loops;
 // - instrument volume, filters, fades, reversing and sustain repeats are baked into the sample data;
+//   virtual instruments are mixed from their source instruments and transwave instruments rendered
+//   (80 cycles morphing between two loops) at load time, as OpenMPT does;
 // - Symphonie pans channels hard left / right. FT2 takes the panning from the sample on every
 //   instrument change, so an instrument played on both sides gets a second, right-panned sample;
-// - continuous Symphonie slides (volume, pitch) are approximated per row like OpenMPT does,
-//   volume slides in the volume column, pitch slides as 1xx/2xx/E1x/E2x;
-// - DSP (echo, delay, filter), CV, add-pitch/add-volume, emphasis and sample vibrato are dropped;
-//   virtual instruments play their first source sample, transwave instruments are silent.
+// - continuous volume and pitch slides run every tick in the player (Song::symphonieSlides,
+//   effects U/V/W/Y) at the original's rates;
+// - Replay From / From Add are in 1/256 and 1/16384 of the sample; "sample vibrato" is an LFO on the
+//   Replay From start (it is not a pitch vibrato);
+// - the DSP echo (normal, cross, cross 2, center) runs on the final mix (Song::symEcho, effect Qxx).
+// Still approximated or dropped:
+// - Replay From goes through 9xx: 256-frame steps, nothing past frame 65280 of long samples, and the
+//   note restarts at its base pitch (a pitch slide's progress is lost);
+// - Stop Sample is silence rather than a pause; Key Off is a note off (the next row's volume
+//   correction brings a still-playing sample back) instead of playing on past the sustain loop;
+// - the instruments' "no DSP" flag is ignored: every channel goes through the echo;
+// - the echo's pre-filter, DSP delay / hall, the resonant filter command, CV, add pitch / add volume,
+//   emphasis, stereo detune / phase and the 256-instrument limit (255 here) are dropped;
+// - vibrato / tremolo are FT2 4xy / 7xy (speed and depth capped at 15), re-sent every row, and lose a
+//   row when a slide or other command needs the effect column; a slide change that finds the effect
+//   column taken waits for the next free row.
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -98,7 +113,7 @@ constexpr int8_t TYPE_LOOP = 4, TYPE_SUSTAIN = 8;
 constexpr uint8_t CHAN_STEREO_L = 1, CHAN_STEREO_R = 2;
 constexpr uint8_t SF_REVERSE = 1, SF_MIRROR = 4, SF_NEW_LOOP = 16;
 constexpr uint8_t IF_NO_TRANSPOSE = 1, IF_SYNC_PLAY = 4;
-constexpr uint8_t FX_R = 27, FX_X = 33;
+constexpr uint8_t FX_Q = 26, FX_R = 27, FX_U = 30, FX_V = 31, FX_W = 32, FX_X = 33, FX_Y = 34;
 constexpr int kMaxRows = 1024;  // the longest Symphonie track
 
 struct Event {
@@ -425,18 +440,29 @@ void amplify(std::vector<T>& d, int gain, int bits) {
 
 int16_t sat16(int64_t v) { return (int16_t)(v < -32768 ? -32768 : (v > 32767 ? 32767 : v)); }
 
+// Playback rate of an instrument's sample at Symphonie's base note.
+double instRate(const SymInst& in, int extraDownsample, double extraTranspose) {
+    const double octaves = -(in.downsample() + extraDownsample) + (in.transpose() + extraTranspose) / 12.0 +
+                           in.finetune() / (128.0 * 12.0);
+    return 40460.0 * std::pow(2.0, octaves);
+}
+
 // Applies the instrument's settings to its sample: loop, tuning, the sample processing Symphonie
-// does at load time and the instrument volume (baked into the data).
-void convertInstrument(const SymInst& in, Sample& s, int extraDownsample) {
+// does at load time and the instrument volume (baked into the data). `preVolume` receives the
+// processed sample before the volume is applied: what virtual and transwave instruments mix.
+void convertInstrument(const SymInst& in, Sample& s, int extraDownsample, double extraTranspose = 0,
+                       Sample* preVolume = nullptr) {
     uint32_t loopStart = 0, loopLen = 0;
     sampleLoop(in, s, loopStart, loopLen);
     s.loop = LoopType::None;
     s.loopStart = s.loopLength = 0;
     s.volume = 64;
     s.pan = 128;
-    const double octaves = -(in.downsample() + extraDownsample) + in.transpose() / 12.0 + in.finetune() / (128.0 * 12.0);
-    samplePitchFromRate(s, 40460.0 * std::pow(2.0, octaves));
-    if (!s.length) return;
+    samplePitchFromRate(s, instRate(in, extraDownsample, extraTranspose));
+    if (!s.length) {
+        if (preVolume) *preVolume = s;
+        return;
+    }
 
     if (in.sampleFlags() & SF_REVERSE) {
         if (s.is16) std::vector<int16_t>(s.data16.rbegin(), s.data16.rend()).swap(s.data16);
@@ -504,10 +530,6 @@ void convertInstrument(const SymInst& in, Sample& s, int extraDownsample) {
     if (vol > 100 && vol < 200) {
         if (s.is16) amplify(s.data16, vol, 16);
         else amplify(s.data8, vol, 8);
-    } else if (vol > 0 && vol < 100) {
-        to16(s);  // keep the resolution of quiet 8-bit instruments
-        const int gain = vol * 128 / 100;
-        for (auto& v : s.data16) v = (int16_t)(v * gain / 128);
     }
 
     if (in.type() == TYPE_LOOP && loopLen >= 2) {
@@ -533,6 +555,113 @@ void convertInstrument(const SymInst& in, Sample& s, int extraDownsample) {
             s.length = (uint32_t)newLen;
         }
     }
+
+    if (preVolume) *preVolume = s;
+    if (vol > 0 && vol < 100) {
+        to16(s);  // keep the resolution of quiet 8-bit instruments
+        const int gain = vol * 128 / 100;
+        for (auto& v : s.data16) v = (int16_t)(v * gain / 128);
+    }
+}
+
+constexpr double kMaxRendered = 16 << 20;  // frames: a virtual or transwave instrument longer than this fails
+
+double frameAt(const Sample& s, int64_t i) {  // 16-bit scale, the last frame repeats past the end
+    if (!s.length || i < 0) return 0;
+    if (i >= (int64_t)s.length) i = s.length - 1;
+    return s.is16 ? s.data16[(size_t)i] : s.data8[(size_t)i] * 256.0;
+}
+
+double lerpAt(const Sample& s, double pos) {
+    const int64_t i = (int64_t)pos;
+    const double f = pos - (double)i;
+    return frameAt(s, i) * (1.0 - f) + frameAt(s, i + 1) * f;
+}
+
+// A virtual instrument: up to 20 note events mixing other instruments at load time, all at once or
+// one after another ("as queue"), at the pitch of each note relative to the first one.
+// `src(i)` is instrument i's processed sample and `rate(i)` its playback rate.
+template <class Src, class Rate>
+bool renderVirtual(const SymInst& in, size_t numIns, uint16_t sampleBoost, Src src, Rate rate, Sample& out) {
+    const int numEvents = be16(in.b + 14);
+    struct Ev {
+        int note, inst, param;
+    };
+    Ev evs[20];
+    for (int i = 0; i < numEvents; ++i) {
+        const uint8_t* e = in.b + 20 + i * 4;
+        evs[i] = {(int8_t)e[1], e[3], e[2]};
+    }
+    if (numEvents < 1 || (size_t)evs[0].inst >= numIns) return false;
+    const bool queue = (in.sampleFlags() & 2) != 0;
+    const double firstRate = rate(evs[0].inst) > 0 ? rate(evs[0].inst) : 1.0;
+
+    double total = 0;
+    for (int i = 0; i < (queue ? numEvents : 1); ++i) {
+        const Ev& e = evs[i];
+        if ((size_t)e.inst >= numIns || e.note < 0) continue;
+        total += std::round(src(e.inst).length * std::pow(2.0, (e.note - evs[0].note) / -12.0) * rate(e.inst) / firstRate);
+    }
+    if (total < 1 || total > kMaxRendered) return false;
+    const size_t len = (size_t)total;
+    std::vector<double> mix(len, 0.0);
+    double gain = sampleBoost / 10000.0;
+    if (!queue) gain /= numEvents;
+    double start = 0;
+    for (int i = 0; i < numEvents; ++i) {
+        const Ev& e = evs[i];
+        if ((size_t)e.inst >= numIns || e.note < 0) continue;
+        // pitch up / down commands in the event: fine tuning of 1, 2 or 4 1/96 octaves
+        int fine = 0;
+        if (e.param >= VOL_PITCH_DOWN3 && e.param <= VOL_PITCH_UP) {
+            static constexpr int8_t kFine[] = {-4, 4, -2, 2, -1, 1};
+            fine = kFine[e.param - VOL_PITCH_DOWN3];
+        }
+        const Sample& sm = src(e.inst);
+        const double inc = std::pow(2.0, (e.note - evs[0].note) / 12.0 + fine / 96.0) * rate(e.inst) / firstRate;
+        if (inc <= 0) continue;
+        const size_t from = (size_t)start;
+        const double frames = std::round(sm.length / inc);
+        if (queue) start += frames;
+        for (size_t k = 0; k < (size_t)frames && from + k < len; ++k) mix[from + k] += lerpAt(sm, k * inc) * gain;
+    }
+    out = Sample{};
+    out.is16 = true;
+    out.length = (uint32_t)len;
+    out.data16.resize(len);
+    for (size_t k = 0; k < len; ++k) out.data16[k] = sat16(std::llround(mix[k]));
+    return true;
+}
+
+// A transwave instrument: 80 cycles of the first source's loop (4x oversampled) morphing into the
+// second source's loop. Loop points are 1/65536 percent of each source.
+bool renderTranswave(const SymInst& in, const Sample& a, const Sample& b, Sample& out) {
+    auto loop = [](const Sample& s, const uint8_t* p, double& start, double& len) {
+        const double scale = (double)s.length / (100 << 16);
+        const uint32_t ls = be32(p + 4), ll = be32(p + 8), cap = 100u << 16;
+        const uint32_t st = (uint32_t)(scale * (ls < cap ? ls : cap));
+        const uint32_t ln = (uint32_t)(scale * (ll < cap ? ll : cap));
+        start = st;
+        len = ln < s.length - st ? ln : s.length - st;
+    };
+    double s1, l1, s2, l2;
+    loop(a, in.b + 20, s1, l1);
+    loop(b, in.b + 36, s2, l2);
+    if (l1 < 1 || l1 * 4 * 80 > kMaxRendered) return false;
+    const size_t cycle = (size_t)l1 * 4, len = cycle * 80;
+    const double f1 = l1 / (double)cycle, f2 = l2 / (double)cycle;
+    out = Sample{};
+    out.is16 = true;
+    out.length = (uint32_t)len;
+    out.data16.resize(len);
+    for (size_t i = 0; i < cycle; ++i) {
+        const double v1 = a.length ? lerpAt(a, s1 + i * f1) : 0, v2 = b.length ? lerpAt(b, s2 + i * f2) : 0;
+        for (size_t at = i; at < len; at += cycle) {
+            const double amp = (double)at / (double)len;
+            out.data16[at] = sat16(std::llround(v1 * (1.0 - amp) + v2 * amp));
+        }
+    }
+    return true;
 }
 
 // Instrument name without the Amiga path.
@@ -553,15 +682,15 @@ void instName(const SymInst& in, char* dst) {
 
 struct ChanState {
     float vol = 64;              // Symphonie channel volume 0..64 (what the song wants)
-    int playerVol = 64;          // what our player has after the converted cells
-    float volSlide = 0;          // per tick
-    float pitchSlide = 0;        // per tick, in 1/16 semitones
-    float pitchSlideAmt = 0;     // not yet emitted pitch slide
+    int volSlide = 0, pitchSlide = 0;  // Symphonie's continuous slides: signed parameters
+    // what our player has after the converted cells (see Player::symphonieSlideTick)
+    int playerVol = 64, playerVolRate = 0, playerPitchRate = 0;
+    float playerSymVol = 0;
     bool stopped = false;
     int lastNote = 0;            // our note numbering, 0 = none
     int lastInst = 0;            // Symphonie instrument + 1
     uint8_t lastVol = 64;
-    uint8_t fromAdd = 0;
+    int32_t fromAdd = 0;  // replay start added by From Add, in 1/16384 of the sample
     bool retrigVibrato = false, retrigTremolo = false;
     uint8_t vibrato = 0, tremolo = 0, tonePortaAmt = 0;
     uint8_t sampleVibSpeed = 0, sampleVibDepth = 0;
@@ -610,6 +739,7 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
     for (int c = 0; c < kMaxChannels; ++c) s.channelPan[c] = (c & 1) ? 255 : 0;  // hard stereo
 
     uint32_t trackLen = 0;
+    uint16_t sampleBoost = 2500;  // Symphonie Pro's "sample boost": the level virtual instruments mix at
     bool external = false;
     std::vector<uint8_t> posData, seqData, evData, insData;
     std::vector<Sample> slots;  // samples in file order, slot i belongs to instrument i
@@ -621,9 +751,13 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
             case CH_NUM_INSTRUMENTS:
             case CH_STEREO_DETUNE:
             case CH_STEREO_PHASE:
-            case CH_SAMPLE_BOOST:
                 r.skip(4);
                 break;
+            case CH_SAMPLE_BOOST: {
+                const uint32_t v = r.u32be();
+                if (!r.overrun()) sampleBoost = (uint16_t)(v > 10000 ? 10000 : v);
+                break;
+            }
             case CH_TRACK_LENGTH:
                 trackLen = r.u32be();
                 if (trackLen > kMaxRows) return Result<Song>::fail("BAD SYMPHONIE FILE");
@@ -717,26 +851,59 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
     }
     auto inst = [&](size_t i) { return SymInst{insData.data() + i * 256}; };
     s.samples.resize(numIns);
+    // Virtual and transwave instruments mix other instruments' processed samples (before their
+    // volume): keep those, but only for the instruments they use.
+    std::vector<Sample> pre(numIns);
+    std::vector<bool> isSource(numIns), havePre(numIns);
+    std::vector<double> rates(numIns, 40460.0);
     for (size_t i = 0; i < numIns; ++i) {
         const SymInst in = inst(i);
-        Sample& sm = s.samples[i];
         if (in.isEmpty()) continue;
         if (in.isVirtual()) {
-            const size_t src = in.firstSource();
-            if (src < slots.size()) sm = slots[src];
-            convertInstrument(in, sm, src < numIns ? inst(src).downsample() : 0);
-            setName(sm, "Virtual");
-            continue;
+            for (int k = 0; k < be16(in.b + 14); ++k)
+                if (in.b[20 + k * 4 + 3] < numIns) isSource[in.b[20 + k * 4 + 3]] = true;
+        } else if (in.isTranswave()) {
+            if (be16(in.b + 20) < numIns) isSource[be16(in.b + 20)] = true;
+            if (be16(in.b + 36) < numIns) isSource[be16(in.b + 36)] = true;
         }
-        if (in.isTranswave()) {
-            sm = Sample{};
-            setName(sm, "Transwave");
-            continue;
-        }
-        if (i < slots.size()) sm = slots[i];
-        convertInstrument(in, sm, 0);
-        instName(in, sm.name);
     }
+    const Sample noSample;
+    // an instrument not processed yet plays its raw sample, like in OpenMPT
+    auto source = [&](size_t i) -> const Sample& { return havePre[i] ? pre[i] : (i < slots.size() ? slots[i] : noSample); };
+    for (int pass = 0; pass < 2; ++pass) {  // the plain instruments first, then the ones made of them
+        for (size_t i = 0; i < numIns; ++i) {
+            const SymInst in = inst(i);
+            Sample& sm = s.samples[i];
+            if (in.isEmpty() || in.virtValid() != (pass == 1)) continue;
+            Sample* keep = isSource[i] ? &pre[i] : nullptr;
+            int extraDown = 0;
+            double extraTranspose = 0;
+            if (in.isVirtual()) {
+                const size_t src0 = in.firstSource();
+                extraDown = src0 < numIns ? inst(src0).downsample() : 0;
+                if (!renderVirtual(in, numIns, sampleBoost, source, [&](size_t k) { return rates[k]; }, sm))
+                    sm = src0 < slots.size() ? slots[src0] : Sample{};  // the first source plays with these settings
+                convertInstrument(in, sm, extraDown, 0, keep);
+                setName(sm, "Virtual");
+            } else if (in.isTranswave()) {
+                const size_t a = be16(in.b + 20), b = be16(in.b + 36);
+                if (a < numIns && renderTranswave(in, source(a), b < numIns ? source(b) : noSample, sm))
+                    extraTranspose = 12;  // an octave below the source, but 4x oversampled: an octave above
+                else
+                    sm = Sample{};
+                convertInstrument(in, sm, 0, extraTranspose, keep);
+                setName(sm, "Transwave");
+            } else {
+                if (i < slots.size()) sm = slots[i];
+                convertInstrument(in, sm, 0, 0, keep);
+                instName(in, sm.name);
+            }
+            rates[i] = instRate(in, extraDown, extraTranspose);
+            havePre[i] = keep != nullptr;
+        }
+    }
+    pre.clear();
+    pre.shrink_to_fit();
     slots.clear();
     slots.shrink_to_fit();
 
@@ -848,12 +1015,16 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                 x = syncCell;
                                 const ChanState& prev = chs[ch - 1];
                                 st.vol = prev.vol;
-                                st.playerVol = prev.playerVol;
                                 st.lastVol = prev.lastVol;
+                                st.volSlide = prev.volSlide;
+                                st.pitchSlide = prev.pitchSlide;
+                                st.playerVol = prev.playerVol;  // the same cell: the player does the same
+                                st.playerSymVol = prev.playerSymVol;
+                                st.playerVolRate = prev.playerVolRate;
+                                st.playerPitchRate = prev.playerPitchRate;
                                 if (!global) continue;
                             }
 
-                            bool resumed = false;
                             int note = (ev.note >= 0 && ev.note <= 84) ? ev.note + 13 : -1;
                             int mapped = 0;
                             if (ev.inst < numIns) {
@@ -871,11 +1042,9 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                             case VOL_STOP_SAMPLE:  // pause: approximated as silence
                                                 x.vol = 0x10;
                                                 st.stopped = true;
-                                                st.playerVol = 0;
                                                 break;
                                             case VOL_CONT_SAMPLE:
-                                                st.stopped = false;
-                                                resumed = true;
+                                                st.stopped = false;  // the volume is corrected below
                                                 break;
                                             case VOL_KEY_OFF:
                                                 x.note = NOTE_OFF;
@@ -931,16 +1100,15 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                         ns.vol = st.vol;
                                         ns.volSlide = st.volSlide;
                                         ns.pitchSlide = st.pitchSlide;
-                                        ns.pitchSlideAmt = st.pitchSlideAmt;
                                         ns.retrigRemain = st.retrigRemain;
                                         dup[ch + 1] = true;
                                     }
                                     break;
                                 case EV_VOL_SLIDE_UP:
-                                    st.volSlide = ev.param * 0.0333f;
+                                    st.volSlide = ev.param;
                                     break;
                                 case EV_VOL_SLIDE_DOWN:
-                                    st.volSlide = ev.param * -0.0333f;
+                                    st.volSlide = -ev.param;
                                     break;
                                 case EV_TREMOLO: {
                                     const int sp = (ev.inst >> 3) < 15 ? ev.inst >> 3 : 15;
@@ -951,8 +1119,7 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                 }
                                 case EV_PITCH_SLIDE_UP:
                                 case EV_PITCH_SLIDE_DOWN:
-                                    st.pitchSlideAmt = 0;
-                                    st.pitchSlide = ev.param * (ev.cmd == EV_PITCH_SLIDE_UP ? 0.0333f : -0.0333f);
+                                    st.pitchSlide = ev.cmd == EV_PITCH_SLIDE_UP ? ev.param : -ev.param;
                                     st.tonePortaRemain = 0;
                                     break;
                                 case EV_PITCH_SLIDE_TO:
@@ -994,16 +1161,16 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                     patSpeed = ev.param ? ev.param : 4;
                                     x.setFx(0xF, speedParam(patSpeed));
                                     break;
-                                case EV_SET_FROM_ADD:
-                                    st.fromAdd = ev.param;
-                                    st.sampleVibSpeed = st.sampleVibDepth = 0;
+                                case EV_SET_FROM_ADD:  // param/256 of the sample
+                                    st.fromAdd = ev.param * 64;
                                     break;
-                                case EV_FROM_ADD:
-                                    st.fromAdd = (uint8_t)(st.fromAdd + ev.param);
+                                case EV_FROM_ADD:  // signed param/16384 of the sample
+                                    st.fromAdd += (int8_t)ev.param;
                                     break;
-                                case EV_SAMPLE_VIB:
+                                case EV_SAMPLE_VIB:  // an LFO on the Replay From start, not on the pitch
                                     st.sampleVibSpeed = ev.inst;
                                     st.sampleVibDepth = ev.param;
+                                    if (!ev.inst && !ev.param) st.sampleVibPhase = 0;
                                     break;
                                 case EV_FROM_AND_PITCH:
                                 case EV_REPLAY_FROM: {
@@ -1012,90 +1179,98 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                     x.note = st.lastNote;  // the sample restarts at the current note
                                     if (note >= 0 || ev.cmd == EV_FROM_AND_PITCH) x.inst = st.lastInst = mapped;
                                     if (ev.param || st.fromAdd || st.sampleVibDepth) {
-                                        double vib = 0;
-                                        if (st.sampleVibDepth)
-                                            vib = st.sampleVibDepth *
-                                                  (std::sin(st.sampleVibPhase * (6.283185307179586 / 1024.0) + 4.71238898038469) - 1.0) / 4.0;
-                                        double pct = ev.param + st.fromAdd + vib;
-                                        pct = pct < 0 ? 0 : (pct > 255 ? 255 : pct);
-                                        // percent of the sample -> 9xx (256 frames per step)
+                                        // Symphonie: start = From Add + param/256 of the sample, the sample
+                                        // vibrato scaling param down by up to depth/256
+                                        int p = ev.param;
+                                        if (st.sampleVibDepth) {
+                                            const int lfo = (int)std::lround(127.0 * std::cos(6.283185307179586 * (st.sampleVibPhase >> 1) / 512.0)) + 127;
+                                            p -= ((lfo * st.sampleVibDepth) >> 8) * p >> 8;
+                                            if (p < 0) p = 0;
+                                        }
                                         const int si = (x.inst ? x.inst : st.lastInst) - 1;
                                         if (si >= 0 && si < (int)numIns) {
-                                            const double frames = std::round(pct) * s.samples[si].length / 100.0;
-                                            const long o = std::lround(frames / 256.0);
+                                            const int64_t len = s.samples[si].length;
+                                            int64_t start = (len >> 8) * p + len * st.fromAdd / 16384;
+                                            if (start < 0) {  // like the original: From Add cancels the offset
+                                                st.fromAdd = -p * 64;
+                                                start = 0;
+                                            }
+                                            const long o = std::lround((double)start / 256.0);  // 9xx: 256 frames per step
                                             if (o > 0) x.setFx(0x9, (uint8_t)(o > 255 ? 255 : o));
                                         }
                                     }
                                     st.tonePortaRemain = 0;
                                     break;
                                 }
-                                default:  // add pitch / volume, emphasis, CV, filter and DSP: dropped
+                                case EV_DSP_ECHO: {  // note = type, param = delay in ticks, instrument = feedback
+                                    const Song::SymEcho e{(uint8_t)(ev.note >= 0 && ev.note < 5 ? ev.note : 0), ev.param, ev.inst};
+                                    size_t best = 0;
+                                    long bestDist = -1;
+                                    for (size_t k = 0; k < s.symEcho.size(); ++k) {
+                                        const Song::SymEcho& o = s.symEcho[k];
+                                        if (o.type != e.type) continue;
+                                        const long d = (long)(o.delay - e.delay) * (o.delay - e.delay) +
+                                                       (long)(o.feedback - e.feedback) * (o.feedback - e.feedback);
+                                        if (bestDist < 0 || d < bestDist) best = k, bestDist = d;
+                                    }
+                                    if (bestDist != 0 && s.symEcho.size() < 256) {
+                                        best = s.symEcho.size();
+                                        s.symEcho.push_back(e);
+                                    } else if (bestDist < 0) {
+                                        break;  // 256 settings and none of this type
+                                    }
+                                    x.setFx(FX_Q, (uint8_t)best);  // global: before anything else in this cell
+                                    break;
+                                }
+                                default:  // add pitch / volume, emphasis, CV, filter and DSP delay: dropped
                                     break;
                             }
 
                             // any event that plays a note restarts the continuous effects
                             if (x.note > 0 && x.note != NOTE_OFF) st.stopped = false;
-                            else if (st.stopped) continue;
+                            const bool frozen = st.stopped;  // a paused sample: slides wait too
 
-                            if (st.retrigRemain) {
+                            if (!frozen && st.retrigRemain) {
                                 st.retrigRemain = (st.retrigRemain > patSpeed ? st.retrigRemain : patSpeed) - patSpeed;
                                 if (!x.hasFx) x.setFx(FX_R, 0);
                             }
 
-                            // volume: what the player will have after tick 0 of this cell...
+                            // Continuous slides run in the player (effects U/V/W/Y, Song::symphonieSlides).
+                            // Follow what the player's volume will be after tick 0 of this cell...
                             int pv = st.playerVol;
                             if (x.inst) pv = 64;  // the instrument resets to the sample volume
                             if (x.note == NOTE_OFF) pv = 0;
                             if (x.vol >= 0x10 && x.vol <= 0x50) pv = x.vol - 0x10;
-                            // ...and what Symphonie has by the end of it
-                            const float vStart = st.vol;
-                            if (st.volSlide != 0) {
-                                st.vol += st.volSlide * patSpeed;
-                                st.vol = st.vol < 0 ? 0 : (st.vol > 64 ? 64 : st.vol);
+                            // ...and correct it to Symphonie's where they part
+                            const int want = roundi(st.vol);
+                            if (!frozen && !x.vol && x.note != NOTE_OFF && pv != want) {
+                                x.vol = (uint8_t)(0x10 + want);
+                                pv = want;
                             }
-                            if (!x.vol && x.note != NOTE_OFF) {
-                                if (st.volSlide == 0 || x.inst || resumed) {
-                                    const int want = roundi(vStart);
-                                    if (pv != want) {
-                                        x.vol = (uint8_t)(0x10 + want);
-                                        pv = want;
-                                    }
-                                } else {
-                                    const int diff = roundi(st.vol) - pv, ad = std::abs(diff);
-                                    if (patSpeed > 1 && ad >= patSpeed - 1) {
-                                        int k = (int)std::lround((double)ad / (patSpeed - 1));
-                                        k = k > 15 ? 15 : k;
-                                        x.vol = (uint8_t)((diff > 0 ? 0x70 : 0x60) + k);
-                                        pv += (diff > 0 ? 1 : -1) * k * (patSpeed - 1);
-                                    } else if (ad >= 1) {
-                                        const int k = ad > 15 ? 15 : ad;
-                                        x.vol = (uint8_t)((diff > 0 ? 0x90 : 0x80) + k);
-                                        pv += diff > 0 ? k : -k;
-                                    }
-                                    pv = pv < 0 ? 0 : (pv > 64 ? 64 : pv);
+                            // slide changes, before the effects re-sent every row; a note stops the
+                            // player's pitch slide
+                            if (x.note > 0 && x.note != NOTE_OFF) st.playerPitchRate = 0;
+                            const int wantVol = frozen ? 0 : st.volSlide, wantPitch = frozen ? 0 : st.pitchSlide;
+                            if (st.playerVolRate != wantVol && !x.hasFx) {
+                                x.setFx(wantVol < 0 ? FX_V : FX_U, (uint8_t)std::abs(wantVol));
+                                st.playerVolRate = wantVol;
+                            }
+                            if (st.playerPitchRate != wantPitch && !x.hasFx) {
+                                x.setFx(wantPitch < 0 ? FX_Y : FX_W, (uint8_t)std::abs(wantPitch));
+                                st.playerPitchRate = wantPitch;
+                            }
+                            // this row's ticks, in the player and in Symphonie
+                            for (int t = 0; t < patSpeed; ++t) {
+                                if (st.playerVolRate) {
+                                    if (pv != (int)std::lround(st.playerSymVol)) st.playerSymVol = (float)pv;
+                                    symVolumeStep(st.playerSymVol, st.playerVolRate);
+                                    pv = (int)std::lround(st.playerSymVol);
                                 }
+                                if (!frozen && st.volSlide) symVolumeStep(st.vol, st.volSlide);
                             }
                             st.playerVol = pv;
+                            if (frozen) continue;
 
-                            // pitch slide in 1/16 semitones: 1xx/2xx per tick, E1x/E2x once
-                            if (st.pitchSlide != 0) {
-                                st.pitchSlideAmt += st.pitchSlide * patSpeed;
-                                if (!x.hasFx) {
-                                    const float a = st.pitchSlideAmt, aa = std::fabs(a);
-                                    const bool up = a > 0;
-                                    if (patSpeed > 1 && aa >= patSpeed - 1) {
-                                        int k = (int)std::lround(aa / (patSpeed - 1));
-                                        k = k > 0xFF ? 0xFF : k;
-                                        x.setFx(up ? 0x1 : 0x2, (uint8_t)k);
-                                        st.pitchSlideAmt -= (up ? 1 : -1) * (float)(k * (patSpeed - 1));
-                                    } else if (aa >= 1) {
-                                        int k = (int)std::lround(aa);
-                                        k = k > 15 ? 15 : k;
-                                        x.setFx(0xE, (uint8_t)((up ? 0x10 : 0x20) | k));
-                                        st.pitchSlideAmt -= (up ? 1 : -1) * (float)k;
-                                    }
-                                }
-                            }
                             // Symphonie's vibrato and tremolo keep going until switched off
                             if (!x.hasFx && st.vibrato) {
                                 x.setFx(0x4, st.vibrato);
@@ -1163,6 +1338,7 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                 }
         }
     }
+    s.symphonieSlides = true;
     if (s.patterns.empty()) s.patterns.push_back(makePattern(64, s.numChannels));
     if (s.order.empty()) s.order.push_back(0);
     if (truncated) s.loadFlags |= LOAD_TRUNCATED;
