@@ -6,6 +6,7 @@
 
 #include "core/render.h"
 #include "core/sample_edit.h"
+#include "ui/credits.h"
 #include "ui/pixel_canvas.h"
 #include "ui/play_screen.h"
 #include "ui/pattern_layout.h"
@@ -99,6 +100,7 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     PixelCanvas& c = *canvas_;
     if (panel_ != Panel::EditOp && panel_ != Panel::Sampler && panel_ != Panel::PosEd)
         panel_ = Panel::Main;  // the other panels exist only on the normal screen
+    if (panel_ != Panel::Main) credits_ = false;  // EDIT OP., POS ED. or SAMPLER opened: the credits close
     const Song* s = e.song();
     const Telemetry& tel = last_;
     const int nch = s ? s->numChannels : 4;
@@ -238,6 +240,7 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
 
     // ---- pattern: grey frame, black columns, small blue text, tall black text on the playing row
     if (panel_ == Panel::Sampler) pureSamplerDraw(c, e);
+    else if (credits_) pureCreditsDraw(c);
     else {
     c.fill(0, pure::kPatternY, 320, 256 - pure::kPatternY, kFace);
     const pure::Box rn = pure::rowNumbers();
@@ -305,6 +308,21 @@ UiAction PlayScreen::pureMouse(float lx, float ly, bool right, Engine& e) {
     const int nch = s ? s->numChannels : 4;
     const int first = pureFirstChannel(nch);
     const int h = pure::hitTest(ax, ay, (pure::View)pureView(), editOpScreen_);
+    if (h == pure::kCredits) {  // the machine name line: credits over the pattern area
+        credits_ = !credits_ || panel_ != Panel::Main;
+        creditsScroll_ = 0;
+        panel_ = Panel::Main;
+        return UiAction::Redraw;
+    }
+    if (h == pure::kCreditsUp || h == pure::kCreditsDown) {
+        const int step = right ? pure::creditsRows() : 3;
+        creditsScroll_ = std::max(0, creditsScroll_ + (h == pure::kCreditsUp ? -step : step));
+        return UiAction::Redraw;
+    }
+    if (h == pure::kCreditsExit || h == pure::kCreditsText) {
+        credits_ = false;
+        return UiAction::Redraw;
+    }
     if (h == pure::kOpExit) {
         panel_ = Panel::Main;
         return UiAction::Redraw;
@@ -415,7 +433,7 @@ int PlayScreen::pureView() const {
         case Panel::EditOp: return pure::kViewEditOp;
         case Panel::PosEd: return pure::kViewPosEd;
         case Panel::Sampler: return pure::kViewSampler;
-        default: return pure::kViewMain;
+        default: return credits_ ? pure::kViewCredits : pure::kViewMain;
     }
 }
 
@@ -635,4 +653,26 @@ void PlayScreen::pat2smp(Engine& e) {
         sampleLoaded(e, static_cast<Sample&&>(sm), wn);
         setStatus(!pt ? "SAMPLED" : cut ? (a == 0 ? "128K C-3" : "128K C-2") : a == 0 ? "NOTE C-3" : "NOTE C-2");
     });
+}
+
+// Credits over the pattern area: title row with the scroll arrows and EXIT, the text in a black box.
+void PlayScreen::pureCreditsDraw(PixelCanvas& c) {
+    c.fill(0, pure::kPatternY, 320, 256 - pure::kPatternY, kFace);
+    box(c, pure::creditsTitle());
+    label(c, pure::creditsTitle(), "FATTRACKER CREDITS");
+    arrowBox(c, pure::creditsScroll(0), true);
+    arrowBox(c, pure::creditsScroll(1), false);
+    box(c, pure::creditsExit());
+    label(c, pure::creditsExit(), "EXIT");
+    const pure::Box tb = pure::creditsText();
+    c.bevel(tb.x - 1, tb.y - 1, tb.w + 2, tb.h + 2, kBlack, kDark, kLight);  // sunken
+    c.fill(tb.x, tb.y, tb.w, tb.h, kBlack);
+    c.fill(0, 255, 320, 1, kDark);
+    static const std::vector<credits::Line> ls = credits::lines(pure::kCreditsCols);
+    const int rows = pure::creditsRows();
+    creditsScroll_ = std::clamp(creditsScroll_, 0, std::max(0, (int)ls.size() - rows));
+    for (int i = 0; i < rows && creditsScroll_ + i < (int)ls.size(); ++i) {
+        const credits::Line& l = ls[creditsScroll_ + i];
+        c.text(tb.x + 2, tb.y + 2 + i * pure::kCreditsPitch, l.text.c_str(), l.heading ? kScope : kLabelInk, kNormal);
+    }
 }

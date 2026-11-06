@@ -111,6 +111,12 @@ Box samplerButton(int i) {
 }
 const char* samplerLabel(int i) { return i >= 0 && i < kSamplerButtons ? kSamplerLabels[i] : ""; }
 
+Box creditsTitle() { return {0, kPatternY, 258, kRowH}; }
+Box creditsScroll(int dir) { return {258 + dir * 11, kPatternY, 11, kRowH}; }
+Box creditsExit() { return {280, kPatternY, 40, kRowH}; }
+Box creditsText() { return {2, kPatternY + kRowH + 2, 316, 256 - kPatternY - kRowH - 5}; }
+int creditsRows() { return (creditsText().h - 2) / kCreditsPitch; }
+
 const char* buttonLabel(int i) { return i >= 0 && i < 12 ? kLabels[i] : ""; }
 // glyphs use 6 of their 8 columns: the text ends 2 px before x + chars * 8
 int valueX(const Box& b, int chars) { return b.x + b.w - chars * 8 - 1; }
@@ -136,6 +142,12 @@ int hitTest(int x, int y, View view, int opScreen) {
             if (samplerButton(i).contains(x, y)) return kSmpButton + i;
         return kNone;
     }
+    if (view == kViewCredits && y >= kPatternY) {
+        for (int d = 0; d < 2; ++d)
+            if (creditsScroll(d).contains(x, y)) return d ? kCreditsDown : kCreditsUp;
+        if (creditsExit().contains(x, y)) return kCreditsExit;
+        return kCreditsText;
+    }
     for (int r = 0; r < kCounterRows; ++r)
         for (int d = 0; d < 2; ++d)
             if (counterArrow(r, d).contains(x, y)) return kArrow + r * 2 + d;
@@ -149,6 +161,7 @@ int hitTest(int x, int y, View view, int opScreen) {
         if (scope(i).contains(x, y)) return kScope + i;
     if (loadButton().contains(x, y)) return kLoad;
     if (exitButton().contains(x, y)) return kExit;
+    if (creditLine().contains(x, y)) return kCredits;
     if (songRow().contains(x, y)) return kSongName;
     if (sampleRow().contains(x, y)) return kSampleName;
     for (int d = 0; d < 2; ++d)

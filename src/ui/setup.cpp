@@ -128,6 +128,7 @@ void PlayScreen::setPure(int mode, Engine& e) {
         setCurrentTheme(themeBeforePure_);
     }
     pure_ = mode;
+    credits_ = false;
     // Pure has its own EDIT OP., POS ED. and SAMPLER; the other panels exist only on the normal screen
     if (mode ? panel_ != Panel::EditOp && panel_ != Panel::Sampler && panel_ != Panel::PosEd : panel_ == Panel::PosEd)
         panel_ = Panel::Main;
