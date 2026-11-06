@@ -16,7 +16,9 @@
 // (wave buffers may be rewritten while they play, like on the Amiga).
 struct AmigaChannel {
     void playSample(const int8_t* data, uint32_t start, uint32_t length);  // starts at once, no loop yet
-    void setSample(const int8_t* data, uint32_t start, uint32_t length);   // takes effect at the next loop
+    // Queued: replaces the sample (looping over itself) when the current buffer ends, or starts at once
+    // when the channel is silent (NostalgicPlayer's SetSample).
+    void setSample(const int8_t* data, uint32_t start, uint32_t length);
     void setLoop(uint32_t start, uint32_t length);                           // repeat part (same data)
     void setAmigaPeriod(uint32_t period) { period_ = period; }
     void setAmigaVolume(uint32_t volume) { volume_ = volume > 64 ? 64 : volume; }
@@ -33,6 +35,14 @@ private:
     bool active_ = false, loop_ = false, pending_ = false;
     uint32_t period_ = 0, volume_ = 0;
 };
+
+// Cuts [start, start + length) to a buffer of `size` bytes, as format code must before handing a range to
+// AmigaChannel (NostalgicPlayer throws on ranges outside the array). False when nothing of it is left.
+inline bool clipRange(size_t size, uint32_t& start, uint32_t& length) {
+    if (start >= size || length == 0) return false;
+    if (length > size - start) length = (uint32_t)(size - start);
+    return true;
+}
 
 class AmigaSynthPlayer : public ChipPlayer {
 public:

@@ -122,13 +122,14 @@ void PlayScreen::diskRefresh() {
                 if (!isDir) {
                     const bool mod = hasExt(n, {L".mod", L".xm", L".stk", L".s3m", L".it", L".mtm", L".669", L".fc", L".fc13", L".fc14", L".smod", L".hip", L".hipc", L".hip7", L".sog", L".mcmd", L".coso", L".sid", L".psid", L".rsid", L".ym", L".vtx", L".psg", L".jam", L".mdat", L".mmd0",
                                                 L".mmd1", L".mmd2", L".mmd3", L".med", L".symmod", L".dbm",
-                                                L".digi", L".tfx"}) ||
+                                                L".digi", L".tfx", L".dm", L".dm1", L".dm2"}) ||
                                      !_wcsnicmp(n.c_str(), L"mdat.", 5) || !_wcsnicmp(n.c_str(), L"mod.", 4) ||
                                      !_wcsnicmp(n.c_str(), L"fc.", 3) || !_wcsnicmp(n.c_str(), L"smod.", 5) ||
                                      !_wcsnicmp(n.c_str(), L"hip.", 4) || !_wcsnicmp(n.c_str(), L"hipc.", 5) ||
                                      !_wcsnicmp(n.c_str(), L"hip7.", 5) || !_wcsnicmp(n.c_str(), L"sog.", 4) ||
                                      !_wcsnicmp(n.c_str(), L"mcmd.", 5) || !_wcsnicmp(n.c_str(), L"coso.", 5) ||
-                                     !_wcsnicmp(n.c_str(), L"jam.", 4);
+                                     !_wcsnicmp(n.c_str(), L"jam.", 4) || !_wcsnicmp(n.c_str(), L"dm.", 3) ||
+                                     !_wcsnicmp(n.c_str(), L"dm1.", 4) || !_wcsnicmp(n.c_str(), L"dm2.", 4);
                     const bool smp = hasExt(n, {L".wav", L".iff", L".8svx", L".aiff"});
                     if (diskFilter_ == 0 && !mod) continue;
                     if (diskFilter_ == 1 && !smp) continue;

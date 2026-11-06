@@ -20,6 +20,11 @@ void AmigaChannel::playSample(const int8_t* data, uint32_t start, uint32_t lengt
 }
 
 void AmigaChannel::setSample(const int8_t* data, uint32_t start, uint32_t length) {
+    if (!active_) {  // nothing playing: the new sample starts now
+        playSample(data, start, length);
+        setLoop(start, length);
+        return;
+    }
     nextData_ = data;
     nextStart_ = start;
     nextLen_ = length;
@@ -61,11 +66,15 @@ float AmigaChannel::next(double rate) {
 std::unique_ptr<AmigaSynthPlayer> AmigaSynthPlayer::open(const uint8_t* d, size_t n) {
     if (!d || n < 8 || n > (64u << 20)) return nullptr;
     if (auto p = openJamCracker(d, n)) return p;
+    if (auto p = openDeltaMusic1(d, n)) return p;
+    if (auto p = openDeltaMusic2(d, n)) return p;
     return nullptr;
 }
 
 bool AmigaSynthPlayer::detect(const uint8_t* d, size_t n) {
-    return d && n >= 8 && std::memcmp(d, "BeEp", 4) == 0;  // JamCracker
+    if (!d || n < 8) return false;
+    return std::memcmp(d, "BeEp", 4) == 0  // JamCracker
+           || isDeltaMusic1(d, n) || isDeltaMusic2(d, n);
 }
 
 void AmigaSynthPlayer::restart() {
