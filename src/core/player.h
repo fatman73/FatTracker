@@ -46,6 +46,9 @@ struct ChannelState {
     int32_t avDelta = 0;
     float outVol01 = 0.f;
     float outPan01 = 0.5f;
+    // Symphonie continuous slides (Song::symphonieSlides): signed rates and fractional values
+    int symVolRate = 0, symPitchRate = 0;
+    float symVol = 0.f, symPeriod = 0.f;
 };
 
 struct PlayerPos {
@@ -98,12 +101,14 @@ private:
     void ft2RowEffects(int c);
     void ft2TickEffects(int c);
     enum : uint8_t { kFxG = 16, kFxH = 17, kFxK = 20, kFxL = 21, kFxP = 25, kFxR = 27, kFxT = 29, kFxX = 33 };
+    enum : uint8_t { kFxU = 30, kFxV = 31, kFxW = 32, kFxY = 34 };  // Symphonie slides
     void doVolSlide(int c, uint8_t param);
     void doPortaUp(int c, int amount);
     void doPortaDown(int c, int amount);
     void doTonePorta(int c);
     void doVibrato(int c);
     void doTremolo(int c);
+    void symphonieSlideTick(int c);
     // player_inst.cpp
     void instrumentTick(int c);
 

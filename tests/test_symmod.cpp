@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <vector>
 
+#include "core/player.h"
 #include "core/render.h"
 #include "formats/formats.h"
 #include "test.h"
@@ -431,6 +432,159 @@ TEST(symmod_sample_vibrato_scales_the_replay_offset) {
     const Cell& c = s->patterns[s->order[0]].at(2, 0);
     CHECK_EQ(c.fx, 9);
     CHECK_EQ(c.param, 51);
+}
+
+// ---- player: Symphonie continuous slides (Song::symphonieSlides), per tick and fractional
+namespace {
+constexpr uint8_t kFxU = 30, kFxV = 31, kFxW = 32, kFxY = 34;
+Song slideSong(bool flag) {
+    Song s = makeEmptySong(4);
+    s.quirks = Quirks::FT2;
+    s.freqMode = FreqMode::Linear;
+    s.initialSpeed = 6;
+    s.symphonieSlides = flag;
+    Sample sm;
+    sm.length = 1000;
+    sm.data8.assign(1000, 50);
+    sm.loop = LoopType::Forward;
+    sm.loopLength = 1000;
+    s.samples.push_back(sm);
+    s.patterns[0].at(0, 0) = Cell{49, 1, 0x10 + 32, 0, 0};
+    return s;
+}
+struct Rig {
+    Mixer m{48000};
+    Player p{m};
+    explicit Rig(const Song& s) {
+        p.setSong(&s);
+        p.play();
+    }
+    void ticks(int n) {
+        for (int i = 0; i < n; ++i) p.tick();
+    }
+};
+}  // namespace
+
+TEST(player_symphonie_volume_slide_runs_every_tick) {
+    Song s = slideSong(true);
+    s.patterns[0].at(0, 0).fx = kFxU, s.patterns[0].at(0, 0).param = 25;  // +1 volume per tick
+    Rig* r = new Rig(s);
+    r->ticks(6);
+    CHECK_EQ(r->p.channel(0).volume, 38);
+    r->ticks(6);  // keeps going on the next row without a command
+    CHECK_EQ(r->p.channel(0).volume, 44);
+    delete r;
+}
+
+TEST(player_symphonie_volume_slide_is_fractional_and_stops_at_zero) {
+    Song s = slideSong(true);
+    s.patterns[0].at(0, 0).fx = kFxV, s.patterns[0].at(0, 0).param = 10;  // -0.4 per tick
+    Rig* r = new Rig(s);
+    r->ticks(6);
+    CHECK_EQ(r->p.channel(0).volume, 30);  // 32 - 2.4
+    s.patterns[0].at(1, 0).fx = kFxV, s.patterns[0].at(1, 0).param = 255;
+    r->ticks(18);
+    CHECK_EQ(r->p.channel(0).volume, 0);
+    s.patterns[0].at(4, 0).vol = 0x10 + 20;  // the slide stopped at 0: a new volume stays
+    r->ticks(12);
+    CHECK_EQ(r->p.channel(0).volume, 20);
+    delete r;
+}
+
+TEST(player_symphonie_pitch_slide_runs_every_tick) {
+    Song s = slideSong(true);
+    s.patterns[0].at(0, 0).fx = kFxW, s.patterns[0].at(0, 0).param = 82;  // x(1 + 82/8192) per tick
+    Rig* r = new Rig(s);
+    r->ticks(6);
+    CHECK_EQ(r->p.channel(0).period, 4608 - 66);
+    s.patterns[0].at(1, 0).note = 49;  // a new note stops it
+    r->ticks(12);
+    CHECK_EQ(r->p.channel(0).period, 4608);
+    s.patterns[0].at(3, 0).fx = kFxY, s.patterns[0].at(3, 0).param = 82;
+    r->ticks(6);
+    CHECK_EQ(r->p.channel(0).period, 4608 + 67);  // down: x(1 - 82/8192)
+    delete r;
+}
+
+TEST(player_ignores_symphonie_slides_in_other_songs) {
+    Song s = slideSong(false);
+    s.patterns[0].at(0, 0).fx = kFxU, s.patterns[0].at(0, 0).param = 25;
+    Rig* r = new Rig(s);
+    r->ticks(6);
+    CHECK_EQ(r->p.channel(0).volume, 32);
+    delete r;
+}
+
+TEST(symmod_slides_become_continuous_slide_commands) {
+    SymSpec sp;
+    sp.ins = {normalIns("bass")};
+    sp.smp = {dc(100, 64)};
+    sp.put(0, 0, 0, 36, 50, 0);   // key on, volume 50
+    sp.put(1, 0, 1, -1, 25, 0);   // volume slide up 25
+    sp.put(2, 0, 0, -1, 99, 0);   // volume 99: the slide stops
+    sp.put(0, 1, 0, 36, 50, 0);
+    sp.put(1, 1, 3, -1, 82, 0);  // pitch slide up 82
+    sp.put(2, 1, 4, -1, 10, 0);  // pitch slide down 10
+    Result<Song> r = Result<Song>::fail("");
+    const Song* s = loadInto(r, sp);
+    CHECK(s);
+    if (!s) return;
+    CHECK(s->symphonieSlides);
+    const Pattern& p = s->patterns[s->order[0]];
+    CHECK_EQ(p.at(1, 0).fx, kFxU);
+    CHECK_EQ(p.at(1, 0).param, 25);
+    CHECK_EQ(p.at(1, 0).vol, 0);  // no volume column approximation
+    CHECK_EQ(p.at(2, 0).vol, 0x10 + 63);
+    CHECK_EQ(p.at(2, 0).fx, kFxU);
+    CHECK_EQ(p.at(2, 0).param, 0);
+    CHECK_EQ(p.at(3, 0).fx, 0);
+    CHECK_EQ(p.at(1, 1).fx, kFxW);
+    CHECK_EQ(p.at(1, 1).param, 82);
+    CHECK_EQ(p.at(2, 1).fx, kFxY);
+    CHECK_EQ(p.at(2, 1).param, 10);
+    CHECK_EQ(p.at(3, 1).fx, 0);
+}
+
+TEST(symmod_slide_keeps_going_across_a_new_note) {
+    // a key-on without volume does not stop the volume slide; the instrument's reset volume is
+    // corrected to where the slide got to
+    SymSpec sp;
+    sp.ins = {normalIns("bass")};
+    sp.smp = {dc(100, 64)};
+    sp.speed = 5;
+    sp.put(0, 0, 0, 36, 50, 0);  // volume 32 of 64
+    sp.put(1, 0, 2, -1, 25, 0);  // down 1 per tick: 27 after row 1
+    sp.put(2, 0, 0, 40, 0, 0);   // new note, no volume
+    Result<Song> r = Result<Song>::fail("");
+    const Song* s = loadInto(r, sp);
+    CHECK(s);
+    if (!s) return;
+    const Pattern& p = s->patterns[s->order[0]];
+    CHECK_EQ(p.at(1, 0).fx, kFxV);
+    CHECK_EQ(p.at(2, 0).note, 53);
+    CHECK_EQ(p.at(2, 0).vol, 0x10 + 27);
+    CHECK_EQ(p.at(2, 0).fx, 0);
+}
+
+TEST(symmod_stopped_sample_pauses_the_slide) {
+    SymSpec sp;
+    sp.ins = {normalIns("bass")};
+    sp.smp = {dc(100, 64)};
+    sp.put(0, 0, 0, 36, 50, 0);
+    sp.put(1, 0, 1, -1, 25, 0);   // volume slide up: 38 after row 1
+    sp.put(2, 0, 0, -1, 254, 0);  // stop sample: silent, the slide waits
+    sp.put(3, 0, 0, -1, 253, 0);  // continue: back at 38, sliding again
+    Result<Song> r = Result<Song>::fail("");
+    const Song* s = loadInto(r, sp);
+    CHECK(s);
+    if (!s) return;
+    const Pattern& p = s->patterns[s->order[0]];
+    CHECK_EQ(p.at(2, 0).vol, 0x10);
+    CHECK_EQ(p.at(2, 0).fx, kFxU);
+    CHECK_EQ(p.at(2, 0).param, 0);
+    CHECK_EQ(p.at(3, 0).vol, 0x10 + 38);
+    CHECK_EQ(p.at(3, 0).fx, kFxU);
+    CHECK_EQ(p.at(3, 0).param, 25);
 }
 
 TEST(real_modules_symphonie_load_and_play) {

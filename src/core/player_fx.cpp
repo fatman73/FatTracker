@@ -339,9 +339,35 @@ void Player::volumeColumn(int c, bool tick0) {
     }
 }
 
+// Symphonie slides run every tick (tick 0 too), from the fractional value they left, unless
+// something else has changed the volume / period since.
+void Player::symphonieSlideTick(int c) {
+    ChannelState& ch = ch_[c];
+    if (ch.symVolRate) {
+        if (ch.volume != (uint8_t)std::lround(ch.symVol)) ch.symVol = ch.volume;
+        symVolumeStep(ch.symVol, ch.symVolRate);
+        ch.volume = (uint8_t)std::lround(ch.symVol);
+    }
+    if (ch.symPitchRate && ch.period > 0) {
+        if (ch.period != (int32_t)std::lround(ch.symPeriod)) ch.symPeriod = (float)ch.period;
+        // the original multiplies its frequency by (1 + rate / 8192): 768 linear period units per octave
+        ch.symPeriod -= 768.f * std::log2(1.f + (float)ch.symPitchRate / 8192.f);
+        ch.symPeriod = ch.symPeriod < 1.f ? 1.f : (ch.symPeriod > 32000.f ? 32000.f : ch.symPeriod);
+        ch.period = (int32_t)std::lround(ch.symPeriod);
+    }
+}
+
 void Player::ft2RowEffects(int c) {
     ChannelState& ch = ch_[c];
     const uint8_t fx = ch.cell.fx, p = ch.cell.param;
+    if (song_->symphonieSlides) {
+        switch (fx) {
+            case kFxU: ch.symVolRate = p; break;
+            case kFxV: ch.symVolRate = -p; break;
+            case kFxW: ch.symPitchRate = p; break;
+            case kFxY: ch.symPitchRate = -p; break;
+        }
+    }
     switch (fx) {
         case kFxG:
             globalVol_ = p > 64 ? 64 : p;

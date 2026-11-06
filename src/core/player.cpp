@@ -197,6 +197,7 @@ void Player::noteStart(int c) {
         return;
     }
     if (!cell.note) return;
+    ch.symPitchRate = 0;  // any note stops a Symphonie pitch slide
 
     if (useInstruments && ch.instrument >= 0 && !cell.instr) {
         uint16_t m = s.instruments[ch.instrument].sampleMap[cell.note - 1];
@@ -289,6 +290,7 @@ void Player::processRow() {
         }
         if (isFT2() && !ch.delayPending) volumeColumn(c, true);
         rowEffects(c);
+        if (song_->symphonieSlides) symphonieSlideTick(c);
         updateOutputs(c);
     }
     if (pendingStop_) {
@@ -330,6 +332,7 @@ void Player::tick() {
             }
             if (isFT2()) volumeColumn(c, false);
             tickEffects(c);
+            if (song_->symphonieSlides) symphonieSlideTick(c);
             updateOutputs(c);
         }
     }

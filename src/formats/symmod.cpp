@@ -98,7 +98,7 @@ constexpr int8_t TYPE_LOOP = 4, TYPE_SUSTAIN = 8;
 constexpr uint8_t CHAN_STEREO_L = 1, CHAN_STEREO_R = 2;
 constexpr uint8_t SF_REVERSE = 1, SF_MIRROR = 4, SF_NEW_LOOP = 16;
 constexpr uint8_t IF_NO_TRANSPOSE = 1, IF_SYNC_PLAY = 4;
-constexpr uint8_t FX_R = 27, FX_X = 33;
+constexpr uint8_t FX_R = 27, FX_U = 30, FX_V = 31, FX_W = 32, FX_X = 33, FX_Y = 34;
 constexpr int kMaxRows = 1024;  // the longest Symphonie track
 
 struct Event {
@@ -667,10 +667,10 @@ void instName(const SymInst& in, char* dst) {
 
 struct ChanState {
     float vol = 64;              // Symphonie channel volume 0..64 (what the song wants)
-    int playerVol = 64;          // what our player has after the converted cells
-    float volSlide = 0;          // per tick
-    float pitchSlide = 0;        // per tick, in 1/16 semitones
-    float pitchSlideAmt = 0;     // not yet emitted pitch slide
+    int volSlide = 0, pitchSlide = 0;  // Symphonie's continuous slides: signed parameters
+    // what our player has after the converted cells (see Player::symphonieSlideTick)
+    int playerVol = 64, playerVolRate = 0, playerPitchRate = 0;
+    float playerSymVol = 0;
     bool stopped = false;
     int lastNote = 0;            // our note numbering, 0 = none
     int lastInst = 0;            // Symphonie instrument + 1
@@ -1000,12 +1000,16 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                 x = syncCell;
                                 const ChanState& prev = chs[ch - 1];
                                 st.vol = prev.vol;
-                                st.playerVol = prev.playerVol;
                                 st.lastVol = prev.lastVol;
+                                st.volSlide = prev.volSlide;
+                                st.pitchSlide = prev.pitchSlide;
+                                st.playerVol = prev.playerVol;  // the same cell: the player does the same
+                                st.playerSymVol = prev.playerSymVol;
+                                st.playerVolRate = prev.playerVolRate;
+                                st.playerPitchRate = prev.playerPitchRate;
                                 if (!global) continue;
                             }
 
-                            bool resumed = false;
                             int note = (ev.note >= 0 && ev.note <= 84) ? ev.note + 13 : -1;
                             int mapped = 0;
                             if (ev.inst < numIns) {
@@ -1023,11 +1027,9 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                             case VOL_STOP_SAMPLE:  // pause: approximated as silence
                                                 x.vol = 0x10;
                                                 st.stopped = true;
-                                                st.playerVol = 0;
                                                 break;
                                             case VOL_CONT_SAMPLE:
-                                                st.stopped = false;
-                                                resumed = true;
+                                                st.stopped = false;  // the volume is corrected below
                                                 break;
                                             case VOL_KEY_OFF:
                                                 x.note = NOTE_OFF;
@@ -1083,16 +1085,15 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                         ns.vol = st.vol;
                                         ns.volSlide = st.volSlide;
                                         ns.pitchSlide = st.pitchSlide;
-                                        ns.pitchSlideAmt = st.pitchSlideAmt;
                                         ns.retrigRemain = st.retrigRemain;
                                         dup[ch + 1] = true;
                                     }
                                     break;
                                 case EV_VOL_SLIDE_UP:
-                                    st.volSlide = ev.param * 0.0333f;
+                                    st.volSlide = ev.param;
                                     break;
                                 case EV_VOL_SLIDE_DOWN:
-                                    st.volSlide = ev.param * -0.0333f;
+                                    st.volSlide = -ev.param;
                                     break;
                                 case EV_TREMOLO: {
                                     const int sp = (ev.inst >> 3) < 15 ? ev.inst >> 3 : 15;
@@ -1103,8 +1104,7 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                 }
                                 case EV_PITCH_SLIDE_UP:
                                 case EV_PITCH_SLIDE_DOWN:
-                                    st.pitchSlideAmt = 0;
-                                    st.pitchSlide = ev.param * (ev.cmd == EV_PITCH_SLIDE_UP ? 0.0333f : -0.0333f);
+                                    st.pitchSlide = ev.cmd == EV_PITCH_SLIDE_UP ? ev.param : -ev.param;
                                     st.tonePortaRemain = 0;
                                     break;
                                 case EV_PITCH_SLIDE_TO:
@@ -1193,67 +1193,49 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
 
                             // any event that plays a note restarts the continuous effects
                             if (x.note > 0 && x.note != NOTE_OFF) st.stopped = false;
-                            else if (st.stopped) continue;
+                            const bool frozen = st.stopped;  // a paused sample: slides wait too
 
-                            if (st.retrigRemain) {
+                            if (!frozen && st.retrigRemain) {
                                 st.retrigRemain = (st.retrigRemain > patSpeed ? st.retrigRemain : patSpeed) - patSpeed;
                                 if (!x.hasFx) x.setFx(FX_R, 0);
                             }
 
-                            // volume: what the player will have after tick 0 of this cell...
+                            // Continuous slides run in the player (effects U/V/W/Y, Song::symphonieSlides).
+                            // Follow what the player's volume will be after tick 0 of this cell...
                             int pv = st.playerVol;
                             if (x.inst) pv = 64;  // the instrument resets to the sample volume
                             if (x.note == NOTE_OFF) pv = 0;
                             if (x.vol >= 0x10 && x.vol <= 0x50) pv = x.vol - 0x10;
-                            // ...and what Symphonie has by the end of it
-                            const float vStart = st.vol;
-                            if (st.volSlide != 0) {
-                                st.vol += st.volSlide * patSpeed;
-                                st.vol = st.vol < 0 ? 0 : (st.vol > 64 ? 64 : st.vol);
+                            // ...and correct it to Symphonie's where they part
+                            const int want = roundi(st.vol);
+                            if (!frozen && !x.vol && x.note != NOTE_OFF && pv != want) {
+                                x.vol = (uint8_t)(0x10 + want);
+                                pv = want;
                             }
-                            if (!x.vol && x.note != NOTE_OFF) {
-                                if (st.volSlide == 0 || x.inst || resumed) {
-                                    const int want = roundi(vStart);
-                                    if (pv != want) {
-                                        x.vol = (uint8_t)(0x10 + want);
-                                        pv = want;
-                                    }
-                                } else {
-                                    const int diff = roundi(st.vol) - pv, ad = std::abs(diff);
-                                    if (patSpeed > 1 && ad >= patSpeed - 1) {
-                                        int k = (int)std::lround((double)ad / (patSpeed - 1));
-                                        k = k > 15 ? 15 : k;
-                                        x.vol = (uint8_t)((diff > 0 ? 0x70 : 0x60) + k);
-                                        pv += (diff > 0 ? 1 : -1) * k * (patSpeed - 1);
-                                    } else if (ad >= 1) {
-                                        const int k = ad > 15 ? 15 : ad;
-                                        x.vol = (uint8_t)((diff > 0 ? 0x90 : 0x80) + k);
-                                        pv += diff > 0 ? k : -k;
-                                    }
-                                    pv = pv < 0 ? 0 : (pv > 64 ? 64 : pv);
+                            // slide changes, before the effects re-sent every row; a note stops the
+                            // player's pitch slide
+                            if (x.note > 0 && x.note != NOTE_OFF) st.playerPitchRate = 0;
+                            const int wantVol = frozen ? 0 : st.volSlide, wantPitch = frozen ? 0 : st.pitchSlide;
+                            if (st.playerVolRate != wantVol && !x.hasFx) {
+                                x.setFx(wantVol < 0 ? FX_V : FX_U, (uint8_t)std::abs(wantVol));
+                                st.playerVolRate = wantVol;
+                            }
+                            if (st.playerPitchRate != wantPitch && !x.hasFx) {
+                                x.setFx(wantPitch < 0 ? FX_Y : FX_W, (uint8_t)std::abs(wantPitch));
+                                st.playerPitchRate = wantPitch;
+                            }
+                            // this row's ticks, in the player and in Symphonie
+                            for (int t = 0; t < patSpeed; ++t) {
+                                if (st.playerVolRate) {
+                                    if (pv != (int)std::lround(st.playerSymVol)) st.playerSymVol = (float)pv;
+                                    symVolumeStep(st.playerSymVol, st.playerVolRate);
+                                    pv = (int)std::lround(st.playerSymVol);
                                 }
+                                if (!frozen && st.volSlide) symVolumeStep(st.vol, st.volSlide);
                             }
                             st.playerVol = pv;
+                            if (frozen) continue;
 
-                            // pitch slide in 1/16 semitones: 1xx/2xx per tick, E1x/E2x once
-                            if (st.pitchSlide != 0) {
-                                st.pitchSlideAmt += st.pitchSlide * patSpeed;
-                                if (!x.hasFx) {
-                                    const float a = st.pitchSlideAmt, aa = std::fabs(a);
-                                    const bool up = a > 0;
-                                    if (patSpeed > 1 && aa >= patSpeed - 1) {
-                                        int k = (int)std::lround(aa / (patSpeed - 1));
-                                        k = k > 0xFF ? 0xFF : k;
-                                        x.setFx(up ? 0x1 : 0x2, (uint8_t)k);
-                                        st.pitchSlideAmt -= (up ? 1 : -1) * (float)(k * (patSpeed - 1));
-                                    } else if (aa >= 1) {
-                                        int k = (int)std::lround(aa);
-                                        k = k > 15 ? 15 : k;
-                                        x.setFx(0xE, (uint8_t)((up ? 0x10 : 0x20) | k));
-                                        st.pitchSlideAmt -= (up ? 1 : -1) * (float)k;
-                                    }
-                                }
-                            }
                             // Symphonie's vibrato and tremolo keep going until switched off
                             if (!x.hasFx && st.vibrato) {
                                 x.setFx(0x4, st.vibrato);
@@ -1321,6 +1303,7 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                 }
         }
     }
+    s.symphonieSlides = true;
     if (s.patterns.empty()) s.patterns.push_back(makePattern(64, s.numChannels));
     if (s.order.empty()) s.order.push_back(0);
     if (truncated) s.loadFlags |= LOAD_TRUNCATED;
