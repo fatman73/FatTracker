@@ -30,6 +30,10 @@ ChipRoute routeChipFile(const std::wstring& path, std::vector<uint8_t>& data, co
 bool loadRoutedChip(Engine& engine, const ChipRoute& route, const std::vector<uint8_t>& mdat,
                     const std::wstring& exeReplayDir, bool play);
 
+// Any song file into the engine, stopped: a chip song (routed as above) or else a tracker module.
+// False with the status text in `error` (what the app would show).
+bool loadSongFile(Engine& engine, const std::wstring& path, const std::wstring& exeReplayDir, std::string* error);
+
 // Companion files of a song (IFF SMUS instruments): plain names in the song's own folder (or its Instruments
 // subfolder), nothing else.
 AmigaFileResolver songFolderFiles(const std::wstring& songPath);

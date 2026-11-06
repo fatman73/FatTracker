@@ -3,7 +3,7 @@ if(APPLE)
   # macOS port: Universal Binary (arm64 + x86_64), macOS 13+; see cmake/apple.cmake
   set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version")
   set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target architectures")
-  project(FatTracker LANGUAGES C CXX)
+  project(FatTracker LANGUAGES C CXX OBJCXX)
   include(cmake/apple.cmake)
   return()
 endif()

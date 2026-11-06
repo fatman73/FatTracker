@@ -52,3 +52,9 @@ target_compile_definitions(fttest PRIVATE FT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_executable(ftrender tools/ftrender.cpp src/app/chip_route.cpp src/audio/engine.cpp src/mac/audio_out_null.cpp)
 target_link_libraries(ftrender PRIVATE ftcore)
 target_include_directories(ftrender PRIVATE src)
+
+# ftplay: plays a song on the default output through Core Audio (src/mac/audio_out_mac.mm); PLAYS SOUND
+add_executable(ftplay tools/ftplay.cpp src/app/chip_route.cpp src/audio/engine.cpp src/mac/audio_out_mac.mm)
+target_link_libraries(ftplay PRIVATE ftcore "-framework AudioToolbox" "-framework CoreAudio" objc)  # objc: ARC runtime
+target_include_directories(ftplay PRIVATE src)
+target_compile_options(ftplay PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
