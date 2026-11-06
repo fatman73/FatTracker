@@ -14,8 +14,12 @@ bool validCell(const Song& s, int pat, int row, int ch) {
 
 // ---------------------------------------------------------------- history
 
-Editor::Snap Editor::capture(const Song& s, const std::vector<int>& pats) const {
+Editor::Snap Editor::capture(const Song& s, const std::vector<int>& pats, bool instruments) const {
     Snap snap;
+    if (instruments) {
+        snap.hasInstruments = true;
+        snap.instruments = s.instruments;
+    }
     snap.order = s.order;
     snap.patternCount = s.patterns.size();
     snap.numChannels = s.numChannels;
@@ -52,6 +56,7 @@ void Editor::restore(Song& s, const Snap& snap) const {
         }
     }
     s.order = snap.order;
+    if (snap.hasInstruments) s.instruments = snap.instruments;
 }
 
 void Editor::record(const Song& s, const std::vector<int>& pats) {
@@ -65,7 +70,7 @@ bool Editor::undo(Song& s) {
     if (undo_.empty()) return false;
     Snap top = static_cast<Snap&&>(undo_.back());
     undo_.pop_back();
-    redo_.push_back(capture(s, top.idx.empty() ? std::vector<int>{} : top.idx));
+    redo_.push_back(capture(s, top.idx.empty() ? std::vector<int>{} : top.idx, top.hasInstruments));
     restore(s, top);
     dirty_ = true;
     return true;
@@ -75,10 +80,17 @@ bool Editor::redo(Song& s) {
     if (redo_.empty()) return false;
     Snap top = static_cast<Snap&&>(redo_.back());
     redo_.pop_back();
-    undo_.push_back(capture(s, top.idx));
+    undo_.push_back(capture(s, top.idx, top.hasInstruments));
     restore(s, top);
     dirty_ = true;
     return true;
+}
+
+void Editor::recordInstruments(const Song& s) {
+    undo_.push_back(capture(s, {}, true));
+    if (undo_.size() > kUndoLimit) undo_.erase(undo_.begin());
+    redo_.clear();
+    dirty_ = true;
 }
 
 // ---------------------------------------------------------------- cells

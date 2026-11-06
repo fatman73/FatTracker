@@ -56,6 +56,8 @@ public:
     void setOrder(Song& s, int pos, uint8_t pattern);
     void clearSong(Song& s);  // all patterns empty, one position
     void setChannels(Song& s, int channels);  // undoable channel count change
+    // instruments: call before changing Song::instruments (core/instrument_edit.h); undo restores them all
+    void recordInstruments(const Song& s);
     // history
     bool undo(Song& s);
     bool redo(Song& s);
@@ -74,8 +76,10 @@ private:
         std::vector<uint8_t> order;
         size_t patternCount = 0;
         uint8_t numChannels = 4;
+        bool hasInstruments = false;  // recordInstruments: the whole instrument list
+        std::vector<Instrument> instruments;
     };
-    Snap capture(const Song& s, const std::vector<int>& pats) const;
+    Snap capture(const Song& s, const std::vector<int>& pats, bool instruments = false) const;
     void restore(Song& s, const Snap& snap) const;
     void record(const Song& s, const std::vector<int>& pats);  // push undo, clear redo
 

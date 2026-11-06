@@ -849,6 +849,26 @@ int screenshotMode() {
                     drawFrame();
                     continue;
                 }
+                if (!wcsncmp(tok, L"CLICK:", 6) || !wcsncmp(tok, L"RCLICK:", 7) || !wcsncmp(tok, L"DRAG:", 5)) {
+                    // mouse in logical units: CLICK:x,y  RCLICK:x,y  DRAG:x0,y0,x1,y1 (press, move in steps, release)
+                    float v[4] = {};
+                    const wchar_t* q = wcschr(tok, L':') + 1;
+                    for (int i = 0; i < 4 && q; ++i) {
+                        v[i] = (float)_wtof(q);
+                        q = wcschr(q, L',');
+                        if (q) ++q;
+                    }
+                    g_screen.click(v[0], v[1], tok[0] == L'R', *g_engine);
+                    if (tok[0] == L'D') {
+                        for (int i = 1; i <= 8; ++i)
+                            g_screen.onMouseMove(v[0] + (v[2] - v[0]) * i / 8, v[1] + (v[3] - v[1]) * i / 8, true, *g_engine);
+                        g_screen.onMouseUp(v[2], v[3], *g_engine);
+                    } else {
+                        g_screen.onMouseUp(v[0], v[1], *g_engine);
+                    }
+                    drawFrame();
+                    continue;
+                }
                 if (!wcsncmp(tok, L"OP:", 3)) {  // Pure EDIT OP. screen 0..2
                     g_screen.setEditOpScreen(_wtoi(tok + 3));
                     drawFrame();
@@ -863,7 +883,8 @@ int screenshotMode() {
                     const wchar_t* pn = tok + 2;
                     Panel p = !lstrcmpiW(pn, L"DISKOP") ? Panel::DiskOp : !lstrcmpiW(pn, L"SAMPLER") ? Panel::Sampler
                             : !lstrcmpiW(pn, L"EDITOP") ? Panel::EditOp : !lstrcmpiW(pn, L"SETUP") ? Panel::Setup
-                            : !lstrcmpiW(pn, L"POSED") ? Panel::PosEd : Panel::Help;
+                            : !lstrcmpiW(pn, L"POSED") ? Panel::PosEd : !lstrcmpiW(pn, L"INSTR") ? Panel::Instrument
+                            : Panel::Help;
                     g_screen.openPanel(p);
                     drawFrame();
                     continue;

@@ -36,6 +36,7 @@ Start `FatTracker.exe`, then drag a `.mod` / `.xm` file onto the window or press
 | Click track header | Mute / unmute |
 | Right-click track header | Solo |
 | Alt+Enter | Fullscreen |
+| Ctrl+I (or SAMPLER → INSTRUMENT) | XM instrument editor: envelopes, key map, fadeout, autovibrato |
 | PLAY / STOP / PATTERN buttons | As in ProTracker |
 
 ## Tests
