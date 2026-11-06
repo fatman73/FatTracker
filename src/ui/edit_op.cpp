@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "ui/credits.h"
 #include "ui/play_screen.h"
 #include "ui/widgets.h"
 
@@ -221,11 +222,40 @@ int PlayScreen::editOpHit(float x, float y) const {
 
 void PlayScreen::applyMetronome(Engine& e) { e.setMetronome(metronome_, metroEvery_); }
 
+RectF PlayScreen::helpTab() const {
+    const RectF a = bottomArea();
+    return {a.x + a.w - 8 - 16 - 150, a.y + 8 + 10, 150, 36};
+}
+
 void PlayScreen::helpDraw(Gfx& g, Text& tx, const Theme& t) {
     const RectF a = bottomArea();
     g.panel(a, t, Gfx::PanelState::Normal);
     RectF w = {a.x + 8, a.y + 8, a.w - 16, a.h - 16};
     g.well(w, t, t.patternBg);
+    Ui u{g, tx, t};
+    drawButton(u, helpTab(), credits_ ? "HELP" : "CREDITS",
+               hover_ == kHelpTabHit ? Gfx::PanelState::Hover : Gfx::PanelState::Normal, 15.f);
+    const float lh = 23.f;
+    if (credits_) {  // two columns of the credits table, scrolled by lines
+        tx.draw(g, {w.x + 16, w.y + 8, w.w / 2, 36}, "CREDITS AND LICENCES", 17.f, t.patternFx, Align::Left);
+        const float top = w.y + 54;
+        const int perCol = std::max(1, (int)((w.y + w.h - 8 - top) / lh));
+        const float colW = w.w / 2 - 28;
+        const auto ls = credits::lines(std::max(20, (int)(colW / (15.f * tx.monoAdvance()))));
+        const int n = (int)ls.size();
+        creditsScroll_ = std::clamp(creditsScroll_, 0, std::max(0, n - 2 * perCol));
+        for (int i = 0; i < 2 * perCol && creditsScroll_ + i < n; ++i) {
+            const credits::Line& l = ls[creditsScroll_ + i];
+            tx.draw(g, {w.x + 16 + (i / perCol) * (w.w / 2), top + (i % perCol) * lh, colW, lh}, l.text.c_str(), 15.f,
+                    l.heading ? t.patternFx : t.patternText, Align::Left, FontRole::Mono);
+        }
+        if (n > 2 * perCol) {
+            char m[48];
+            std::snprintf(m, sizeof m, "WHEEL / ARROWS: SCROLL  %d%%", creditsScroll_ * 100 / std::max(1, n - 2 * perCol));
+            tx.draw(g, {w.x + w.w / 2, w.y + 8 + 10, w.w / 2 - 190, 36}, m, 14.f, t.patternText, Align::Right);
+        }
+        return;
+    }
     static const char* const lines[] = {
         "PLAYBACK",                          "  F5 / RIGHT ALT      PLAY SONG",
         "  RIGHT CTRL          PLAY PATTERN", "  SPACE               STOP / EDIT MODE ON-OFF",
@@ -251,7 +281,6 @@ void PlayScreen::helpDraw(Gfx& g, Text& tx, const Theme& t) {
         "OTHER",                             "  CLICK TRACK HEADER  MUTE (RIGHT CLICK: SOLO)",
         "  ALT+ENTER           FULL SCREEN", "  ESC                 CLOSE PANEL"};
     const int n = (int)(sizeof lines / sizeof lines[0]);
-    const float lh = 23.f;
     const int perCol = (int)((w.h - 16) / lh);
     for (int i = 0; i < n; ++i) {
         const int col = i / perCol, row = i % perCol;

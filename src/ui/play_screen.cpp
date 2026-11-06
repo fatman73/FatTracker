@@ -109,6 +109,7 @@ int PlayScreen::hitId(float x, float y) const {
         const int ih = instrHit(x, y);
         if (ih >= 0) return 1000 + ih;
     }
+    if (panel_ == Panel::Help && helpTab().contains(x, y)) return kHelpTabHit;
     const bool topMain = panel_ != Panel::DiskOp && panel_ != Panel::EditOp && panel_ != Panel::Setup;
     const bool bottomPattern = panel_ != Panel::Sampler && panel_ != Panel::Help && panel_ != Panel::Instrument;
     if (topMain)
@@ -574,6 +575,10 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
         if (r != UiAction::None) return r;
         if (vk != VK_SPACE) return UiAction::None;
     }
+    if (creditsShown()) {
+        const UiAction r = creditsKey(vk);
+        if (r != UiAction::None) return r;
+    }
     if (panel_ == Panel::Help && vk != VK_ESCAPE && vk != VK_SPACE) return UiAction::None;
     if (vk == VK_ESCAPE && panel_ != Panel::Main) {
         panel_ = Panel::Main;
@@ -611,8 +616,28 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
     return editKey(vk, shift, ctrl, alt, repeat, e);
 }
 
+// The scroll is clamped when the credits are drawn (the number of lines depends on the screen).
+UiAction PlayScreen::creditsKey(unsigned vk) {
+    const int page = pure_ ? pure::creditsRows() : 20;
+    switch (vk) {
+        case VK_UP: creditsScroll_ = std::max(0, creditsScroll_ - 1); break;
+        case VK_DOWN: ++creditsScroll_; break;
+        case VK_PRIOR: creditsScroll_ = std::max(0, creditsScroll_ - page); break;
+        case VK_NEXT: creditsScroll_ += page; break;
+        case VK_HOME: creditsScroll_ = 0; break;
+        case VK_END: creditsScroll_ = 1 << 20; break;
+        case VK_ESCAPE:
+            if (!pure_) return UiAction::None;  // closes HELP
+            credits_ = false;
+            break;
+        default: return UiAction::None;
+    }
+    return UiAction::Redraw;
+}
+
 void PlayScreen::openPanel(Panel p) {
     panel_ = panel_ == p ? Panel::Main : p;
+    credits_ = false;  // HELP opens on its help page
     if (panel_ == Panel::DiskOp) diskRefresh();
     if (panel_ == Panel::Sampler) viewStart_ = viewEnd_ = selA_ = selB_ = 0;
     if (panel_ == Panel::Instrument) {
@@ -684,6 +709,10 @@ UiAction PlayScreen::onMouseUp(float, float, Engine&) {
 
 UiAction PlayScreen::onWheel(float x, float y, int delta, Engine& e) {
     const int notches = delta / 120 != 0 ? delta / 120 : (delta > 0 ? 1 : -1);
+    if (creditsShown()) {
+        creditsScroll_ = std::max(0, creditsScroll_ - notches * 3);
+        return UiAction::Redraw;
+    }
     if (pure_ && !(panel_ == Panel::Sampler && samplerWave().contains(x, y))) {
         if (!last_.playing && panel_ != Panel::Sampler) moveCursor(-notches, 0, e);
         return UiAction::Redraw;
@@ -844,7 +873,12 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
     if (panel_ == Panel::Sampler && bottomArea().contains(x, y)) return samplerMouse(x, y, right, e);
     if (panel_ == Panel::Instrument && bottomArea().contains(x, y)) return instrMouse(x, y, right, e);
     if (panel_ == Panel::Help && bottomArea().contains(x, y)) {
-        panel_ = Panel::Main;
+        if (helpTab().contains(x, y)) {  // HELP <-> CREDITS
+            credits_ = !credits_;
+            creditsScroll_ = 0;
+        } else {
+            panel_ = Panel::Main;
+        }
         return UiAction::Redraw;
     }
     if (L_.logo.contains(x, y) && panel_ != Panel::DiskOp && panel_ != Panel::EditOp && panel_ != Panel::Setup) {

@@ -34,6 +34,11 @@ enum Id : int {
     kExit = 91,        // EXIT PURE button in the line under the scopes
     kSongName = 92,    // click: edit the song name
     kSampleName = 93,  // click: edit the sample name
+    kCredits = 94,     // the machine name line under the scopes: credits on / off
+    kCreditsUp = 95,   // credits over the pattern area: scroll arrows, EXIT, the text (click: close)
+    kCreditsDown = 96,
+    kCreditsExit = 97,
+    kCreditsText = 98,
     kOpTitle = 100,    // EDIT OP. / POS ED. title (EDIT OP.: next screen)
     kOpExit = 101,
     kOpItem = 110,     // + item index of the EDIT OP. screen
@@ -44,8 +49,9 @@ enum Id : int {
     kSmpButton = 200,  // + sampler operation (the normal sampler's order)
 };
 
-// What covers the screen: EDIT OP. and POS ED. sit over the quadrascope, SAMPLER over the pattern area.
-enum View { kViewMain, kViewEditOp, kViewPosEd, kViewSampler };
+// What covers the screen: EDIT OP. and POS ED. sit over the quadrascope, SAMPLER and the credits over the
+// pattern area.
+enum View { kViewMain, kViewEditOp, kViewPosEd, kViewSampler, kViewCredits };
 constexpr int kOpScreens = 3, kPosLines = 6, kSamplerButtons = 30;
 
 // EDIT OP. items. kind: button, value display, up / down arrow of a value, embossed caption
@@ -96,6 +102,13 @@ Box posScroll(int dir);  // 0 up, 1 down
 Box samplerWave();
 Box samplerButton(int i);
 const char* samplerLabel(int i);
+// Credits over the pattern area: a title row (title, scroll up / down, EXIT), then the text in the pixel font.
+Box creditsTitle();
+Box creditsScroll(int dir);  // 0 up, 1 down
+Box creditsExit();
+Box creditsText();           // black, inside the grey frame
+constexpr int kCreditsCols = 39, kCreditsPitch = 9;  // characters per line, line pitch (7 px glyphs)
+int creditsRows();           // text lines that fit
 // Pattern row under y, relative to the centre row (0 = centre); false outside the pattern area.
 bool rowAt(int y, int& rel);
 // Cell column under x inside a track (0 note, 1/2 instrument, 5 effect, 6/7 parameter), -1 outside.

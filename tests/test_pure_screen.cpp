@@ -250,3 +250,36 @@ TEST(pure_sampler_replaces_the_pattern_area) {
     }
     CHECK_EQ(hitTest(130, 5, kViewSampler), kButton + 0);
 }
+
+TEST(pure_credits_open_from_the_machine_line) {
+    using namespace pure;
+    const Box cl = creditLine();
+    CHECK_EQ(hitTest(cl.x + 4, cl.y + 4), kCredits);         // "A500" / "A1200"
+    CHECK_EQ(hitTest(cl.x + cl.w - 2, cl.y + 4), kCredits);  // the LEDs and DF0 too
+    CHECK_EQ(hitTest(exitButton().x + 2, exitButton().y + 4), kExit);
+    CHECK_EQ(hitTest(150, 70), kScope + 0);
+    CHECK(hitTest(cl.x + 4, cl.y + 4, kViewEditOp, 0) != kCredits);  // EDIT OP. covers the line
+    CHECK_EQ(hitTest(cl.x + 4, cl.y + 4, kViewSampler), kCredits);
+    CHECK_EQ(hitTest(cl.x + 4, cl.y + 4, kViewCredits), kCredits);  // click again: close
+}
+
+TEST(pure_credits_cover_the_pattern_area) {
+    using namespace pure;
+    const Box t = creditsTitle(), up = creditsScroll(0), dn = creditsScroll(1), ex = creditsExit(), tx = creditsText();
+    for (const Box& b : {t, up, dn, ex, tx}) CHECK(b.x >= 0 && b.y >= kPatternY && b.x + b.w <= 320 && b.y + b.h <= 256);
+    CHECK(t.x + t.w <= up.x && up.x + up.w <= dn.x && dn.x + dn.w <= ex.x);  // one row, no overlaps
+    CHECK(tx.y >= t.y + t.h);
+    CHECK((int)std::strlen("FATTRACKER CREDITS") * 8 - 1 <= t.w - 6);  // labels keep 3 px of face
+    CHECK((int)std::strlen("EXIT") * 8 - 1 <= ex.w - 6);
+    CHECK(5 <= up.w - 6);  // the arrow glyphs are 5 px wide
+    // the text: kCreditsCols characters 2 px inside the black box, the rows inside it too
+    CHECK(tx.x + 2 + kCreditsCols * 8 - 2 <= tx.x + tx.w - 2);
+    CHECK(creditsRows() >= 10);
+    CHECK(tx.y + 2 + creditsRows() * kCreditsPitch <= tx.y + tx.h);
+    CHECK_EQ(hitTest(up.x + 5, up.y + 5, kViewCredits), kCreditsUp);
+    CHECK_EQ(hitTest(dn.x + 5, dn.y + 5, kViewCredits), kCreditsDown);
+    CHECK_EQ(hitTest(ex.x + 20, ex.y + 5, kViewCredits), kCreditsExit);
+    CHECK_EQ(hitTest(160, 200, kViewCredits), kCreditsText);  // click on the text: close
+    CHECK_EQ(hitTest(40, 200), kTrack + 0);                    // closed: the pattern again
+    CHECK_EQ(hitTest(130, 5, kViewCredits), kButton + 0);      // the top stays usable
+}

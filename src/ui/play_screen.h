@@ -256,8 +256,15 @@ private:
     RectF editOpCell(int row, int col) const;
     int editOpHit(float x, float y) const;
     // HELP
-    int helpScroll_ = 0;
     void helpDraw(Gfx& g, Text& tx, const Theme& t);
+    // CREDITS (credits.cpp table): a HELP page; in Pure mode over the pattern area (click the machine name)
+    bool credits_ = false;
+    int creditsScroll_ = 0;  // first line shown (clamped when drawn)
+    RectF helpTab() const;   // HELP: the CREDITS / HELP page button
+    static constexpr int kHelpTabHit = 880;
+    bool creditsShown() const { return credits_ && (pure_ ? panel_ == Panel::Main : panel_ == Panel::Help); }
+    UiAction creditsKey(unsigned vk);  // scrolling keys and ESC while the credits are shown
+    void pureCreditsDraw(PixelCanvas& c);
     // SETUP (setup.cpp)
     void setupDraw(Gfx& g, Text& tx, const Theme& t);
     UiAction setupMouse(float x, float y, bool right, Engine& e);
