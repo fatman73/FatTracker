@@ -1,4 +1,5 @@
 // Jochen Hippel family: Future Composer 1.3 (SMOD) / 1.4 (FC14), Hippel TFMX / COSO - playback only.
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -81,4 +82,28 @@ TEST(hippel_real_modules_play) {
     }
     std::printf("  hippel / future composer: %d modules\n", n);
     CHECK(n >= 2);
+}
+
+TEST(hippel_crafted_headers_end_quickly) {
+    // tags at the start, the rest 0xFF / 0x00 / noise: no hang (sound sequence counters, header links),
+    // no out-of-range access (sample counts, pattern offsets)
+    const char* tags[] = {"MCMD", "COSO", "TFMX", "FC14", "SMOD"};
+    for (const char* tag : tags)
+        for (int fill = 0; fill < 3; ++fill)
+            for (size_t size : {(size_t)0x900, (size_t)0x4400, (size_t)0x8000}) {
+                std::vector<uint8_t> d(size);
+                uint32_t x = 12345;
+                for (auto& b : d) {
+                    x = x * 1103515245u + 12345u;
+                    b = fill == 0 ? 0xFF : fill == 1 ? 0x00 : (uint8_t)(x >> 24);
+                }
+                std::memcpy(d.data(), tag, 4);
+                if (!std::strcmp(tag, "TFMX")) d[4] = 0;
+                const auto t0 = std::chrono::steady_clock::now();
+                HippelPlayer p;
+                p.setRate(48000);
+                if (HippelPlayer::detect(d.data(), d.size()) && p.load(d.data(), d.size())) peakOf(p, 0.2);
+                const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+                CHECK(s < 10.0);
+            }
 }

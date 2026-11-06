@@ -7,6 +7,7 @@
 
 #include "core/floppy.h"
 #include "core/song.h"
+#include "core/ay_player.h"
 #include "core/hippel_player.h"
 #include "core/sid_player.h"
 #include "core/tfmx_player.h"
@@ -154,6 +155,16 @@ bool Engine::loadSid(const uint8_t* data, size_t size, const char* name, bool pl
         return false;
     }
     return installChip(p, name && *name ? name : p->title(), play);
+}
+
+bool Engine::loadAy(const uint8_t* data, size_t size, const char* name, bool play) {
+    AyPlayer* p = new AyPlayer;
+    p->setRate(mixer_->rate());
+    if (!p->load(data, size)) {
+        delete p;
+        return false;
+    }
+    return installChip(p, *p->title() ? p->title() : name, play);
 }
 
 bool Engine::installChip(ChipPlayer* p, const char* name, bool play) {

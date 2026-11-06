@@ -374,7 +374,8 @@ if ( !LiveFixShaolin5 ) {
             0x16, 0x0c, 0x04, 0x15, 0xf4, 0x00, 0x00, 0x07, 0x0c, 0x00, 0x00, 0x00, 0x00
         };
         udword trackTabPos = offsets.trackTable+(0x33*trackStepLen);
-        if ( memcmp(input.buf+trackTabPos,&trackTabOrig,t) == 0 ) {
+        if ( (unsigned long long)trackTabPos + t <= input.len &&  // FatTracker: bounds
+             memcmp(input.buf+trackTabPos,&trackTabOrig,t) == 0 ) {
             // Replace the bad/dubious track table entries.
             memcpy(input.buf+trackTabPos,&trackTabFixed,t);
 #ifdef DEBUG

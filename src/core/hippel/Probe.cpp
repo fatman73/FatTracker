@@ -64,7 +64,7 @@ bool HippelDecoder::TFMX_findTag(const ubyte* buf, udword len) {
     const ubyte* r = std::search(buf,buf+len,TFMX_TAG.c_str(),TFMX_TAG.c_str()+4);
     if (r != (buf+len) ) {
         udword h = (udword)(r-buf);
-        if (buf[h+4] != 0) {  // require trailing zero
+        if (h+4 >= len || buf[h+4] != 0) {  // require trailing zero (FatTracker: inside the buffer)
             return false;
         }
         // An earlier "COSO" header means this is not uncompressed TFMX,
@@ -111,7 +111,7 @@ bool HippelDecoder::TFMX_findPortamentoCode() {
                 break;
             }
         }
-        pos = o;
+        pos = o+1;  // FatTracker: search on after a non-matching hit (was an endless loop)
     }
     while (r != (input.buf+input.len) && pos<input.len);
     return foundIt;

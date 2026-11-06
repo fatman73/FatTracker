@@ -77,6 +77,9 @@ bool HippelDecoder::MCMD_init(int songNumber) {
     traits.patternSize = fcBuf[h+0xd];
     stats.songs = readBEuword(fcBuf,h+0xe);;
     stats.samples = readBEuword(fcBuf,h+0x10);
+    if (stats.samples > SAMPLES_MAX) {  // FatTracker: samples[] holds SAMPLES_MAX
+        stats.samples = SAMPLES_MAX;
+    }
     
     udword offs = h+0x12;  // this is fixed
     offsets.sndModSeqs = offs;

@@ -146,6 +146,9 @@ bool Analyze::usesE7setDiffWave(HippelDecoder* decoder) {
             ubyte seq = it->first;
             udword seqOffs = decoder->getSndSeq(seq);
             udword seqOffsEnd = decoder->getSndSeqEnd(seq);
+            if (seqOffsEnd <= seqOffs || seqOffsEnd > decoder->input.len) {  // FatTracker: no wrapped ranges
+                continue;
+            }
             for (udword i=0; i<(seqOffsEnd-seqOffs); i++) {
                 if ( decoder->fcBuf[seqOffs+i] == 0xE0 ||
                      decoder->fcBuf[seqOffs+i] == 0xE1 ) {

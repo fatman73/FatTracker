@@ -473,8 +473,10 @@ udword HippelDecoder::getSndSeqEnd(ubyte seq) {
 }
 
 bool HippelDecoder::havePattern(int n, const ubyte (&pattWanted)[PATTERN_LENGTH]) {
-    udword pattStart = offsets.patterns+(n*traits.patternSize);
-    if ( (n<stats.patterns) && (pattStart+n) < input.len ) {
+    // FatTracker: 64-bit bounds (the 32-bit sum could wrap past input.len)
+    const unsigned long long pattStart64 = (unsigned long long)offsets.patterns + (unsigned long long)n*traits.patternSize;
+    const udword pattStart = (udword)pattStart64;
+    if ( (n<stats.patterns) && pattStart64 + traits.patternSize <= input.len ) {
         return ( memcmp(input.buf+pattStart,pattWanted,traits.patternSize) == 0 );
     }
     return false;

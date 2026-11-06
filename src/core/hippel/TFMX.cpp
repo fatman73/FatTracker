@@ -105,7 +105,8 @@ bool HippelDecoder::TFMX_init(int songNumber) {
     // Reject Atari ST TFMX modules. As it seems to use different sound
     // sequence commands, a command like $E2 $E5 with less than $E5 samples
     // would be invalid for TFMX on Amiga.
-    for (ubyte seq = 0; seq<stats.sndSeqs; seq++) {
+    for (int seqI = 0; seqI<stats.sndSeqs && seqI<256; seqI++) {  // FatTracker: a ubyte never reached 256
+        const ubyte seq = (ubyte)seqI;
         udword seqOffs = getSndSeq(seq);
         if ( stats.samples < 0xe5 && fcBuf[seqOffs] == 0xe2 &&
              fcBuf[seqOffs+1] >= 0xe5 ) {

@@ -20,7 +20,10 @@ set_source_files_properties(${FT_HIPPEL_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1
 # C64 SID emulation: cRSID by Hermit (Mihaly Horvath), see src/core/crsid/README.txt; one translation unit
 set(FT_CRSID_SOURCES src/core/crsid/libcRSID.c)
 set_source_files_properties(${FT_CRSID_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1;/TP")  # C++: nested functions became lambdas
-add_library(ftcore STATIC ${FT_CORE_SOURCES} ${FT_TFMX_SOURCES} ${FT_HIPPEL_SOURCES} ${FT_CRSID_SOURCES})
+# AY-3-8910 / YM2149 emulation: ayumi by Peter Sovietov (MIT), plain C
+set(FT_AYUMI_SOURCES src/core/ayumi/ayumi.c)
+set_source_files_properties(${FT_AYUMI_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
+add_library(ftcore STATIC ${FT_CORE_SOURCES} ${FT_TFMX_SOURCES} ${FT_HIPPEL_SOURCES} ${FT_CRSID_SOURCES} ${FT_AYUMI_SOURCES})
 target_include_directories(ftcore PUBLIC src)
 
 # Windows-specific modules shared by the app and the test runner

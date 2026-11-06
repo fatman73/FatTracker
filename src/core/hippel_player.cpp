@@ -119,7 +119,7 @@ void HippelPlayer::render(float* out, uint32_t frames, float gain) {
     Impl& m = *impl_;
     if (!m.loaded) return;
     const int nv = voices();
-    if (nv > 4) gain *= 0.6f;  // 7 voice formats mix extra voices into Paula channel 3
+    // 7 voice formats: voices 3..6 are mixed into Paula channel 3 (each at a quarter)
     const float decay = (float)std::pow(0.5, (double)frames / (m.rate * 0.08));
     float peak[kMaxVoices] = {};
     for (uint32_t f = 0; f < frames; ++f) {
@@ -131,7 +131,7 @@ void HippelPlayer::render(float* out, uint32_t frames, float gain) {
         m.tickLeft -= 1;
         float l = 0, r = 0;
         for (int v = 0; v < nv; ++v) {
-            const float s = m.voice[v].next(m.rate);
+            const float s = m.voice[v].next(m.rate) * (nv > 4 && v >= 3 ? 0.25f : 1.f);
             const int pc = v < 4 ? v : 3;  // Paula wiring: 0 and 3 left, 1 and 2 right
             const bool left = pc == 0 || pc == 3;
             l += s * (left ? 1.f : 0.3f);

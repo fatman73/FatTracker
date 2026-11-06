@@ -40,7 +40,8 @@ bool HippelDecoder::COSO_isModPack(std::vector<udword>& vHeaders, bool& reject) 
     // concatenates multiple COSO modules, linking from COSO header
     // sample data offset at +$1c to next COSO header.
     nextHeader = offsets.sampleData;
-    while (nextHeader != 0 && COSO_HEX == readBEudword(fcBuf,nextHeader)) {
+    int walk = 0;  // FatTracker: links must move forward, and not forever
+    while (nextHeader != 0 && nextHeader < input.len && ++walk <= 64 && COSO_HEX == readBEudword(fcBuf,nextHeader)) {
         foundLink = true;
         if (TFMX_HEX != readBEudword(fcBuf,nextHeader+0x20)) {
             reject = true;  // COSO but no TFMX
@@ -50,7 +51,11 @@ bool HippelDecoder::COSO_isModPack(std::vector<udword>& vHeaders, bool& reject) 
         stats.songs += readBEuword(fcBuf,nextHeader+0x20+0x10);
 
         offsets.sampleHeaders = nextHeader+readBEudword(fcBuf,nextHeader+0x18);
-        nextHeader += readBEudword(fcBuf,nextHeader+0x1c);
+        const udword link = readBEudword(fcBuf,nextHeader+0x1c);
+        if (link == 0 || link >= input.len) {
+            break;
+        }
+        nextHeader += link;
         offsets.sampleData = nextHeader;
     }
     if (foundLink) {
@@ -66,10 +71,13 @@ bool HippelDecoder::COSO_isModPack(std::vector<udword>& vHeaders, bool& reject) 
     //   4 songs = 4*6+6 = $1e (WRONG, it's one song only!)
     // 3rd header: $33b8 "COSO" + offset in $18 = sample headers (CORRECT)
     nextHeader = offsets.sampleHeaders;
+    int walk2 = 0;  // FatTracker: see above
+    udword prevHeader = 0;
     do {
-        if (nextHeader == 0) {
+        if (nextHeader == 0 || nextHeader >= input.len || ++walk2 > 64 || (walk2 > 1 && nextHeader <= prevHeader)) {
             break;
         }
+        prevHeader = nextHeader;
         if (COSO_HEX == readBEudword(fcBuf,nextHeader)) {
         }
         else if (COSO_HEX == readBEudword(fcBuf,nextHeader-0x18)) {
