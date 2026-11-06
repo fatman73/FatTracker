@@ -131,7 +131,14 @@ bool osRenameFile(const std::wstring& from, const std::wstring& to, bool replace
     return std::rename(utf8(from).c_str(), utf8(to).c_str()) == 0;
 }
 
+#ifdef __APPLE__
+bool macMoveToTrash(const char* utf8Path);  // src/mac/trash_mac.mm
+bool osDeleteFile(const std::wstring& path) { return macMoveToTrash(utf8(path).c_str()); }
+const char* osDeleteDoneText() { return "MOVED TO TRASH"; }
+#else
 bool osDeleteFile(const std::wstring& path) { return ::unlink(utf8(path).c_str()) == 0; }
+const char* osDeleteDoneText() { return "FILE DELETED"; }
+#endif
 
 const char* osReadFile(const std::wstring& path, std::vector<uint8_t>& out) {
     const std::string p = utf8(path);

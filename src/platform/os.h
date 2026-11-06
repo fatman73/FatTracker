@@ -26,7 +26,8 @@ std::wstring osDriveDir(const std::wstring& driveEntryName);
 bool osListDir(const std::wstring& dir, std::vector<OsDirItem>& out);
 bool osFileExists(const std::wstring& path);
 bool osRenameFile(const std::wstring& from, const std::wstring& to, bool replace);
-bool osDeleteFile(const std::wstring& path);
+bool osDeleteFile(const std::wstring& path);  // Windows: deleted for good; macOS: moved to the Trash
+const char* osDeleteDoneText();               // the status after osDeleteFile ("FILE DELETED" / "MOVED TO TRASH")
 void osLocalTime(std::tm& out);
 // Whole file (at most 256 MB): nullptr = ok, else the status text ("ERROR: CANNOT OPEN FILE" ...).
 const char* osReadFile(const std::wstring& path, std::vector<uint8_t>& out);

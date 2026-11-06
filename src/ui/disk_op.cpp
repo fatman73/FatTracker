@@ -291,7 +291,7 @@ UiAction PlayScreen::diskMouse(float x, float y, bool, Engine& e) {
                 std::snprintf(text, sizeof text, "DELETE %s ?", narrow(entries_[diskSel_].name, 40).c_str());
                 ask(text, {"DELETE", "CANCEL"}, [this, path](int a) {
                     if (a != 0) return;
-                    setStatus(osDeleteFile(path) ? "FILE DELETED" : "ERROR: CANNOT DELETE FILE");
+                    setStatus(osDeleteFile(path) ? osDeleteDoneText() : "ERROR: CANNOT DELETE FILE");
                     diskRefresh();
                 });
                 return UiAction::Redraw;

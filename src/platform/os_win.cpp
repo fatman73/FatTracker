@@ -58,6 +58,8 @@ bool osRenameFile(const std::wstring& from, const std::wstring& to, bool replace
 
 bool osDeleteFile(const std::wstring& path) { return DeleteFileW(path.c_str()) != 0; }
 
+const char* osDeleteDoneText() { return "FILE DELETED"; }
+
 const char* osReadFile(const std::wstring& pathW, std::vector<uint8_t>& out) {
     const wchar_t* path = pathW.c_str();
     HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
