@@ -1,5 +1,7 @@
 // FatTracker entry point: window, message loop, file loading, input routing.
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <memory>
 #include <vector>
 
@@ -101,7 +103,7 @@ std::vector<uint8_t> g_pendingMdat, g_pendingSmpl;
 char g_pendingName[21] = {};
 bool loadPending() { return g_pending || g_pendingTfmx; }
 // The playback-only player a file goes to; chosen once in loadTfmxPair (with trial loads), used by applyTfmx.
-enum class Chip { Tfmx, Sid, Pt3, Gme, Synth, Ay, Hippel };
+enum class Chip { Tfmx, Sid, Pt3, Gme, Synth, SynthFiles, Ay, Hippel };  // SynthFiles: with companion files
 Chip g_pendingChip = Chip::Tfmx;
 bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
                const std::wstring& mdatPath, Chip chip);
@@ -135,6 +137,13 @@ void loadFloppySounds() {
         }
     g_engine->setFloppySounds(use[0], use[1], use[2]);  // copies (trimmed) what it uses
     for (Sample& s : snd) s = Sample{};
+}
+
+// Companion files of a song (IFF SMUS instruments): plain names in the song's own folder (or its Instruments
+// subfolder), nothing else.
+AmigaFileResolver songFolderFiles(const std::wstring& songPath) {
+    const size_t slash = songPath.find_last_of(L"\\/");
+    return folderFileResolver(slash == std::wstring::npos ? L"." : songPath.substr(0, slash + 1));
 }
 
 // TFMX songs are two files: mdat.<name> (song) and smpl.<name> (samples), or .mdat/.smpl, .tfx/.sam.
@@ -193,6 +202,18 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
         }
         if (!hippel && AmigaSynthPlayer::detect(d, n))  // JamCracker, Delta Music, SidMon, SoundMon, Mugician, Whittaker
             pick(Chip::Synth, AmigaSynthPlayer::open(d, n) != nullptr);
+        if (!hippel && AmigaSynthPlayer::needsFiles(d, n)) {  // IFF SMUS: its instruments are files next to it
+            std::string err;
+            if (!AmigaSynthPlayer::openWithFiles(d, n, songFolderFiles(path), &err)) {
+                static char msg[100];
+                std::snprintf(msg, sizeof msg, "IFF SMUS: %s", err.c_str());
+                for (char* c = msg; *c; ++c) *c = (unsigned char)*c < 127 ? (char)toupper((unsigned char)*c) : '_';
+                g_screen.setStatus(msg);
+                g_engine->floppyDir();  // the drive still looked at it
+                return true;
+            }
+            pick(Chip::SynthFiles, true);
+        }
         if (!hippel && AyPlayer::detect(d, n)) {  // YM / VTX / PSG (LHA packed YM too)
             AyPlayer trial;
             pick(Chip::Ay, trial.load(d, n));
@@ -244,6 +265,7 @@ bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smp
         case Chip::Pt3: ok = g_engine->loadPt3(d, n, name, false); break;
         case Chip::Gme: ok = g_engine->loadGme(d, n, name, false); break;
         case Chip::Synth: ok = g_engine->loadAmigaSynth(d, n, name, false); break;
+        case Chip::SynthFiles: ok = g_engine->loadAmigaSynth(d, n, songFolderFiles(mdatPath), name, false); break;
         case Chip::Ay: ok = g_engine->loadAy(d, n, name, false); break;
         case Chip::Hippel: ok = g_engine->loadHippel(d, n, name, false); break;
         case Chip::Tfmx: ok = g_engine->loadTfmx(d, n, smpl.data(), smpl.size(), name, false); break;
@@ -470,7 +492,7 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.dw;*.dwold;dw.*;dwold.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.dw;*.dwold;dw.*;dwold.*;*.smus;smus.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;

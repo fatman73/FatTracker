@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "audio/audio_out.h"
+#include "core/amiga_synth.h"
 #include "core/song.h"
 
 class Mixer;
@@ -77,6 +78,9 @@ public:
     bool loadPt3(const uint8_t* data, size_t size, const char* name, bool play);
     // Amiga synth formats ported from NostalgicPlayer (JamCracker, ...): playback only
     bool loadAmigaSynth(const uint8_t* data, size_t size, const char* name, bool play);
+    // the same with companion files (IFF SMUS instruments) read through `files`; `error` (if given) says why not
+    bool loadAmigaSynth(const uint8_t* data, size_t size, const AmigaFileResolver& files, const char* name, bool play,
+                        std::string* error = nullptr);
     // consoles and 8-bit computers through Game_Music_Emu (SPC, VGM, SAP, AY, NSF, GBS, ...): playback only
     bool loadGme(const uint8_t* data, size_t size, const char* name, bool play);
     bool tfmx() const { return tfmxOn_; }  // a playback-only chip song (TFMX, FC, Hippel) is loaded

@@ -6,6 +6,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -45,11 +46,29 @@ inline bool clipRange(size_t size, uint32_t& start, uint32_t& length) {
     return true;
 }
 
+// Companion files of a song (IFF SMUS instruments and samples): fills `out` with the file called `name` (a plain
+// file name, never a path) and returns true, or returns false when there is no such file.
+using AmigaFileResolver = std::function<bool(const std::string& name, std::vector<uint8_t>& out)>;
+
+// A name a song may ask for: not empty, at most 255 bytes, no control characters, no \ / : and no "..".
+bool isPlainFileName(const std::string& name);
+// Resolver over the files of one folder (a score's own folder): a plain name matches a regular file there,
+// case-insensitively (an exact match first), else one in its "Instruments" subfolder (where NostalgicPlayer
+// looks). Files over 16 MB are not read.
+AmigaFileResolver folderFileResolver(const std::wstring& dir);
+
 class AmigaSynthPlayer : public ChipPlayer {
 public:
-    // The format behind these bytes (one of the ported replayers), or null.
+    // The format behind these bytes (one of the ported replayers), or null. Formats with companion files
+    // (needsFiles) are not opened here.
     static std::unique_ptr<AmigaSynthPlayer> open(const uint8_t* data, size_t size);
     static bool detect(const uint8_t* data, size_t size);
+    // Formats that need companion files (IFF SMUS); openWithFiles loads them through `files` (and opens the
+    // others like open). On failure `error` (if given) says why, e.g. which instrument file is missing.
+    static bool needsFiles(const uint8_t* data, size_t size);
+    static std::unique_ptr<AmigaSynthPlayer> openWithFiles(const uint8_t* data, size_t size,
+                                                           const AmigaFileResolver& files,
+                                                           std::string* error = nullptr);
 
     void restart() override;
     void setRate(uint32_t hz) override { rate_ = hz ? hz : 48000; }
@@ -71,8 +90,11 @@ protected:
     // into channel 3, each at a quarter (as HippelPlayer does).
     AmigaChannel ch_[kMaxVoices];
     int voices_ = 4;
+    // false: voices past the fourth are mixed into channel 3 at a quarter each (Digital Mugician 2);
+    // true: every voice is a channel of its own, panned like Paula channel v % 4 (IFF SMUS tracks)
+    bool ownChannels_ = false;
     std::string format_;
-    double tickHz_ = 50.0;  // replay calls per second (VBlank)
+    double tickHz_ = 50.0;  // replay calls per second (VBlank); playTick may change it (CIA tempo)
     bool endReached_ = false;  // set by playTick when the song wrapped around
 
     int subsongs_ = 1, subsong_ = 0;  // formats with sub-songs set subsongs_; initSound plays subsong_
