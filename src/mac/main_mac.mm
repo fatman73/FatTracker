@@ -143,12 +143,16 @@ NSCursor* currentCursor() {
     return YES;  // a click on the inactive window also acts (like Windows)
 }
 
+// A new size: the frame is redrawn at once at that size and shown, so a live resize scales the screen smoothly
+// step by step (like WM_SIZE on Windows) instead of showing the new, still empty bitmap until the next tick.
 - (void)syncSize {
     const CGFloat s = self.window ? self.window.backingScaleFactor : 2.0;
     const NSSize b = self.bounds.size;
     const uint32_t w = (uint32_t)std::lround(b.width * s), h = (uint32_t)std::lround(b.height * s);
-    if (w && h) appResize(w, h);
     self.layer.contentsScale = s;
+    if (!w || !h) return;
+    appResize(w, h);
+    if (self.window && appDrawFrame()) [self updateLayer];
 }
 
 - (void)setFrameSize:(NSSize)size {
@@ -642,6 +646,27 @@ NSCursor* currentCursor() {
             [self key:0x35 chars:@"\x1b" flags:0];
         },
         ^{ [self shot:@"10_cancelled.png"]; },
+        ^{  // live resize: right after each new size the frame shown must have that size and not be empty
+            const NSRect start = self.window.frame;
+            for (NSSize sz : {NSMakeSize(900, 520), NSMakeSize(1240, 700), NSMakeSize(700, 400)}) {
+                NSRect f = start;
+                f.size = [self.window frameRectForContentRect:NSMakeRect(0, 0, sz.width, sz.height)].size;
+                [self.window setFrame:f display:YES];
+                CGImageRef img = (__bridge CGImageRef)self.view.layer.contents;
+                long w = img ? (long)CGImageGetWidth(img) : 0, h = img ? (long)CGImageGetHeight(img) : 0;
+                uint32_t centre = 0;
+                if (img) {
+                    CFDataRef d = CGDataProviderCopyData(CGImageGetDataProvider(img));
+                    const size_t row = CGImageGetBytesPerRow(img);
+                    std::memcpy(&centre, CFDataGetBytePtr(d) + (size_t)(h / 2) * row + (size_t)(w / 2) * 4, 4);
+                    CFRelease(d);
+                }
+                const NSSize px = [self.view convertSizeToBacking:self.view.bounds.size];
+                printf("resize %.0fx%.0f px: shown frame %ldx%ld, centre pixel %08x%s\n", px.width, px.height, w, h,
+                       centre, (w == (long)px.width && h == (long)px.height && (centre & 0xFFFFFF)) ? "" : "  BAD");
+            }
+            [self.window setFrame:start display:YES];
+        },
         ^{ [NSApp terminate:nil]; },
     ];
     for (NSUInteger i = 0; i < steps.count; ++i)
