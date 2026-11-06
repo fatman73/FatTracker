@@ -58,6 +58,43 @@ bool osRenameFile(const std::wstring& from, const std::wstring& to, bool replace
 
 bool osDeleteFile(const std::wstring& path) { return DeleteFileW(path.c_str()) != 0; }
 
+const char* osReadFile(const std::wstring& pathW, std::vector<uint8_t>& out) {
+    const wchar_t* path = pathW.c_str();
+    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return "ERROR: CANNOT OPEN FILE";
+    LARGE_INTEGER sz;
+    const char* err = nullptr;
+    if (!GetFileSizeEx(h, &sz))
+        err = "ERROR: CANNOT READ FILE";
+    else if (sz.QuadPart > 256ll * 1024 * 1024)
+        err = "ERROR: FILE TOO BIG";
+    if (!err) {
+        out.resize((size_t)sz.QuadPart);
+        DWORD got = 0;
+        if (!out.empty() && (!ReadFile(h, out.data(), (DWORD)out.size(), &got, nullptr) || got != out.size()))
+            err = "ERROR: CANNOT READ FILE";
+    }
+    CloseHandle(h);
+    return err;
+}
+
+bool osWriteFileAtomic(const std::wstring& pathW, const std::vector<uint8_t>& data) {
+    const wchar_t* path = pathW.c_str();
+    std::wstring tmp = std::wstring(path) + L".fattmp";
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    DWORD written = 0;
+    const bool ok = data.empty() || (WriteFile(h, data.data(), (DWORD)data.size(), &written, nullptr) &&
+                                     written == data.size());
+    FlushFileBuffers(h);
+    CloseHandle(h);
+    if (!ok || !MoveFileExW(tmp.c_str(), path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(tmp.c_str());
+        return false;
+    }
+    return true;
+}
+
 void osLocalTime(std::tm& out) {
     SYSTEMTIME st;
     GetLocalTime(&st);

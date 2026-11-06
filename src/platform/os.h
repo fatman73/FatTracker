@@ -28,6 +28,10 @@ bool osFileExists(const std::wstring& path);
 bool osRenameFile(const std::wstring& from, const std::wstring& to, bool replace);
 bool osDeleteFile(const std::wstring& path);
 void osLocalTime(std::tm& out);
+// Whole file (at most 256 MB): nullptr = ok, else the status text ("ERROR: CANNOT OPEN FILE" ...).
+const char* osReadFile(const std::wstring& path, std::vector<uint8_t>& out);
+// Writes `path` + ".fattmp", flushes it and renames it over `path` (no half-written file on failure).
+bool osWriteFileAtomic(const std::wstring& path, const std::vector<uint8_t>& data);
 
 // Settings file (Windows INI semantics: [section] key=value).
 int osIniInt(const wchar_t* ini, const wchar_t* section, const wchar_t* key, int def);

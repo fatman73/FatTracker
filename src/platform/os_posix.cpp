@@ -133,6 +133,34 @@ bool osRenameFile(const std::wstring& from, const std::wstring& to, bool replace
 
 bool osDeleteFile(const std::wstring& path) { return ::unlink(utf8(path).c_str()) == 0; }
 
+const char* osReadFile(const std::wstring& path, std::vector<uint8_t>& out) {
+    const std::string p = utf8(path);
+    struct stat st;
+    if (::stat(p.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return "ERROR: CANNOT OPEN FILE";
+    if (st.st_size > 256ll * 1024 * 1024) return "ERROR: FILE TOO BIG";
+    std::FILE* f = std::fopen(p.c_str(), "rb");
+    if (!f) return "ERROR: CANNOT OPEN FILE";
+    out.resize((size_t)st.st_size);
+    const bool ok = out.empty() || std::fread(out.data(), 1, out.size(), f) == out.size();
+    std::fclose(f);
+    return ok ? nullptr : "ERROR: CANNOT READ FILE";
+}
+
+bool osWriteFileAtomic(const std::wstring& path, const std::vector<uint8_t>& data) {
+    const std::string p = utf8(path), tmp = p + ".fattmp";
+    std::FILE* f = std::fopen(tmp.c_str(), "wb");
+    if (!f) return false;
+    bool ok = data.empty() || std::fwrite(data.data(), 1, data.size(), f) == data.size();
+    ok = std::fflush(f) == 0 && ok;
+    ok = ::fsync(fileno(f)) == 0 && ok;
+    ok = std::fclose(f) == 0 && ok;
+    if (!ok || std::rename(tmp.c_str(), p.c_str()) != 0) {
+        ::unlink(tmp.c_str());
+        return false;
+    }
+    return true;
+}
+
 void osLocalTime(std::tm& out) {
     const std::time_t now = std::time(nullptr);
     localtime_r(&now, &out);

@@ -66,12 +66,13 @@ set(FT_UI_SOURCES ${FT_UI_PURE_SOURCES} src/ui/theme.cpp src/ui/widgets.cpp src/
     src/ui/play_screen.cpp src/ui/play_edit.cpp src/ui/disk_op.cpp src/ui/edit_op.cpp src/ui/setup.cpp
     src/ui/sampler.cpp src/ui/instrument_ed.cpp src/ui/pure_screen.cpp)
 set(FT_MAC_APP_SOURCES src/mac/main_mac.mm src/mac/app_glue.cpp src/mac/keymap_mac.cpp src/mac/gfx_mac.cpp src/mac/text_mac.mm src/mac/audio_out_mac.mm
-    src/platform/os_posix.cpp src/app/chip_route.cpp src/app/shot.cpp src/audio/engine.cpp)
+    src/platform/os_posix.cpp src/app/chip_route.cpp src/app/shot.cpp src/app/app_logic.cpp src/app/document.cpp
+    src/mac/capture_mac.mm src/audio/engine.cpp)
 configure_file(src/mac/Info.plist.in ${CMAKE_BINARY_DIR}/Info.plist @ONLY)
 add_executable(FatTracker MACOSX_BUNDLE ${FT_UI_SOURCES} ${FT_MAC_APP_SOURCES})
 set_target_properties(FatTracker PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${CMAKE_BINARY_DIR}/Info.plist)
 target_include_directories(FatTracker PRIVATE src)
 target_compile_options(FatTracker PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
-target_link_libraries(FatTracker PRIVATE ftcore objc "-framework AppKit" "-framework QuartzCore"
+target_link_libraries(FatTracker PRIVATE ftcore objc "-framework AppKit" "-framework QuartzCore" "-framework AVFoundation"
     "-framework CoreGraphics" "-framework CoreText" "-framework ImageIO" "-framework Accelerate"
     "-framework AudioToolbox" "-framework CoreAudio")

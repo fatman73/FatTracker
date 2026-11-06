@@ -7,10 +7,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <unistd.h>
+#include <string>
+#include <vector>
 
 #include "mac/app_glue.h"
 #include "mac/keymap_mac.h"
 #include "platform/vk.h"
+#include "ui/cursor_art.h"
 
 namespace {
 NSString* appSupportDir() {
@@ -39,6 +44,52 @@ NSString* replayDir() {
     if ([NSFileManager.defaultManager fileExistsAtPath:user isDirectory:&dir] && dir) return user;
     NSString* res = NSBundle.mainBundle.resourcePath ?: @".";
     return [res stringByAppendingPathComponent:@"Replay"];
+}
+
+// Pure mode drive sounds (floppy_motor/step/insert.wav, supplied by the user): Application Support first,
+// then the app's resources
+std::vector<std::string> soundDirs() {
+    NSString* res = NSBundle.mainBundle.resourcePath ?: @".";
+    return {std::string([appSupportDir() stringByAppendingPathComponent:@"sounds"].fileSystemRepresentation) + "/",
+            std::string([res stringByAppendingPathComponent:@"sounds"].fileSystemRepresentation) + "/"};
+}
+
+// The Amiga pointer (src/ui/cursor_art.cpp) at 32 points, with 1x and 2x pixels (main.cpp builds it per DPI)
+NSCursor* amigaCursor(bool busy) {
+    NSImage* img = [[NSImage alloc] initWithSize:NSMakeSize(32, 32)];
+    for (int scale = 1; scale <= 2; ++scale) {
+        const int px = 32 * scale;
+        std::vector<uint32_t> argb((size_t)px * px);
+        renderAmigaCursor(argb.data(), px, busy);  // premultiplied 0xAARRGGBB
+        NSBitmapImageRep* rep = [[NSBitmapImageRep alloc]
+            initWithBitmapDataPlanes:nullptr
+                          pixelsWide:px
+                          pixelsHigh:px
+                       bitsPerSample:8
+                     samplesPerPixel:4
+                            hasAlpha:YES
+                            isPlanar:NO
+                      colorSpaceName:NSDeviceRGBColorSpace
+                        bitmapFormat:NSBitmapFormatThirtyTwoBitLittleEndian | NSBitmapFormatAlphaFirst
+                         bytesPerRow:px * 4
+                        bitsPerPixel:32];
+        std::memcpy(rep.bitmapData, argb.data(), argb.size() * 4);  // little-endian ARGB words = BGRA bytes
+        rep.size = NSMakeSize(32, 32);
+        [img addRepresentation:rep];
+    }
+    int hx = 0, hy = 0;
+    amigaCursorHotspot(32, hx, hy);
+    return [[NSCursor alloc] initWithImage:img hotSpot:NSMakePoint(hx, hy)];
+}
+
+NSCursor* g_arrowCursor = nil;
+NSCursor* g_busyCursor = nil;
+NSCursor* currentCursor() {
+    if (!g_arrowCursor) {
+        g_arrowCursor = amigaCursor(false);
+        g_busyCursor = amigaCursor(true);
+    }
+    return appBusy() ? g_busyCursor : g_arrowCursor;
 }
 }  // namespace
 
@@ -71,7 +122,7 @@ NSString* replayDir() {
         _audioTimer = [NSTimer timerWithTimeInterval:2.0
                                              repeats:YES
                                                block:^(NSTimer*) { appPollAudio(); }];
-        _clockTimer = [NSTimer timerWithTimeInterval:1.0 repeats:YES block:^(NSTimer*) { appSetDirty(); }];
+        _clockTimer = [NSTimer timerWithTimeInterval:1.0 repeats:YES block:^(NSTimer*) { appClockTick(); }];
         for (NSTimer* t in @[ _frameTimer, _audioTimer, _clockTimer ])
             [[NSRunLoop mainRunLoop] addTimer:t forMode:NSRunLoopCommonModes];
         [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
@@ -111,28 +162,16 @@ NSString* replayDir() {
 }
 
 - (void)tick {
-    char dir[1024];
-    if (appTakeOpenRequest(dir, sizeof dir)) [self showOpenPanel:dir];
     if (!appFrameDue()) return;
-    char name[512];
-    bool edited = false;
-    if (appTitle(name, sizeof name, edited)) {
-        self.window.title = [NSString stringWithFormat:@"FatTracker \u2014 %@", [NSString stringWithUTF8String:name] ?: @"?"];
-        self.window.documentEdited = edited;
-    }
     if (appDrawFrame()) [self setNeedsDisplay:YES];
 }
 
-- (void)showOpenPanel:(const char*)dir {
-    NSOpenPanel* panel = [NSOpenPanel openPanel];
-    panel.canChooseDirectories = NO;
-    panel.allowsMultipleSelection = NO;
-    panel.message = @"Open a module";
-    if (*dir) panel.directoryURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:dir] ?: @"/" isDirectory:YES];
-    [panel beginSheetModalForWindow:self.window
-                  completionHandler:^(NSModalResponse r) {
-                      if (r == NSModalResponseOK && panel.URL) appOpenChosen(panel.URL.fileSystemRepresentation);
-                  }];
+// the Amiga pointer over the view (busy while the simulated floppy reads)
+- (void)resetCursorRects {
+    [self addCursorRect:self.bounds cursor:currentCursor()];
+}
+- (void)cursorUpdate:(NSEvent*)e {
+    [currentCursor() set];
 }
 
 // ---- mouse: points in the flipped view -> device pixels (the frame is drawn at the backing scale)
@@ -174,7 +213,7 @@ NSString* replayDir() {
     if (_tracking) [self removeTrackingArea:_tracking];
     _tracking = [[NSTrackingArea alloc]
         initWithRect:NSZeroRect
-             options:NSTrackingMouseMoved | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+             options:NSTrackingMouseMoved | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect | NSTrackingCursorUpdate
                owner:self
             userInfo:nil];
     [self addTrackingArea:_tracking];
@@ -221,7 +260,7 @@ NSString* replayDir() {
     } else if (ctrl && !alt && vk >= '1' && vk <= '9') {
         key = VK_NUMPAD1 + (vk - '1');
     }
-    if (key) appKey(key, shift, ctrl, alt, false, e.isARepeat);
+    if (key && appKey(key, shift, ctrl, alt, false, e.isARepeat)) return;  // it only ended a floppy load
     if (f & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) return;  // Ctrl+key types nothing
     if (key == VK_INSERT) return;
     NSString* chars = e.characters;
@@ -299,11 +338,29 @@ NSString* replayDir() {
 
 // ---------------------------------------------------------------- application
 
+// The save panel's file type (like the Windows dialog's filter list): XM / MOD / WAV, keeps the name's extension
+// in step with the choice.
+@interface FTSaveType : NSObject
+@property(weak) NSSavePanel* panel;
+@property(strong) NSPopUpButton* popup;
+@end
+
+@implementation FTSaveType
+- (void)changed:(id)sender {
+    static NSString* const ext[3] = {@"xm", @"mod", @"wav"};
+    NSString* name = self.panel.nameFieldStringValue;
+    self.panel.nameFieldStringValue = [name.stringByDeletingPathExtension stringByAppendingPathExtension:ext[self.popup.indexOfSelectedItem]];
+}
+@end
+
 @interface FTAppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @property(copy) NSString* inputTestDir;  // --input-test <dir>: scripted events, PNGs, quit (no audio)
 @property(strong) NSWindow* window;
 @property(strong) FTView* view;
 @property(strong) NSMutableArray<NSURL*>* pendingOpen;
+@property(strong) NSTimer* floppyTimer;
+@property(strong) FTSaveType* saveType;
+@property BOOL closeConfirmed;  // the unsaved-changes question was answered: close / quit for real
 @end
 
 @implementation FTAppDelegate
@@ -333,8 +390,78 @@ NSString* replayDir() {
     NSApp.windowsMenu = winMenu;
 }
 
+// AppKit services for the shared app logic (AppShell, through app_glue's MacHost)
+- (void)installHost {
+    __weak FTAppDelegate* weakSelf = self;
+    MacHost h;
+    h.setTitle = [weakSelf](const char* name, bool dirty) {
+        FTAppDelegate* me = weakSelf;
+        me.window.title = [NSString stringWithFormat:@"FatTracker \u2014 %@", [NSString stringWithUTF8String:name] ?: @"?"];
+        me.window.documentEdited = dirty;
+    };
+    h.setBusy = [weakSelf](bool) {
+        FTAppDelegate* me = weakSelf;
+        [me.window invalidateCursorRectsForView:me.view];
+        [currentCursor() set];
+    };
+    h.startFloppyTimer = [weakSelf](double seconds) {
+        FTAppDelegate* me = weakSelf;
+        [me.floppyTimer invalidate];
+        me.floppyTimer = [NSTimer scheduledTimerWithTimeInterval:seconds
+                                                         repeats:NO
+                                                           block:^(NSTimer*) {
+                                                               weakSelf.floppyTimer = nil;
+                                                               appFloppyTimer();
+                                                           }];
+    };
+    h.stopFloppyTimer = [weakSelf]() {
+        [weakSelf.floppyTimer invalidate];
+        weakSelf.floppyTimer = nil;
+    };
+    h.openDialog = [weakSelf](const char* startDir, std::function<void(const char*)> done) {
+        NSOpenPanel* panel = [NSOpenPanel openPanel];
+        panel.canChooseDirectories = NO;
+        panel.allowsMultipleSelection = NO;
+        panel.message = @"Open a module";
+        if (*startDir) panel.directoryURL = [NSURL fileURLWithPath:@(startDir) isDirectory:YES];
+        [panel beginSheetModalForWindow:weakSelf.window
+                      completionHandler:^(NSModalResponse r) {
+                          if (r == NSModalResponseOK && panel.URL) done(panel.URL.fileSystemRepresentation);
+                      }];
+    };
+    h.saveDialog = [weakSelf](const char* dir, const char* name, int filter, std::function<void(const char*, int)> done) {
+        FTAppDelegate* me = weakSelf;
+        NSSavePanel* panel = [NSSavePanel savePanel];
+        panel.allowsOtherFileTypes = YES;
+        panel.canCreateDirectories = YES;
+        if (*dir) panel.directoryURL = [NSURL fileURLWithPath:@(dir) isDirectory:YES];
+        panel.nameFieldStringValue = @(name);
+        NSPopUpButton* popup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 260, 26) pullsDown:NO];
+        [popup addItemsWithTitles:@[ @"FastTracker 2 module (.xm)", @"ProTracker module (.mod)", @"WAV audio (.wav)" ]];
+        [popup selectItemAtIndex:std::clamp(filter, 1, 3) - 1];
+        me.saveType = [FTSaveType new];
+        me.saveType.panel = panel;
+        me.saveType.popup = popup;
+        popup.target = me.saveType;
+        popup.action = @selector(changed:);
+        NSTextField* label = [NSTextField labelWithString:@"Format:"];
+        NSStackView* row = [NSStackView stackViewWithViews:@[ label, popup ]];
+        row.edgeInsets = NSEdgeInsetsMake(8, 8, 8, 8);
+        panel.accessoryView = row;
+        [me.saveType changed:nil];
+        [panel beginSheetModalForWindow:me.window
+                      completionHandler:^(NSModalResponse r) {
+                          const int chosen = (int)popup.indexOfSelectedItem + 1;
+                          weakSelf.saveType = nil;
+                          if (r == NSModalResponseOK && panel.URL) done(panel.URL.fileSystemRepresentation, chosen);
+                      }];
+    };
+    appSetHost(h);
+}
+
 - (void)applicationDidFinishLaunching:(NSNotification*)n {
     [self buildMenu];
+    [self installHost];
     NSScreen* scr = NSScreen.mainScreen;
     const NSRect vis = scr ? scr.visibleFrame : NSMakeRect(0, 0, 1600, 900);
     const CGFloat px = scr ? scr.frame.size.width * scr.backingScaleFactor : 1600;
@@ -362,10 +489,13 @@ NSString* replayDir() {
     [self.view syncSize];
 
     NSArray<NSString*>* args = NSProcessInfo.processInfo.arguments;
-    if (args.count >= 3 && [args[1] isEqualToString:@"--input-test"]) self.inputTestDir = args[2];
+    if (args.count >= 3 && [args[1] isEqualToString:@"--input-test"]) {
+        self.inputTestDir = args[2];
+        chdir(self.inputTestDir.fileSystemRepresentation);  // DISK OP. browses (and saves into) the test folder
+    }
     // the input test runs without the user's settings file and silently
     NSString* ini = self.inputTestDir ? [self.inputTestDir stringByAppendingPathComponent:@"input-test.ini"] : iniPath();
-    appWindowReady(ini.fileSystemRepresentation, replayDir().fileSystemRepresentation, !self.inputTestDir);
+    appWindowReady(ini.fileSystemRepresentation, replayDir().fileSystemRepresentation, soundDirs(), !self.inputTestDir);
     // FatTracker <module> from the command line, or files opened from the Finder before launch finished
     if (args.count >= 2 && ![args[1] hasPrefix:@"-"]) appOpenFile(args[1].fileSystemRepresentation, true);
     for (NSURL* u in self.pendingOpen) appOpenFile(u.fileSystemRepresentation, true);
@@ -481,6 +611,25 @@ NSString* replayDir() {
         ^{ [self shot:@"6_mac_keys.png"]; },
         ^{ [self clickLogical:NSMakePoint(1092, 208) right:NO flags:0]; },  // HELP
         ^{ [self shot:@"7_help.png"]; },
+        ^{  // M6: DISK OP. SAVE XM writes <name>.xm into the folder being browsed (the test folder)
+            [self key:0x35 chars:@"\x1b" flags:0];
+            [self clickLogical:NSMakePoint(884, 150) right:NO flags:0];
+            [self clickLogical:NSMakePoint(279, 162) right:NO flags:0];
+        },
+        ^{ [self shot:@"8_saved_xm.png"]; },
+        ^{  // a new note makes the song dirty; loading the saved file then asks SAVE / DISCARD / CANCEL
+            [self key:0x35 chars:@"\x1b" flags:0];
+            [self key:0x0C chars:@"q" flags:0];
+            NSArray* files = [NSFileManager.defaultManager contentsOfDirectoryAtPath:self.inputTestDir error:nil];
+            for (NSString* f in files)
+                if ([f.pathExtension isEqualToString:@"xm"])
+                    appDropFile([self.inputTestDir stringByAppendingPathComponent:f].fileSystemRepresentation);
+        },
+        ^{ [self shot:@"9_unsaved_question.png"]; },
+        ^{  // DISCARD (Return = the first button would be SAVE; click DISCARD instead): the file loads
+            [self key:0x35 chars:@"\x1b" flags:0];
+        },
+        ^{ [self shot:@"10_cancelled.png"]; },
         ^{ [NSApp terminate:nil]; },
     ];
     for (NSUInteger i = 0; i < steps.count; ++i)
@@ -503,6 +652,31 @@ NSString* replayDir() {
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)app {
     return YES;
+}
+
+// Closing the window or Cmd+Q with unsaved changes: the screen's SAVE / DISCARD / CANCEL question first
+// (main.cpp WM_CLOSE)
+- (BOOL)windowShouldClose:(NSWindow*)w {
+    if (self.closeConfirmed || self.inputTestDir) return YES;
+    __weak FTAppDelegate* weakSelf = self;
+    appConfirmClose([weakSelf]() {
+        weakSelf.closeConfirmed = YES;
+        [weakSelf.window close];
+    });
+    return NO;
+}
+
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)app {
+    if (self.closeConfirmed || self.inputTestDir || !appHasUnsavedChanges()) return NSTerminateNow;
+    [self.window makeKeyAndOrderFront:nil];
+    appConfirmClose([]() {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            FTAppDelegate* d = (FTAppDelegate*)NSApp.delegate;
+            d.closeConfirmed = YES;
+            [NSApp terminate:nil];
+        });
+    });
+    return NSTerminateCancel;
 }
 
 - (void)applicationWillTerminate:(NSNotification*)n {
