@@ -1,5 +1,5 @@
-// The ported Amiga synth replayers (one source file each: JamCracker, SidMon 1.0, SidMon 2.0);
-// AmigaSynthPlayer::open tries them in turn.
+// The ported Amiga synth replayers (one source file each: JamCracker, Delta Music, SidMon, SoundMon,
+// Digital Mugician); AmigaSynthPlayer::open tries them in turn.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -21,3 +21,12 @@ std::unique_ptr<AmigaSynthPlayer> openSidMon2(const uint8_t* data, size_t size);
 // Cheap signature checks for AmigaSynthPlayer::detect.
 bool detectSidMon1(const uint8_t* data, size_t size);  // the replay routine's instructions (never PSID / RSID)
 bool detectSidMon2(const uint8_t* data, size_t size);  // "SIDMON II - THE MIDI VERSION" at 58
+
+// BP SoundMon V.2 / V.3 ("V.2" / "V.3" at 26 and position, track and sample tables that fit the file),
+// soundmon.cpp
+bool isSoundMon(const uint8_t* data, size_t size);
+std::unique_ptr<AmigaSynthPlayer> openSoundMon(const uint8_t* data, size_t size);
+// Digital Mugician 1 / 2 (" MUGICIAN/SOFTEYES 1990 " / " MUGICIAN2/SOFTEYES 1990" and tables that fit the
+// file, with a playable sub-song), mugician.cpp
+bool isMugician(const uint8_t* data, size_t size);
+std::unique_ptr<AmigaSynthPlayer> openMugician(const uint8_t* data, size_t size);

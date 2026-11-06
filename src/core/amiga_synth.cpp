@@ -70,6 +70,8 @@ std::unique_ptr<AmigaSynthPlayer> AmigaSynthPlayer::open(const uint8_t* d, size_
     if (auto p = openDeltaMusic2(d, n)) return p;
     if (auto p = openSidMon2(d, n)) return p;
     if (auto p = openSidMon1(d, n)) return p;
+    if (auto p = openSoundMon(d, n)) return p;
+    if (auto p = openMugician(d, n)) return p;
     return nullptr;
 }
 
@@ -77,7 +79,7 @@ bool AmigaSynthPlayer::detect(const uint8_t* d, size_t n) {
     if (!d || n < 8) return false;
     return std::memcmp(d, "BeEp", 4) == 0  // JamCracker
            || isDeltaMusic1(d, n) || isDeltaMusic2(d, n)
-           || detectSidMon2(d, n) || detectSidMon1(d, n);
+           || detectSidMon2(d, n) || detectSidMon1(d, n) || isSoundMon(d, n) || isMugician(d, n);
 }
 
 void AmigaSynthPlayer::restart() {
@@ -106,7 +108,8 @@ void AmigaSynthPlayer::measure() {
 
 void AmigaSynthPlayer::render(float* out, uint32_t frames, float gain) {
     std::memset(out, 0, sizeof(float) * 2 * frames);
-    float peak[4] = {};
+    float peak[kMaxVoices] = {};
+    const int nv = voices_;
     for (uint32_t f = 0; f < frames; ++f) {
         if (tickLeft_ <= 0) {
             playTick();
@@ -115,9 +118,10 @@ void AmigaSynthPlayer::render(float* out, uint32_t frames, float gain) {
         }
         tickLeft_ -= 1;
         float l = 0, r = 0;
-        for (int v = 0; v < 4; ++v) {
-            const float s = ch_[v].next(rate_);
-            const bool left = v == 0 || v == 3;  // Paula: 0 and 3 left, 1 and 2 right
+        for (int v = 0; v < nv; ++v) {
+            const float s = ch_[v].next(rate_) * (nv > 4 && v >= 3 ? 0.25f : 1.f);
+            const int pc = v < 4 ? v : 3;
+            const bool left = pc == 0 || pc == 3;  // Paula: 0 and 3 left, 1 and 2 right
             l += s * (left ? 1.f : 0.3f);
             r += s * (left ? 0.3f : 1.f);
             const float a = std::fabs(s);
@@ -129,7 +133,7 @@ void AmigaSynthPlayer::render(float* out, uint32_t frames, float gain) {
     }
     scopePos_ = (scopePos_ + frames) & (kScopeLen - 1);
     const float decay = (float)std::pow(0.5, (double)frames / (rate_ * 0.08));
-    for (int v = 0; v < 4; ++v) {
+    for (int v = 0; v < kMaxVoices; ++v) {
         const float d = vu_[v] * decay;
         vu_[v] = peak[v] > d ? peak[v] : d;
     }
@@ -138,7 +142,7 @@ void AmigaSynthPlayer::render(float* out, uint32_t frames, float gain) {
 void AmigaSynthPlayer::scope(int v, float* dst, int n) const {
     if (n <= 0) return;
     if (n > kScopeLen) n = kScopeLen;
-    if (v < 0 || v >= 4) {
+    if (v < 0 || v >= voices_) {
         for (int k = 0; k < n; ++k) dst[k] = 0;
         return;
     }
@@ -147,6 +151,6 @@ void AmigaSynthPlayer::scope(int v, float* dst, int n) const {
 }
 
 bool AmigaSynthPlayer::buildDisplay(Song& out) {
-    out = makeEmptySong(4);
+    out = makeEmptySong(voices_);
     return true;
 }
