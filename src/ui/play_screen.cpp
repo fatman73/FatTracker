@@ -132,6 +132,13 @@ int PlayScreen::hitId(float x, float y) const {
     return -1;
 }
 
+void PlayScreen::answer(int i) {
+    if (!dialog_.open || i < 0 || i >= dialog_.count) return;
+    Dialog d = dialog_;
+    dialog_.open = false;
+    if (d.onAnswer) d.onAnswer(i);
+}
+
 void PlayScreen::setStatus(const char* msg) {
     std::snprintf(status_, sizeof status_, "%s", msg ? msg : "ALL RIGHT");
 }
@@ -863,11 +870,7 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
             }
     const int h = hitId(x, y);
     if (dialog_.open) {
-        if (h >= H_DIALOG && h < H_DIALOG + dialog_.count) {
-            Dialog d = dialog_;
-            dialog_.open = false;
-            if (d.onAnswer) d.onAnswer(h - H_DIALOG);
-        }
+        if (h >= H_DIALOG && h < H_DIALOG + dialog_.count) answer(h - H_DIALOG);
         return UiAction::Redraw;
     }
     if (panel_ == Panel::DiskOp && panelArea().contains(x, y)) return diskMouse(x, y, right, e);

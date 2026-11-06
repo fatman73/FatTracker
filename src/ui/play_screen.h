@@ -80,8 +80,12 @@ public:
     Editor& editor() { return editor_; }
     bool dirty() const { return editor_.dirty(); }
     void ask(const char* text, std::initializer_list<const char*> buttons, std::function<void(int)> onAnswer);
+    const char* status() const { return status_; }
+    const char* question() const { return dialog_.open ? dialog_.text : nullptr; }  // the open question, if any
+    void answer(int i);  // as if answer button i of the open question was clicked
 
 private:
+    friend struct PlayScreenProbe;  // tests/app: presses DISK OP. buttons and picks list entries
     struct Layout {
         float W, H;
         RectF counters, buttons, logo, scopes, scopeGrid, clock, info, pattern, side;
