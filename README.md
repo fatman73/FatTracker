@@ -99,6 +99,8 @@ cmake --build build --config Release
 Targets:
 - `FatTracker` – the application, `build\Release\FatTracker.exe`
 - `fttest` – the test runner and command-line tools, `build\Release\fttest.exe`
+- `ftrender` – offline render of any song (modules and chip formats) to WAV, no audio device:
+  `build\Release\ftrender.exe in.sid out.wav [--seconds S] [--subsong N] [--float]`
 
 CMake collects the sources with globs; run the configure step again after adding files.
 
