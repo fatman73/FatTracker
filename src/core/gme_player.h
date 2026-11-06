@@ -32,6 +32,10 @@ public:
     int tick() const override { return 0; }
     const char* title() const;
     int tracks() const;
+    int subsongs() const override;  // the tracks (at least 1)
+    int subsong() const override;
+    bool selectSubsong(int i) override;
+    const char* subsongTitle() const override;  // the track's own name (NSFE, GBS M3U, ...) or ""
 
 private:
     struct Impl;

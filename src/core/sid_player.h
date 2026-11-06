@@ -31,6 +31,9 @@ public:
     int tick() const override { return 0; }
     const char* title() const;  // from the SID header
     int subtunes() const;
+    int subsongs() const override;  // the header's subtunes (at least 1)
+    int subsong() const override;   // the subtune playing, from 0 (load starts the header's default one)
+    bool selectSubsong(int i) override;
 
 private:
     struct Impl;

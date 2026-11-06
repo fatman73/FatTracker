@@ -1,7 +1,8 @@
 // David Whittaker replayer, ported from NostalgicPlayer's DavidWhittakerWorker.cs (Thomas Neumann, MIT licence)
 // onto AmigaSynthPlayer. David Whittaker songs are saved together with their 68000 replay routine, so the
 // loader finds the data tables and the player's features by looking for the routine's instructions (as
-// NostalgicPlayer does). Files with several sub-songs play the first one.
+// NostalgicPlayer does). Files with several sub-songs start on the longest one (the first sub-song of some
+// files is a short jingle that stops the song).
 // Added for hostile files: the instruction search treats a read outside its 16 KB window as a failure (the
 // C# code throws there), every count, offset and index is checked (the C# code relied on exceptions), sample
 // frequency 0 is refused, position lists / tracks / arpeggios / envelopes have size limits, a channel whose
@@ -463,13 +464,14 @@ public:
             squareData_ = sq.data;
         }
         format_ = "DAVID WHITTAKER (AMIGA)";
-        measure();
+        subsongs_ = (int)songs_.size();
+        selectLongestSubsong();  // measures it
         return true;
     }
 
 protected:
     void initSound() override {
-        const SongInfo& song = songs_[0];
+        const SongInfo& song = songs_[(size_t)subsong_];
         g_ = GlobalPlayingInfo{};
         g_.speed = song.speed;
         g_.delayCounterSpeed = song.delayCounterSpeed;
@@ -743,7 +745,7 @@ private:
 
     // ---- playing
     void initializeChannelInfo() {
-        const SongInfo& song = songs_[0];
+        const SongInfo& song = songs_[(size_t)subsong_];
         for (int i = 0; i < p_.numberOfChannels; ++i) {
             ChannelInfo& c = chan_[i];
             c = ChannelInfo{};

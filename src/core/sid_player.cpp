@@ -140,6 +140,27 @@ const char* SidPlayer::format() const { return impl_->c64 ? impl_->format : ""; 
 const char* SidPlayer::title() const { return impl_->title; }
 int SidPlayer::subtunes() const { return impl_->file.size() > 0x10 ? (impl_->file[0x0F] | (impl_->file[0x0E] << 8)) : 0; }
 
+int SidPlayer::subsongs() const {
+    const int n = subtunes();
+    return n < 1 ? 1 : (n > 255 ? 255 : n);  // cRSID takes subtunes 1..255
+}
+
+int SidPlayer::subsong() const {
+    if (!impl_->c64 || impl_->subtune < 1) return 0;
+    return impl_->subtune > subsongs() ? subsongs() - 1 : impl_->subtune - 1;
+}
+
+bool SidPlayer::selectSubsong(int i) {
+    Impl& m = *impl_;
+    if (!m.c64 || i < 0 || i >= subsongs()) return false;
+    const int was = m.subtune;
+    m.subtune = i + 1;
+    if (m.start()) return true;
+    m.subtune = was;  // (it started before)
+    m.start();
+    return false;
+}
+
 bool SidPlayer::buildDisplay(Song& out) {
     if (!impl_->c64) return false;
     out = makeEmptySong(voices() < 4 ? 4 : voices());

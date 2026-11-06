@@ -98,6 +98,7 @@ private:
     void toggleMute(int ch, Engine& e);
     void solo(int ch, Engine& e);
     void counterStep(int row, int dir, bool big, Engine& e);
+    void chipSubsongStep(int dir, Engine& e);  // chip songs: the POS counter selects the sub-song
     UiAction pressButton(int b, Engine& e);  // main button grid (B_PLAY ...)
     void bpmStep(int d, Engine& e);
     // Pure mode screen (pure_screen.cpp)

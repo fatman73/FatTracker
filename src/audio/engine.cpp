@@ -216,6 +216,46 @@ bool Engine::installChip(ChipPlayer* p, const char* name, bool play) {
 
 const char* Engine::tfmxFormat() const { return tfmxOn_ ? tfmx_->format() : ""; }
 
+int Engine::chipSubsongs() const {
+    AcquireSRWLockShared(SRW);
+    const int n = tfmxOn_ ? tfmx_->subsongs() : 0;
+    ReleaseSRWLockShared(SRW);
+    return n;
+}
+
+int Engine::chipSubsong() const {
+    AcquireSRWLockShared(SRW);
+    const int i = tfmxOn_ ? tfmx_->subsong() : 0;
+    ReleaseSRWLockShared(SRW);
+    return i;
+}
+
+bool Engine::selectChipSubsong(int i) {
+    lock();
+    if (!tfmxOn_ || !tfmx_->selectSubsong(i)) {
+        unlock();
+        return false;
+    }
+    // the display song follows the sub-song (TFMX shows its tracks); the name becomes the sub-song's own one
+    auto song = std::make_unique<Song>(makeEmptySong(4));
+    tfmx_->buildDisplay(*song);
+    const char* title = tfmx_->subsongTitle();
+    if (title && *title) {
+        for (int k = 0; k < 20; ++k) song->name[k] = 0;
+        for (int k = 0; k < 20 && title[k]; ++k) song->name[k] = title[k];
+    } else if (song_) {
+        std::memcpy(song->name, song_->name, sizeof song->name);
+    }
+    player_->setSong(nullptr);
+    song_ = static_cast<std::unique_ptr<Song>&&>(song);
+    player_->setSong(song_.get());
+    if (!tfmxPlaying_) tfmx_->clearMeters();
+    playFrames_ = 0;
+    publish();
+    unlock();
+    return true;
+}
+
 void Engine::setPure(int model) {
     lock();
     const int m = model < 0 || model > 2 ? 0 : model;
@@ -339,6 +379,8 @@ void Engine::publish() {
     tel_.numChannels = song_ ? song_->numChannels : 0;
     tel_.led = mixer_->led();
     tel_.drive = pure_ && floppy_->busySeconds() > 0;
+    tel_.subsong = (uint16_t)(tfmxOn_ ? tfmx_->subsong() : 0);
+    tel_.subsongs = (uint16_t)(tfmxOn_ ? tfmx_->subsongs() : 0);
     if (tfmxOn_) {
         tel_.playing = tfmxPlaying_;
         // the display song has one 64-row pattern per 64 ticks, in order

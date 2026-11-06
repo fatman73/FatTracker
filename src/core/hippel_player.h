@@ -30,6 +30,9 @@ public:
     const char* format() const override;
     bool buildDisplay(Song& out) override;  // empty patterns, one column per voice (meters and scopes move)
     int tick() const override { return 0; }
+    int subsongs() const override;
+    int subsong() const override;
+    bool selectSubsong(int i) override;  // loads the file again (the decoder measures the song while loading)
 
 private:
     struct Impl;

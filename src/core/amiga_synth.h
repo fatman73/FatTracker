@@ -62,6 +62,9 @@ public:
     const char* format() const override { return format_.c_str(); }
     bool buildDisplay(Song& out) override;
     int tick() const override { return 0; }
+    int subsongs() const override { return subsongs_; }
+    int subsong() const override { return subsong_; }
+    bool selectSubsong(int i) override;  // restarts on that sub-song and measures it
 
 protected:
     // Paula channels 0-3; 7 voice formats (Digital Mugician 2) set voices_ = 7 and voices 3..6 are mixed
@@ -72,9 +75,13 @@ protected:
     double tickHz_ = 50.0;  // replay calls per second (VBlank)
     bool endReached_ = false;  // set by playTick when the song wrapped around
 
-    virtual void initSound() = 0;  // song start state
+    int subsongs_ = 1, subsong_ = 0;  // formats with sub-songs set subsongs_; initSound plays subsong_
+
+    virtual void initSound() = 0;  // song start state (of sub-song subsong_)
     virtual void playTick() = 0;   // one replay call
-    void measure();                // dry run: song length in seconds (stops at the first wrap)
+    // dry run: song length in seconds (stops at the first wrap, or after maxSeconds); returns the ticks run
+    long measure(double maxSeconds = 30 * 60);
+    void selectLongestSubsong();   // starts on the longest sub-song (the first of equally long ones)
 
 private:
     uint32_t rate_ = 48000;

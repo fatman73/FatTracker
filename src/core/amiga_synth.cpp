@@ -96,16 +96,43 @@ void AmigaSynthPlayer::clearMeters() {
     std::memset(scope_, 0, sizeof scope_);
 }
 
-void AmigaSynthPlayer::measure() {
+long AmigaSynthPlayer::measure(double maxSeconds) {
     restart();
     long ticks = 0;
-    const long limit = (long)(tickHz_ * 60 * 30);  // 30 minutes at most
+    const long limit = (long)(tickHz_ * maxSeconds);  // 30 minutes at most by default
     while (!endReached_ && ticks < limit) {
         playTick();
         ++ticks;
     }
     seconds_ = ticks / tickHz_;
     restart();
+    return ticks;
+}
+
+bool AmigaSynthPlayer::selectSubsong(int i) {
+    if (i < 0 || i >= subsongs_) return false;
+    subsong_ = i;
+    measure();  // restarts on the sub-song
+    return true;
+}
+
+void AmigaSynthPlayer::selectLongestSubsong() {
+    // Each sub-song is measured up to 10 minutes (a longer one cannot lose), and all of them together up to
+    // 4 hours of ticks, so files with many endless sub-songs still load quickly.
+    constexpr double kCap = 10 * 60;
+    long budget = (long)(tickHz_ * 4 * 60 * 60);
+    int best = 0;
+    double bestSeconds = -1;
+    for (int i = 0; i < subsongs_ && budget > 0; ++i) {
+        subsong_ = i;
+        budget -= measure(kCap);
+        if (seconds_ > bestSeconds) {
+            best = i;
+            bestSeconds = seconds_;
+        }
+        if (seconds_ >= kCap) break;
+    }
+    selectSubsong(best);
 }
 
 void AmigaSynthPlayer::render(float* out, uint32_t frames, float gain) {

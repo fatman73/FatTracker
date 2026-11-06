@@ -24,4 +24,12 @@ public:
     virtual const char* format() const = 0;
     virtual bool buildDisplay(Song& out) = 0;  // what the pattern view shows
     virtual int tick() const = 0;              // display row being played (pattern = tick / kDisplayRows)
+
+    // Sub-songs (counted from 0). Selecting one restarts it and measures seconds() again where the player
+    // measures lengths; an index out of range is refused and changes nothing. Formats without sub-songs
+    // have one.
+    virtual int subsongs() const { return 1; }
+    virtual int subsong() const { return 0; }
+    virtual bool selectSubsong(int i) { return i == 0; }
+    virtual const char* subsongTitle() const { return ""; }  // the current sub-song's own name ("" = none)
 };
