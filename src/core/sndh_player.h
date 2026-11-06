@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "core/chip_player.h"
@@ -14,9 +15,25 @@
 // ICE! 2.x ("ICE!") depacker. false when this is not ICE packed or the stream is broken / cut.
 bool iceDepack(const uint8_t* data, size_t size, std::vector<uint8_t>& out);
 
+// One sub-song of another Atari ST container (core/sc68_player: SC68, YMST) for the same machine: the memory
+// blocks it needs, the init call (D0 = d0, once) and the play call made hz times a second (both return with RTS).
+struct StSong {
+    struct Block {
+        uint32_t address = 0;
+        std::shared_ptr<const std::vector<uint8_t>> bytes;
+    };
+    std::vector<Block> blocks;  // inside [SndhPlayer::kProgramLow, kProgramHigh)
+    uint32_t init = 0, play = 0, d0 = 0;
+    int hz = 50;
+    double seconds = 0;  // 0 = unknown
+    std::string name;    // "" = none
+};
+
 class SndhPlayer : public ChipPlayer {
 public:
     static constexpr uint32_t kLoadAddress = 0x20000;  // where the tune lives in ST memory
+    // StSong blocks: above the machine's own low memory, below the stack the other containers get
+    static constexpr uint32_t kProgramLow = 0x1000, kProgramHigh = 0x1F0000;
 
     SndhPlayer();
     ~SndhPlayer() override;
@@ -52,6 +69,12 @@ public:
     uint32_t mfpInterrupts() const;
 
     struct Impl;  // the emulated machine (named here for the 68000 core's memory callbacks)
+
+protected:
+    // Other containers on this machine: the songs replace the SNDH image; format() says `format`. false (nothing
+    // loaded) for no songs, a block outside the program area, or an init that runs away.
+    bool loadSongs(std::vector<StSong> songs, const std::string& title, const std::string& composer,
+                   const std::string& format, int subsong);
 
 private:
     std::unique_ptr<Impl> impl_;

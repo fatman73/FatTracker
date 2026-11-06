@@ -157,6 +157,10 @@ struct SndhPlayer::Impl {
     int songs = 1, defSong = 0, hz = 50;
     int song = 0;
     bool loaded = false;
+    // other containers (SC68, YMST): memory and calls per sub-song instead of the SNDH image
+    std::vector<StSong> custom;
+    std::string customFormat;
+    uint32_t stackTop = kStackTop, playPc = SndhPlayer::kLoadAddress + 8;
 
     // the machine
     std::vector<uint8_t> ram;
@@ -472,10 +476,13 @@ struct SndhPlayer::Impl {
     uint32_t pc() const { return reg(M68K_REG_PC) & 0xFFFFFF; }
     bool atIdle() const { return pc() == kIdle; }
     void call(uint32_t entry, int d0) {  // the main program calls entry, which returns to the idle loop
+        call(entry, d0 >= 0, (uint32_t)d0);
+    }
+    void call(uint32_t entry, bool setD0, uint32_t d0) {
         m68k_set_reg(M68K_REG_SR, 0x2300);
-        write32(kStackTop - 4, kIdle);
-        m68k_set_reg(M68K_REG_A7, kStackTop - 4);
-        if (d0 >= 0) m68k_set_reg(M68K_REG_D0, (uint32_t)d0);
+        write32(stackTop - 4, kIdle);
+        m68k_set_reg(M68K_REG_A7, stackTop - 4);
+        if (setD0) m68k_set_reg(M68K_REG_D0, d0);
         m68k_set_reg(M68K_REG_PC, entry);
         callActive = true;
         callStart = now;
@@ -497,7 +504,7 @@ struct SndhPlayer::Impl {
             if (!tickPending) tickPending = true, pendingSince = now;
             return;
         }
-        call(SndhPlayer::kLoadAddress + 8, -1);
+        call(playPc, -1);
     }
     // Runs the CPU for n cycles with the MFP timers, the VBL and the play calls on time.
     void run(double n) {
@@ -548,7 +555,7 @@ struct SndhPlayer::Impl {
             if (callActive && atIdle()) callActive = false;
             if (tickPending && !callActive && atIdle()) {
                 tickPending = false;
-                call(SndhPlayer::kLoadAddress + 8, -1);
+                call(playPc, -1);
             }
             if (!inInit && ((callActive && now - callStart > kRunaway) || (tickPending && now - pendingSince > kRunaway)))
                 crash();
@@ -560,11 +567,15 @@ struct SndhPlayer::Impl {
     void setupMemory() {
         ram.assign(kRam, 0);
         shadow.assign(0x1000, 0);
-        std::memcpy(&ram[SndhPlayer::kLoadAddress], image.data(), image.size());
+        if (custom.empty()) {
+            std::memcpy(&ram[SndhPlayer::kLoadAddress], image.data(), image.size());
+        } else {
+            for (const StSong::Block& b : custom[song].blocks) std::memcpy(&ram[b.address], b.bytes->data(), b.bytes->size());
+        }
         auto w16 = [&](uint32_t a, uint16_t v) { ram[a] = (uint8_t)(v >> 8), ram[a + 1] = (uint8_t)v; };
         auto w32 = [&](uint32_t a, uint32_t v) { w16(a, (uint16_t)(v >> 16)), w16(a + 2, (uint16_t)v); };
         for (uint32_t v = 2; v < 256; ++v) w32(v * 4, kRte);
-        w32(0, kStackTop);  // reset: SSP, PC
+        w32(0, stackTop);  // reset: SSP, PC
         w32(4, kIdle);
         for (uint32_t v : {2u, 3u, 4u, 8u, 10u, 11u}) w32(v * 4, kHalt);  // bus/address error, illegal, privilege, line A/F
         for (uint32_t ch = 0; ch < 16; ++ch) {                         // MFP vectors $40-$4F
@@ -620,7 +631,13 @@ struct SndhPlayer::Impl {
         m68k_pulse_reset();  // SSP and PC from the vectors: supervisor, idle loop
         m68k_set_reg(M68K_REG_USP, kUserStack);
         inInit = true;
-        call(SndhPlayer::kLoadAddress, s + 1);
+        if (custom.empty()) {
+            call(SndhPlayer::kLoadAddress, s + 1);
+        } else {
+            hz = custom[s].hz;
+            playPc = custom[s].play;
+            call(custom[s].init, true, custom[s].d0);
+        }
         while (callActive && now < kInitBudget && !dead) run(20000);
         inInit = false;
         const bool ok = !callActive;
@@ -780,6 +797,9 @@ bool SndhPlayer::load(const uint8_t* data, size_t size, int sub) {
     }
     if (img.size() < 16 || img.size() > kMaxImage || std::memcmp(img.data() + 12, "SNDH", 4) != 0) return false;
     m.image = static_cast<std::vector<uint8_t>&&>(img);
+    m.custom.clear();
+    m.stackTop = kStackTop;
+    m.playPc = kLoadAddress + 8;
     m.parse(m.image.data(), m.image.size());
     const int s = sub >= 0 && sub < m.songs ? sub : m.defSong;
     CpuLock cpu(m);
@@ -849,6 +869,7 @@ void SndhPlayer::scope(int v, float* dst, int n) const {
 double SndhPlayer::seconds() const {
     const Impl& m = *impl_;
     if (!m.loaded) return 0;
+    if (!m.custom.empty()) return m.custom[m.song].seconds;
     if (m.song < (int)m.frames.size() && m.frames[m.song]) return (double)m.frames[m.song] / m.hz;
     if (m.song < (int)m.times.size()) return m.times[m.song];
     return 0;
@@ -857,7 +878,8 @@ double SndhPlayer::seconds() const {
 const char* SndhPlayer::format() const {
     Impl& m = *impl_;
     if (!m.loaded) return "";
-    m.format = m.dmaUsed ? "SNDH (ATARI STE, DMA SOUND NOT PLAYED)" : "SNDH (ATARI ST)";
+    if (!m.custom.empty()) m.format = m.customFormat + (m.dmaUsed ? " (STE DMA SOUND NOT PLAYED)" : "");
+    else m.format = m.dmaUsed ? "SNDH (ATARI STE, DMA SOUND NOT PLAYED)" : "SNDH (ATARI ST)";
     return m.format.c_str();
 }
 
@@ -881,6 +903,34 @@ bool SndhPlayer::selectSubsong(int i) {
 const char* SndhPlayer::subsongTitle() const {
     const Impl& m = *impl_;
     return m.loaded && m.song < (int)m.names.size() ? m.names[m.song].c_str() : "";
+}
+
+bool SndhPlayer::loadSongs(std::vector<StSong> songs, const std::string& title, const std::string& composer,
+                           const std::string& format, int sub) {
+    Impl& m = *impl_;
+    m.loaded = false;
+    if (songs.empty() || songs.size() > 99) return false;
+    for (const StSong& s : songs) {
+        if (s.hz < 1 || s.hz > 1000 || (s.init & 1) || (s.play & 1)) return false;
+        for (const StSong::Block& b : s.blocks)
+            if (!b.bytes || b.address < kProgramLow || b.address > kProgramHigh || b.bytes->size() > kProgramHigh - b.address)
+                return false;
+    }
+    m.image.clear();
+    m.custom = static_cast<std::vector<StSong>&&>(songs);
+    m.customFormat = format;
+    m.title = title;
+    m.composer = composer;
+    m.names.clear(), m.frames.clear(), m.times.clear();
+    for (const StSong& s : m.custom) m.names.push_back(s.name);
+    m.songs = (int)m.custom.size();
+    m.defSong = 0;
+    m.stackTop = kHeap - 0x100;  // above the program area, below Malloc's memory
+    const int s = sub >= 0 && sub < m.songs ? sub : 0;
+    CpuLock cpu(m);
+    if (!m.boot(s)) return false;
+    m.loaded = true;
+    return true;
 }
 
 const char* SndhPlayer::title() const { return impl_->title.c_str(); }
