@@ -1,6 +1,7 @@
 // Pattern sequencer and effect interpreter (ProTracker 2.3 / FastTracker 2 quirks).
 #pragma once
 #include <cstdint>
+#include <vector>
 
 #include "core/mixer.h"
 #include "core/song.h"
@@ -101,7 +102,7 @@ private:
     void ft2RowEffects(int c);
     void ft2TickEffects(int c);
     enum : uint8_t { kFxG = 16, kFxH = 17, kFxK = 20, kFxL = 21, kFxP = 25, kFxR = 27, kFxT = 29, kFxX = 33 };
-    enum : uint8_t { kFxU = 30, kFxV = 31, kFxW = 32, kFxY = 34 };  // Symphonie slides
+    enum : uint8_t { kFxQ = 26, kFxU = 30, kFxV = 31, kFxW = 32, kFxY = 34 };  // Symphonie echo, slides
     void doVolSlide(int c, uint8_t param);
     void doPortaUp(int c, int amount);
     void doPortaDown(int c, int amount);
@@ -111,6 +112,10 @@ private:
     void symphonieSlideTick(int c);
     // player_inst.cpp
     void instrumentTick(int c);
+    // player_dsp.cpp: Symphonie DSP echo (Song::symEcho)
+    void echoReset();
+    void echoSet(uint8_t index);
+    void echoProcess(float* out, uint32_t frames);
 
     Mixer& mixer_;
     const Song* song_ = nullptr;
@@ -131,4 +136,8 @@ private:
     bool looped_ = false;
     uint32_t samplesLeft_ = 0;
     double tickFrac_ = 0;
+    std::vector<float> echoLine_;  // interleaved stereo, `delay` ticks long
+    uint32_t echoPos_ = 0;
+    uint8_t echoType_ = 0, echoDelay_ = 0;
+    float echoFeedback_ = 0.5f;
 };

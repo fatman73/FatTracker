@@ -74,6 +74,13 @@ struct Song {
     // slide that runs every tick until changed (see symVolumeStep and Player::symphonieSlideTick). Off for every
     // other format, where those effect letters do nothing.
     bool symphonieSlides = false;
+    // Symphonie DSP echo settings: effect Q xx switches to symEcho[xx]. Empty: no echo, Q does nothing.
+    struct SymEcho {
+        uint8_t type = 0;      // 0 off, 1 echo, 2 cross echo, 3 cross echo 2, 4 center echo
+        uint8_t delay = 0;     // in ticks
+        uint8_t feedback = 0;  // level: the echo feeds back 2^-feedback of itself
+    };
+    std::vector<SymEcho> symEcho;
     std::vector<Pattern> patterns;
     std::vector<Sample> samples;
     std::vector<Instrument> instruments;

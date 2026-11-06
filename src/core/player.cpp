@@ -47,6 +47,7 @@ void Player::start(uint16_t order, uint16_t row, bool patternMode, uint16_t patt
     posJump_ = break_ = loopJump_ = false;
     samplesLeft_ = 0;
     tickFrac_ = 0;
+    echoReset();
     playing_ = true;
 }
 
@@ -395,6 +396,7 @@ void Player::render(float* out, uint32_t frames) {
         }
         uint32_t n = frames < samplesLeft_ ? frames : samplesLeft_;
         mixer_.mix(out, n);
+        if (!song_->symEcho.empty()) echoProcess(out, n);
         out += n * 2;
         frames -= n;
         samplesLeft_ -= n;

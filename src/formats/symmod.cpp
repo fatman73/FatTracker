@@ -98,7 +98,7 @@ constexpr int8_t TYPE_LOOP = 4, TYPE_SUSTAIN = 8;
 constexpr uint8_t CHAN_STEREO_L = 1, CHAN_STEREO_R = 2;
 constexpr uint8_t SF_REVERSE = 1, SF_MIRROR = 4, SF_NEW_LOOP = 16;
 constexpr uint8_t IF_NO_TRANSPOSE = 1, IF_SYNC_PLAY = 4;
-constexpr uint8_t FX_R = 27, FX_U = 30, FX_V = 31, FX_W = 32, FX_X = 33, FX_Y = 34;
+constexpr uint8_t FX_Q = 26, FX_R = 27, FX_U = 30, FX_V = 31, FX_W = 32, FX_X = 33, FX_Y = 34;
 constexpr int kMaxRows = 1024;  // the longest Symphonie track
 
 struct Event {
@@ -1187,7 +1187,27 @@ Result<Song> symLoad(const uint8_t* data, size_t size) {
                                     st.tonePortaRemain = 0;
                                     break;
                                 }
-                                default:  // add pitch / volume, emphasis, CV, filter and DSP: dropped
+                                case EV_DSP_ECHO: {  // note = type, param = delay in ticks, instrument = feedback
+                                    const Song::SymEcho e{(uint8_t)(ev.note >= 0 && ev.note < 5 ? ev.note : 0), ev.param, ev.inst};
+                                    size_t best = 0;
+                                    long bestDist = -1;
+                                    for (size_t k = 0; k < s.symEcho.size(); ++k) {
+                                        const Song::SymEcho& o = s.symEcho[k];
+                                        if (o.type != e.type) continue;
+                                        const long d = (long)(o.delay - e.delay) * (o.delay - e.delay) +
+                                                       (long)(o.feedback - e.feedback) * (o.feedback - e.feedback);
+                                        if (bestDist < 0 || d < bestDist) best = k, bestDist = d;
+                                    }
+                                    if (bestDist != 0 && s.symEcho.size() < 256) {
+                                        best = s.symEcho.size();
+                                        s.symEcho.push_back(e);
+                                    } else if (bestDist < 0) {
+                                        break;  // 256 settings and none of this type
+                                    }
+                                    x.setFx(FX_Q, (uint8_t)best);  // global: before anything else in this cell
+                                    break;
+                                }
+                                default:  // add pitch / volume, emphasis, CV, filter and DSP delay: dropped
                                     break;
                             }
 

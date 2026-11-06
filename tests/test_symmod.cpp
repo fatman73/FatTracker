@@ -587,6 +587,90 @@ TEST(symmod_stopped_sample_pauses_the_slide) {
     CHECK_EQ(p.at(3, 0).param, 25);
 }
 
+// ---- Symphonie DSP echo: a post-mix effect for the songs that switch it on
+namespace {
+constexpr uint8_t kFxQ = 26;
+// a short click on the left channel at row 0; echo setting 0 switched on on the same row
+Song echoSong(uint8_t type, bool withEcho) {
+    Song s = makeEmptySong(4);
+    s.quirks = Quirks::FT2;
+    s.freqMode = FreqMode::Linear;
+    s.initialSpeed = 6;
+    s.initialBpm = 125;
+    s.channelPan[0] = 0;
+    Sample sm;
+    sm.length = 50;
+    sm.data8.assign(50, 100);
+    sm.pan = 0;
+    s.samples.push_back(sm);
+    s.patterns[0].at(0, 0) = Cell{49, 1, 0, withEcho ? kFxQ : (uint8_t)0, 0};
+    if (withEcho) s.symEcho.push_back({type, 2, 1});  // 2 ticks, feedback 1/2
+    return s;
+}
+std::vector<float> renderFrames(const Song& s, uint32_t frames) {
+    Mixer* m = new Mixer(48000);
+    m->setInterp(Interp::None);
+    m->setRamp(false);
+    Player* p = new Player(*m);
+    p->setSong(&s);
+    p->play();
+    std::vector<float> out(frames * 2);
+    p->render(out.data(), frames);
+    delete p;
+    delete m;
+    return out;
+}
+float peak(const std::vector<float>& st, int side, size_t from, size_t to) {
+    float v = 0;
+    for (size_t i = from; i < to; ++i) v = std::fabs(st[i * 2 + side]) > v ? std::fabs(st[i * 2 + side]) : v;
+    return v;
+}
+constexpr size_t kTick = 960;  // 48000 Hz at 125 BPM
+}  // namespace
+
+TEST(player_symphonie_echo_repeats_after_its_delay) {
+    const auto st = renderFrames(echoSong(1, true), kTick * 8);
+    const float dry = peak(st, 0, 0, 400);
+    CHECK(dry > 0.01f);
+    CHECK_NEAR(peak(st, 0, 2 * kTick, 2 * kTick + 400), dry * 0.5f, dry * 0.02f);
+    CHECK_NEAR(peak(st, 0, 4 * kTick, 4 * kTick + 400), dry * 0.25f, dry * 0.02f);
+    CHECK(peak(st, 1, 0, kTick * 8) < 1e-6f);  // normal echo stays on its side
+}
+
+TEST(player_symphonie_cross_echo_bounces_between_sides) {
+    const auto st = renderFrames(echoSong(2, true), kTick * 8);
+    const float dry = peak(st, 0, 0, 400);
+    CHECK_NEAR(peak(st, 1, 2 * kTick, 2 * kTick + 400), dry * 0.5f, dry * 0.02f);
+    CHECK(peak(st, 0, 2 * kTick, 2 * kTick + 400) < 1e-6f);
+    CHECK_NEAR(peak(st, 0, 4 * kTick, 4 * kTick + 400), dry * 0.25f, dry * 0.02f);
+}
+
+TEST(player_without_symphonie_echo_has_no_repeats) {
+    const auto st = renderFrames(echoSong(1, false), kTick * 8);
+    CHECK(peak(st, 0, 0, 400) > 0.01f);
+    CHECK(peak(st, 0, 2 * kTick, kTick * 8) < 1e-6f);
+}
+
+TEST(symmod_dsp_echo_event_becomes_an_echo_setting) {
+    SymSpec sp;
+    sp.ins = {normalIns("bass")};
+    sp.smp = {dc(100, 64)};
+    sp.put(0, 0, 0, 36, 50, 0);
+    sp.put(1, 2, 24, 2, 8, 1);  // DSP echo: cross, 8 ticks, feedback level 1
+    Result<Song> r = Result<Song>::fail("");
+    const Song* s = loadInto(r, sp);
+    CHECK(s);
+    if (!s) return;
+    CHECK_EQ(s->symEcho.size(), 1u);
+    if (s->symEcho.size() != 1) return;
+    CHECK_EQ(s->symEcho[0].type, 2);
+    CHECK_EQ(s->symEcho[0].delay, 8);
+    CHECK_EQ(s->symEcho[0].feedback, 1);
+    const Cell& c = s->patterns[s->order[0]].at(1, 2);
+    CHECK_EQ(c.fx, kFxQ);
+    CHECK_EQ(c.param, 0);
+}
+
 TEST(real_modules_symphonie_load_and_play) {
     const int n = countPlayable(L".symmod");
     if (n < 0) std::printf("SKIP real_modules_symphonie (no modules folder)\n");

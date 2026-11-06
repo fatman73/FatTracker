@@ -360,6 +360,7 @@ void Player::symphonieSlideTick(int c) {
 void Player::ft2RowEffects(int c) {
     ChannelState& ch = ch_[c];
     const uint8_t fx = ch.cell.fx, p = ch.cell.param;
+    if (fx == kFxQ && !song_->symEcho.empty()) echoSet(p);
     if (song_->symphonieSlides) {
         switch (fx) {
             case kFxU: ch.symVolRate = p; break;
