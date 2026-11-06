@@ -120,7 +120,7 @@ private:
     double demoTime_ = -1;
     int pureFirst_ = 0;
     float vpScale_ = 1.f;
-    static constexpr int kPureExitHover = 7000;
+    static constexpr int kPureExitHover = 7000, kPureCreditsHover = 7001;
     void drawDialog(Gfx& g, Text& tx, const Theme& t);
     // play_edit.cpp
     UiAction editKey(unsigned vk, bool shift, bool ctrl, bool alt, bool repeat, Engine& e);

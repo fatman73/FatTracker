@@ -1,6 +1,9 @@
 // Geometry of the Pure mode screen: a ProTracker style Amiga lowres screen, 320x256 pixels.
 // Pure C++ so the hit testing is unit tested.
 #pragma once
+#include <cstdint>
+
+class PixelCanvas;
 
 namespace pure {
 struct Box {
@@ -78,15 +81,30 @@ Box sideButton(int i);               // narrow column right of the grid, 0..4
 Box scopeTitle();
 Box scope(int i);                    // black area of scope i
 Box creditLine();                    // machine name + power / drive LEDs
+// The machine line's contents, laid out for the longest name ("A1200") so A500 and A1200 look alike:
+const char* machineName(int model);  // 1 "A500", 2 "A1200"
+int machineNameX();                  // embossed name, small font
+Box machineLed(int i);               // 0 power, 1 drive
+int machineDriveX();                 // "DF0" right of the drive LED
+Box creditHint();                    // embossed "?" at the right end: the line opens the credits
 Box exitButton();
 Box songRow();
 Box sampleRow();
 Box loadButton();
 Box infoArea();
+Box editSkipBox();                   // sunken edit skip value at the left of the info line
 Box tempoArrow(int dir);             // 0 up, 1 down
 Box track(int i);                    // whole column of track i in the pattern area
 Box rowNumbers();
 const char* buttonLabel(int i);
+const char* counterText(int row);    // POS .. REPLEN
+// Embossed captions (small font, 1 px shadow) are set like ProTracker 2.3's: 8 px per character, but a
+// narrow word space, so "EDIT OP." fits its button with 3 px of face around it.
+constexpr int kLabelSpace = 3;
+int labelAdvance(char c);
+int labelWidth(const char* s);               // ink width, the shadow included
+int labelX(const Box& b, const char* s);     // x to draw from so the ink is centred in b
+void drawLabel(PixelCanvas& c, const Box& b, const char* s, uint32_t ink, uint32_t shadow);  // centred in b
 // x of right aligned value text (8 px per character) keeping 1 px clear of the box bevel.
 int valueX(const Box& b, int chars);
 int hitTest(int x, int y, View view = kViewMain, int opScreen = 0);

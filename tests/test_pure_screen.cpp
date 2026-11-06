@@ -190,7 +190,7 @@ TEST(pure_edit_op_covers_the_scopes) {
         for (int i = 0; i < opCount(sc); ++i) {
             const OpItem it = opItem(sc, i);
             CHECK(it.box.x >= a.x && it.box.y >= a.y && it.box.x + it.box.w <= a.x + a.w && it.box.y + it.box.h <= a.y + a.h);
-            CHECK((int)std::strlen(it.label) * 8 - 1 <= it.box.w - 6);  // 3 px of face on each side of the label
+            CHECK(labelWidth(it.label) <= it.box.w - 6);  // 3 px of face on each side of the label
             const int h = hitTest(it.box.x + it.box.w / 2, it.box.y + it.box.h / 2, kViewEditOp, sc);
             CHECK_EQ(h, kOpItem + i);
             for (int j = 0; j < i; ++j) {  // no overlaps
@@ -218,7 +218,7 @@ TEST(pure_edit_options_switch_the_record_mode) {
     CHECK(std::strcmp(recModeLabel(true), "REC STEP") == 0);
     CHECK(std::strcmp(recModeLabel(false), "REC LIVE") == 0);
     for (bool step : {true, false}) {
-        CHECK((int)std::strlen(recModeLabel(step)) * 8 - 1 <= it.box.w - 6);  // the drawn label keeps 3 px of face
+        CHECK(labelWidth(recModeLabel(step)) <= it.box.w - 6);  // the drawn label keeps 3 px of face
         CHECK(std::strlen(recModeLabel(step)) <= 10);                       // fits the STATUS field too
     }
     CHECK_EQ(hitTest(it.box.x + it.box.w / 2, it.box.y + it.box.h / 2, kViewEditOp, 1), kOpItem + found);
@@ -245,7 +245,7 @@ TEST(pure_sampler_replaces_the_pattern_area) {
     for (int i = 0; i < kSamplerButtons; ++i) {
         const Box b = samplerButton(i);
         CHECK(b.x >= 0 && b.x + b.w <= 320 && b.y >= w.y + w.h && b.y + b.h <= 256);
-        CHECK((int)std::strlen(samplerLabel(i)) * 8 - 1 <= b.w - 6);
+        CHECK(labelWidth(samplerLabel(i)) <= b.w - 6);
         CHECK_EQ(hitTest(b.x + b.w / 2, b.y + b.h / 2, kViewSampler), kSmpButton + i);
     }
     CHECK_EQ(hitTest(130, 5, kViewSampler), kButton + 0);
@@ -269,8 +269,8 @@ TEST(pure_credits_cover_the_pattern_area) {
     for (const Box& b : {t, up, dn, ex, tx}) CHECK(b.x >= 0 && b.y >= kPatternY && b.x + b.w <= 320 && b.y + b.h <= 256);
     CHECK(t.x + t.w <= up.x && up.x + up.w <= dn.x && dn.x + dn.w <= ex.x);  // one row, no overlaps
     CHECK(tx.y >= t.y + t.h);
-    CHECK((int)std::strlen("FATTRACKER CREDITS") * 8 - 1 <= t.w - 6);  // labels keep 3 px of face
-    CHECK((int)std::strlen("EXIT") * 8 - 1 <= ex.w - 6);
+    CHECK(labelWidth("FATTRACKER CREDITS") <= t.w - 6);  // labels keep 3 px of face
+    CHECK(labelWidth("EXIT") <= ex.w - 6);
     CHECK(5 <= up.w - 6);  // the arrow glyphs are 5 px wide
     // the text: kCreditsCols characters 2 px inside the black box, the rows inside it too
     CHECK(tx.x + 2 + kCreditsCols * 8 - 2 <= tx.x + tx.w - 2);
@@ -282,4 +282,100 @@ TEST(pure_credits_cover_the_pattern_area) {
     CHECK_EQ(hitTest(160, 200, kViewCredits), kCreditsText);  // click on the text: close
     CHECK_EQ(hitTest(40, 200), kTrack + 0);                    // closed: the pattern again
     CHECK_EQ(hitTest(130, 5, kViewCredits), kButton + 0);      // the top stays usable
+}
+
+// ---- captions and the machine line keep their margins (A500 and A1200 alike)
+namespace {
+// every pixel the caption changes lies inside the box with 3 px (bevel + 2 px of face) all around
+bool labelKeepsMargins(const pure::Box& b, const char* s) {
+    static PixelCanvas c;
+    const uint32_t face = argb(0x888888);
+    c.clear(0);
+    c.fill(b.x, b.y, b.w, b.h, face);
+    pure::drawLabel(c, b, s, kInk, argb(0x333333));
+    bool ok = true, any = false;
+    for (int y = b.y - 4; y < b.y + b.h + 4; ++y)
+        for (int x = b.x - 4; x < b.x + b.w + 4; ++x) {
+            const uint32_t want = b.contains(x, y) ? face : 0u;
+            if (c.at(x, y) == want) continue;
+            any = true;
+            ok &= x >= b.x + 3 && x < b.x + b.w - 3 && y >= b.y + 3 && y < b.y + b.h - 2;
+        }
+    return ok && any == (*s != 0);
+}
+}  // namespace
+
+TEST(pure_label_width_is_the_drawn_ink) {
+    using namespace pure;
+    for (const char* s : {"EDIT OP.", "DISK OP.", "EXIT PURE", "MOD2WAV", "ZOOM", "?", "VOL -"}) {
+        static PixelCanvas c;
+        c.clear(0);
+        const Box b{0, 0, 120, kRowH};
+        drawLabel(c, b, s, kInk, argb(0x333333));
+        int l = 999, r = -1;
+        for (int y = 0; y < kRowH; ++y)
+            for (int x = 0; x < 120; ++x)
+                if (c.at(x, y)) {
+                    l = x < l ? x : l;
+                    r = x > r ? x : r;
+                }
+        CHECK_EQ(r - l + 1, labelWidth(s));
+        const int left = l - b.x, right = b.x + b.w - 1 - r;
+        CHECK(left == right || left + 1 == right);  // centred
+    }
+    CHECK(labelWidth("EDIT OP.") < (int)std::strlen("EDIT OP.") * 8 - 1);  // the narrow word space
+}
+
+TEST(pure_captions_keep_off_their_box_edges) {
+    // ProTracker 2.3 leaves face around every caption: "EDIT OP." / "DISK OP." ran over their buttons'
+    // bevels and FINETUNE filled its label box from edge to edge
+    using namespace pure;
+    for (int r = 0; r < kCounterRows; ++r) {
+        CHECK(labelKeepsMargins(counterLabel(r), counterText(r)));
+        CHECK(r == 0 || counterLabel(r).x + counterLabel(r).w <= counterValue(r).x);
+        CHECK_EQ(counterValue(r).x + counterValue(r).w, counterArrow(r, 0).x);
+    }
+    CHECK(valueX(counterValue(3), 2) >= counterValue(3).x + 2);  // "-8" still fits the FINETUNE value
+    for (int i = 0; i < 12; ++i) CHECK(labelKeepsMargins(gridButton(i), buttonLabel(i)));
+    CHECK(labelKeepsMargins(exitButton(), "EXIT PURE"));
+    CHECK(labelKeepsMargins(scopeTitle(), "QUADRASCOPE"));
+    CHECK(labelKeepsMargins(loadButton(), "LOAD"));
+    CHECK(labelKeepsMargins(creditHint(), "?"));
+    for (int i = 0; i < 2; ++i) CHECK(labelKeepsMargins(posButton(i), i ? "D" : "I"));
+    for (int sc = 0; sc < kOpScreens; ++sc)
+        for (int i = 0; i < opCount(sc); ++i)
+            if (opItem(sc, i).kind == kOpButton || opItem(sc, i).kind == kOpCaption)
+                CHECK(labelKeepsMargins(opItem(sc, i).box, opItem(sc, i).label));
+    for (int i = 0; i < kSamplerButtons; ++i) CHECK(labelKeepsMargins(samplerButton(i), samplerLabel(i)));
+}
+
+TEST(pure_machine_line_fits_a500_and_a1200) {
+    using namespace pure;
+    const Box cl = creditLine(), hint = creditHint(), p = machineLed(0), d = machineLed(1);
+    CHECK(std::strcmp(machineName(1), "A500") == 0 && std::strcmp(machineName(2), "A1200") == 0);
+    for (int model : {1, 2}) {
+        CHECK(machineNameX() >= cl.x + 3);
+        CHECK(machineNameX() + labelWidth(machineName(model)) + 3 <= p.x);  // the name never reaches the power LED
+    }
+    CHECK(p.x + p.w + 3 <= d.x);
+    CHECK(d.x + d.w + 3 <= machineDriveX());
+    CHECK(machineDriveX() + labelWidth("DF0") + 3 <= hint.x);  // DF0 stays clear of the "?" box
+    for (const Box& b : {p, d}) CHECK(b.y >= cl.y + 2 && b.y + b.h <= cl.y + cl.h - 2);
+    CHECK(hint.x >= cl.x && hint.x + hint.w <= cl.x + cl.w && hint.y == cl.y && hint.h == cl.h);  // inside the line
+    CHECK(hint.x + hint.w <= exitButton().x);
+    const int hx = hint.x + hint.w / 2, hy = hint.y + hint.h / 2;
+    CHECK_EQ(hitTest(hx, hy), kCredits);  // the hint opens the credits
+    CHECK_EQ(hitTest(hx, hy, kViewSampler), kCredits);
+    CHECK_EQ(hitTest(hx, hy, kViewCredits), kCredits);  // and closes them
+    CHECK(hitTest(hx, hy, kViewEditOp, 0) != kCredits);  // covered by EDIT OP. / POS ED.
+    CHECK(hitTest(hx, hy, kViewPosEd) != kCredits);
+    CHECK_EQ(hitTest(exitButton().x + 1, exitButton().y + 5), kExit);  // EXIT PURE right next to it
+}
+
+TEST(pure_info_line_keeps_its_parts_apart) {
+    using namespace pure;
+    const Box info = infoArea(), sk = editSkipBox();
+    CHECK(sk.x >= info.x + 3 && sk.y >= info.y + 2 && sk.y + sk.h <= info.y + info.h - 1);
+    CHECK(sk.x + sk.w + 3 <= tempoArrow(0).x);  // the edit skip box no longer touches the TEMPO arrow
+    CHECK(valueX(sk, 2) >= sk.x + 2);           // two digits fit
 }

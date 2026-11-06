@@ -1,5 +1,7 @@
 #include "ui/pure_layout.h"
 
+#include "ui/pixel_canvas.h"
+
 namespace pure {
 namespace {
 constexpr int kLabelW = 63, kValueX = 63, kValueW = 35, kArrowX = 98, kArrowW = 11;
@@ -9,23 +11,41 @@ const char* const kLabels[12] = {"PLAY",   "STOP",     "MOD2WAV", "PATTERN", "CL
 }  // namespace
 
 // LENGTH, REPEAT and REPLEN show five hex digits: their value boxes are wider, the labels narrower.
+// FINETUNE shows at most two characters ("-8"): its label takes 6 px of the value box to keep its margins.
+constexpr int kFineW = 6;
 Box counterLabel(int row) {
-    if (row == 0) return {0, 0, 42, kRowH};
-    return {0, row * kRowH, row >= 6 ? kLabelW - 8 : kLabelW, kRowH};
+    if (row == 0) return {0, 0, 37, kRowH};  // room for the I / D boxes
+    return {0, row * kRowH, row >= 6 ? kLabelW - 8 : row == 3 ? kLabelW + kFineW : kLabelW, kRowH};
 }
-Box counterValue(int row) { return row >= 6 ? Box{kValueX - 8, row * kRowH, kValueW + 8, kRowH} : Box{kValueX, row * kRowH, kValueW, kRowH}; }
+Box counterValue(int row) {
+    if (row >= 6) return {kValueX - 8, row * kRowH, kValueW + 8, kRowH};
+    if (row == 3) return {kValueX + kFineW, row * kRowH, kValueW - kFineW, kRowH};
+    return {kValueX, row * kRowH, kValueW, kRowH};
+}
+const char* counterText(int row) {
+    static const char* const kText[kCounterRows] = {"POS", "PATTERN", "LENGTH", "FINETUNE", "SAMPLE",
+                                                    "VOLUME", "LENGTH", "REPEAT", "REPLEN"};
+    return row >= 0 && row < kCounterRows ? kText[row] : "";
+}
 Box counterArrow(int row, int dir) { return {kArrowX + dir * kArrowW, row * kRowH, kArrowW, kRowH}; }
-Box posButton(int i) { return {42 + i * 10, 0, i ? 11 : 10, kRowH}; }
+Box posButton(int i) { return {37 + i * 13, 0, 13, kRowH}; }  // 13 px: 3 px of face around the letter
 Box gridButton(int i) { return {kGridX + (i % 3) * kGridW, (i / 3) * kRowH, kGridW, kRowH}; }
 Box sideButton(int i) { return {kSideX, i * kRowH, 14, kRowH}; }
 Box scopeTitle() { return {kGridX, 4 * kRowH, kSideX - kGridX, kRowH}; }
 Box scope(int i) { return {kGridX + i * 47 + 8, 5 * kRowH, 39, 3 * kRowH}; }
 Box creditLine() { return {kGridX, 8 * kRowH, 124, kRowH}; }
+const char* machineName(int model) { return model == 2 ? "A1200" : "A500"; }
+int machineNameX() { return kGridX + 4; }
+// "A1200" ends 39 px after machineNameX(): the LEDs start 4 px after it, then DF0, then the "?" box
+Box machineLed(int i) { return {kGridX + 47 + i * 18, 8 * kRowH + 3, 14, 5}; }
+int machineDriveX() { return kGridX + 83; }
+Box creditHint() { return {kGridX + 124 - 13, 8 * kRowH, 13, kRowH}; }
 Box exitButton() { return {kGridX + 124, 8 * kRowH, 320 - kGridX - 124, kRowH}; }
 Box songRow() { return {0, 9 * kRowH, 320, kRowH}; }
-Box sampleRow() { return {0, 10 * kRowH, 284, kRowH}; }
-Box loadButton() { return {284, 10 * kRowH, 36, kRowH}; }
+Box sampleRow() { return {0, 10 * kRowH, 283, kRowH}; }  // 22 characters from x 106 keep 2 px off its edge
+Box loadButton() { return {283, 10 * kRowH, 37, kRowH}; }
 Box infoArea() { return {0, 11 * kRowH, 320, kPatternY - 11 * kRowH}; }
+Box editSkipBox() { return {5, 11 * kRowH + 4, 22, kRowH}; }  // 3 px clear of the TEMPO up arrow
 Box tempoArrow(int dir) { return {dir ? 78 : 30, 130, 9, 8}; }
 Box track(int i) { return {kTrackX0 + i * kTrackPitch, kPatternY, kTrackW, 256 - kPatternY}; }
 Box rowNumbers() { return {kRowNumX, kPatternY, kRowNumW, 256 - kPatternY}; }
@@ -118,6 +138,41 @@ Box creditsText() { return {2, kPatternY + kRowH + 2, 316, 256 - kPatternY - kRo
 int creditsRows() { return (creditsText().h - 2) / kCreditsPitch; }
 
 const char* buttonLabel(int i) { return i >= 0 && i < 12 ? kLabels[i] : ""; }
+
+int labelAdvance(char c) { return c == ' ' ? kLabelSpace : 8; }
+namespace {
+// first and one-past-last ink column of a caption drawn at x = 0, the shadow included
+void labelInk(const char* s, int& l, int& r) {
+    l = 1 << 20;
+    r = 0;
+    for (int x = 0; *s; x += labelAdvance(*s), ++s) {
+        const uint8_t m = glyphColumns(*s, kSmall);
+        for (int b = 0; b < 7; ++b)
+            if (m & (0x40 >> b)) {
+                l = x + b < l ? x + b : l;
+                r = x + b + 2 > r ? x + b + 2 : r;
+            }
+    }
+    if (r == 0) l = 0;
+}
+}  // namespace
+int labelWidth(const char* s) {
+    int l, r;
+    labelInk(s, l, r);
+    return r - l;
+}
+int labelX(const Box& b, const char* s) {
+    int l, r;
+    labelInk(s, l, r);
+    return b.x + (b.w - (r - l)) / 2 - l;
+}
+void drawLabel(PixelCanvas& c, const Box& b, const char* s, uint32_t ink, uint32_t shadow) {
+    const int y = b.y + (b.h - glyphRows(kSmall)) / 2;
+    for (int x = labelX(b, s); *s; x += labelAdvance(*s), ++s) {
+        const char one[2] = {*s, 0};
+        c.textShadow(x, y, one, ink, shadow, kSmall);
+    }
+}
 // glyphs use 6 of their 8 columns: the text ends 2 px before x + chars * 8
 int valueX(const Box& b, int chars) { return b.x + b.w - chars * 8 - 1; }
 

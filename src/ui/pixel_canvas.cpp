@@ -199,6 +199,16 @@ const uint8_t* amigaGlyph(char c) {
     return fonts().full[u < 128 ? u : 0];
 }
 
+uint8_t glyphColumns(char c, FontSize size) {
+    const FontTables& f = fonts();
+    unsigned u = (unsigned char)c;
+    if (u >= 128) u = 0;
+    const uint8_t* g = size == kSmall ? f.small[u] : size == kTall ? f.tall[u] : size == kMedium ? f.medium[u] : f.full[u];
+    uint8_t m = 0;
+    for (int r = 0; r < glyphRows(size); ++r) m |= g[r];
+    return m;
+}
+
 int glyphRows(FontSize size) { return size == kSmall ? 5 : size == kTall ? 9 : size == kMedium ? 6 : 7; }
 
 void PixelCanvas::fill(int x, int y, int w, int h, uint32_t c) {

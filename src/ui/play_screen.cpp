@@ -650,7 +650,8 @@ bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
     if (pure_ && !dialog_.open) {
         int ax, ay;
         pureToAmiga(x, y, ax, ay);
-        const int h = pure::hitTest(ax, ay, (pure::View)pureView(), editOpScreen_) == pure::kExit ? kPureExitHover : -1;
+        const int hit = pure::hitTest(ax, ay, (pure::View)pureView(), editOpScreen_);
+        const int h = hit == pure::kExit ? kPureExitHover : hit == pure::kCredits ? kPureCreditsHover : -1;
         const bool changed = h != hover_;
         hover_ = h;
         if (!(drag_ && leftDown && panel_ == Panel::Sampler)) return changed;
@@ -976,7 +977,7 @@ void PlayScreen::startNameEdit(int which, Engine& e) {
         line_.begin(s->name, 20);
     }
     nameEdit_ = which;
-    setStatus("TYPE THE NAME - ENTER KEEPS IT, ESC CANCELS");
+    setStatus(pure_ ? "EDIT NAME" : "TYPE THE NAME - ENTER KEEPS IT, ESC CANCELS");  // Pure: 10 characters
 }
 
 void PlayScreen::finishNameEdit(Engine& e, bool keep) {
