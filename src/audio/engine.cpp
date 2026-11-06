@@ -88,7 +88,7 @@ void Engine::unlock() { ReleaseSRWLockExclusive(SRW); }
 void Engine::setSong(std::unique_ptr<Song> s) {
     lock();
     player_->setSong(nullptr);
-    tfmxOn_ = tfmxPlaying_ = false;  // a pattern song replaces a TFMX song
+    tfmxOn_ = tfmxPlaying_ = chipPaused_ = false;  // a pattern song replaces a TFMX song
     song_ = static_cast<std::unique_ptr<Song>&&>(s);
     player_->setSong(song_.get());
     playFrames_ = 0;
@@ -101,12 +101,16 @@ void Engine::play() { play(0); }
 void Engine::play(uint16_t order) {
     lock();
     if (tfmxOn_) {
-        tfmx_->restart();
+        if (!chipPaused_) {  // STOP paused the chip song: PLAY goes on from there
+            tfmx_->restart();
+            playFrames_ = 0;
+        }
+        chipPaused_ = false;
         tfmxPlaying_ = true;
-    } else {
-        player_->play(order);
+    } else if (!player_->resume(order)) {  // elsewhere: fast-forward to `order`
+        player_->playFrom(order);
+        playFrames_ = 0;
     }
-    playFrames_ = 0;
     publish();
     unlock();
 }
@@ -259,6 +263,7 @@ bool Engine::installChip(ChipPlayer* p, const char* name, bool play) {
     tfmx_ = p;
     tfmxOn_ = true;
     tfmxPlaying_ = play;
+    chipPaused_ = false;
     if (!play) tfmx_->clearMeters();
     playFrames_ = 0;
     publish();
@@ -302,6 +307,7 @@ bool Engine::selectChipSubsong(int i) {
     song_ = static_cast<std::unique_ptr<Song>&&>(song);
     player_->setSong(song_.get());
     if (!tfmxPlaying_) tfmx_->clearMeters();
+    chipPaused_ = false;  // PLAY starts the new sub-song from its beginning
     playFrames_ = 0;
     publish();
     unlock();
@@ -368,6 +374,7 @@ void Engine::playPattern(uint16_t pattern) {
     if (tfmxOn_) {
         tfmx_->restart();
         tfmxPlaying_ = true;
+        chipPaused_ = false;
     } else {
         player_->playPattern(pattern);
     }
@@ -378,6 +385,7 @@ void Engine::playPattern(uint16_t pattern) {
 
 void Engine::stop() {
     lock();
+    if (tfmxOn_ && tfmxPlaying_) chipPaused_ = true;
     tfmxPlaying_ = false;
     tfmx_->clearMeters();  // nothing renders while stopped: let the meters fall
     player_->stop();

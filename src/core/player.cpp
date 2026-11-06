@@ -12,7 +12,19 @@ void Player::setSong(const Song* s) {
     playing_ = false;
     mixer_.reset();  // voices may point at samples of the song being replaced
     song_ = s;
-    if (s) mixer_.setNumChannels(s->numChannels);
+    resumable_ = false;
+    if (s) {
+        mixer_.setNumChannels(s->numChannels);
+        initialTempo();
+    }
+}
+
+void Player::initialTempo() {
+    speed_ = song_->initialSpeed ? song_->initialSpeed : 6;
+    bpm_ = song_->initialBpm >= 32 ? song_->initialBpm : 125;
+    globalVol_ = song_->globalVolume > 64 ? 64 : song_->globalVolume;
+    seenSpeed_ = song_->initialSpeed;
+    seenBpm_ = song_->initialBpm;
 }
 
 void Player::start(uint16_t order, uint16_t row, bool patternMode, uint16_t pattern) {
@@ -25,9 +37,12 @@ void Player::start(uint16_t order, uint16_t row, bool patternMode, uint16_t patt
         ch_[c].pan = song_->channelPan[c];
         mixer_.stopVoice(c);
     }
-    speed_ = song_->initialSpeed ? song_->initialSpeed : 6;
-    bpm_ = song_->initialBpm >= 32 ? song_->initialBpm : 125;
-    globalVol_ = song_->globalVolume > 64 ? 64 : song_->globalVolume;
+    if (patternMode) {  // the speed and BPM in effect stay
+        globalVol_ = song_->globalVolume > 64 ? 64 : song_->globalVolume;
+    } else {
+        initialTempo();
+    }
+    resumable_ = false;
     std::memset(visited_, 0, sizeof visited_);
     looped_ = false;
     patternMode_ = patternMode;
@@ -53,9 +68,51 @@ void Player::start(uint16_t order, uint16_t row, bool patternMode, uint16_t patt
 
 void Player::play(uint16_t order, uint16_t row) { start(order, row, false, 0); }
 
+void Player::playFrom(uint16_t order) {
+    start(0, 0, false, 0);
+    if (!playing_ || order == 0) return;
+    const uint16_t target = order < song_->order.size() ? order : 0;
+    constexpr double kMaxSeconds = 30 * 60;  // song time; jumps and loops may never reach the target
+    bool reached = target == 0;
+    for (double t = 0; !reached && playing_ && t < kMaxSeconds; t += 2.5 / bpm_) {
+        tick();
+        reached = playing_ && tick_ == 0 && !repeatingRow_ && order_ == target;
+    }
+    const uint8_t speed = speed_, bpm = bpm_, globalVol = globalVol_;
+    if (!reached) {  // the last tempo seen, fresh channels
+        start(target, 0, false, 0);
+        speed_ = speed;
+        bpm_ = bpm;
+        globalVol_ = globalVol;
+        return;
+    }
+    // at the target with the state the song has there; every voice silent until its next note
+    for (int c = 0; c < Mixer::kMaxVoices; ++c)
+        if (c != 32) mixer_.stopVoice(c);  // 32: the jam preview voice
+    std::memset(visited_, 0, sizeof visited_);
+    visited_[order_ >> 5] |= 1u << (order_ & 31);
+    looped_ = false;
+    row_ = tick_ = 0;
+    patDelay_ = 0;
+    repeatingRow_ = pendingStop_ = false;
+    posJump_ = break_ = loopJump_ = false;
+    samplesLeft_ = 0;
+    tickFrac_ = 0;
+}
+
+bool Player::resume(uint16_t order) {
+    if (!resumable_ || playing_ || !song_ || patternMode_ || order != order_ || song_->order.empty() ||
+        song_->patterns.empty())
+        return false;
+    resumable_ = false;
+    playing_ = true;
+    return true;
+}
+
 void Player::playPattern(uint16_t pattern, uint16_t row) { start(0, row, true, pattern); }
 
 void Player::stop() {
+    if (playing_) resumable_ = !patternMode_;
     playing_ = false;
     for (int c = 0; c < Mixer::kMaxVoices; ++c) mixer_.stopVoice(c);
 }
@@ -104,8 +161,18 @@ void Player::songEdited() {
     // the song may have lost patterns or positions (undo, clear): re-validate everything we index
     if (song_->patterns.empty() || song_->order.empty()) {
         stop();
+        resumable_ = false;
         order_ = pattern_ = row_ = 0;
         return;
+    }
+    // the tempo gadgets edit the initial speed / BPM: they set the tempo in effect too
+    if (song_->initialSpeed != seenSpeed_) {
+        seenSpeed_ = song_->initialSpeed;
+        if (seenSpeed_) speed_ = seenSpeed_;
+    }
+    if (song_->initialBpm != seenBpm_) {
+        seenBpm_ = song_->initialBpm;
+        if (seenBpm_ >= 32) bpm_ = seenBpm_;
     }
     if (patternMode_) {
         if (pattern_ >= song_->patterns.size()) pattern_ = 0;
@@ -297,6 +364,7 @@ void Player::processRow() {
     if (pendingStop_) {
         pendingStop_ = false;
         stop();
+        resumable_ = false;  // the song ended: PLAY starts it again
         return;
     }
     if (metroOn_ && !repeatingRow_ && row_ % metroEvery_ == 0) {
