@@ -10,6 +10,7 @@
 #include "core/amiga_synth.h"
 #include "core/ay_player.h"
 #include "core/pt3_player.h"
+#include "core/zx_trackers.h"
 #include "core/gme_player.h"
 #include "core/hippel_player.h"
 #include "core/sid_player.h"
@@ -183,6 +184,16 @@ bool Engine::loadSndh(const uint8_t* data, size_t size, const char* name, bool p
 
 bool Engine::loadPt3(const uint8_t* data, size_t size, const char* name, bool play) {
     Pt3Player* p = new Pt3Player;
+    p->setRate(mixer_->rate());
+    if (!p->load(data, size)) {
+        delete p;
+        return false;
+    }
+    return installChip(p, *p->title() ? p->title() : name, play);
+}
+
+bool Engine::loadZxTracker(const uint8_t* data, size_t size, const char* name, bool play) {
+    ZxTrackerPlayer* p = new ZxTrackerPlayer;
     p->setRate(mixer_->rate());
     if (!p->load(data, size)) {
         delete p;

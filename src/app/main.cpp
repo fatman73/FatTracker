@@ -18,6 +18,7 @@
 #include "core/gme_player.h"
 #include "core/hippel_player.h"
 #include "core/pt3_player.h"
+#include "core/zx_trackers.h"
 #include "core/sid_player.h"
 #include "core/sndh_player.h"
 #include "core/tfmx_player.h"
@@ -104,7 +105,7 @@ std::vector<uint8_t> g_pendingMdat, g_pendingSmpl;
 char g_pendingName[21] = {};
 bool loadPending() { return g_pending || g_pendingTfmx; }
 // The playback-only player a file goes to; chosen once in loadTfmxPair (with trial loads), used by applyTfmx.
-enum class Chip { Tfmx, Sid, Pt3, Gme, Synth, SynthFiles, Ay, Hippel, Sndh };  // SynthFiles: with companion files
+enum class Chip { Tfmx, Sid, Pt3, Gme, Synth, SynthFiles, Ay, Hippel, Sndh, ZxTracker };  // SynthFiles: with companion files
 Chip g_pendingChip = Chip::Tfmx;
 bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
                const std::wstring& mdatPath, Chip chip);
@@ -227,6 +228,10 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
             HippelPlayer trial;
             pick(Chip::Hippel, trial.load(d, n));
         }
+        if (!hippel && ZxTrackerPlayer::detect(d, n)) {  // ZX STC / Sound Tracker 1.1 / PT2 / ASC / SQT (no tags)
+            ZxTrackerPlayer trial;
+            pick(Chip::ZxTracker, trial.load(d, n));
+        }
     }
     if (!hippel && !TfmxPlayer::detect(data.data(), data.size())) return false;
     const std::wstring mfile = mdatPath.substr(slash == std::wstring::npos ? 0 : slash + 1);
@@ -268,6 +273,7 @@ bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smp
     switch (chip) {  // decided by loadTfmxPair's trial loads
         case Chip::Sid: ok = g_engine->loadSid(d, n, "", false); break;
         case Chip::Pt3: ok = g_engine->loadPt3(d, n, name, false); break;
+        case Chip::ZxTracker: ok = g_engine->loadZxTracker(d, n, name, false); break;
         case Chip::Gme: ok = g_engine->loadGme(d, n, name, false); break;
         case Chip::Synth: ok = g_engine->loadAmigaSynth(d, n, name, false); break;
         case Chip::SynthFiles: ok = g_engine->loadAmigaSynth(d, n, songFolderFiles(mdatPath), name, false); break;
@@ -498,7 +504,7 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.sndh;sndh.*;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.dw;*.dwold;dw.*;dwold.*;*.smus;smus.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.sndh;sndh.*;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.pt2;*.stc;*.st11;*.st13;*.asc;*.sqt;*.dw;*.dwold;dw.*;dwold.*;*.smus;smus.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;
