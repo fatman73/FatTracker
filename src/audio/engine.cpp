@@ -186,6 +186,13 @@ bool Engine::loadAmigaSynth(const uint8_t* data, size_t size, const char* name, 
     return installChip(p.release(), name, play);
 }
 
+bool Engine::loadAmigaSynth(const uint8_t* data, size_t size, const AmigaFileResolver& files, const char* name,
+                            bool play, std::string* error) {
+    std::unique_ptr<AmigaSynthPlayer> p = AmigaSynthPlayer::openWithFiles(data, size, files, error);
+    if (!p) return false;
+    return installChip(p.release(), name, play);
+}
+
 bool Engine::loadGme(const uint8_t* data, size_t size, const char* name, bool play) {
     GmePlayer* p = new GmePlayer;
     p->setRate(mixer_->rate());

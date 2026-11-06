@@ -1,11 +1,13 @@
 // The ported Amiga synth replayers (one source file each: JamCracker, Delta Music, SidMon, SoundMon,
-// Digital Mugician, David Whittaker); AmigaSynthPlayer::open tries them in turn.
+// Digital Mugician, David Whittaker); AmigaSynthPlayer::open tries them in turn. IFF SMUS needs its instrument
+// files and is opened by AmigaSynthPlayer::openWithFiles.
 #pragma once
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
-class AmigaSynthPlayer;
+#include "core/amiga_synth.h"
 
 std::unique_ptr<AmigaSynthPlayer> openJamCracker(const uint8_t* data, size_t size);  // jamcracker.cpp
 
@@ -34,3 +36,9 @@ std::unique_ptr<AmigaSynthPlayer> openMugician(const uint8_t* data, size_t size)
 // SC68; files with sub-songs start on the longest one), whittaker.cpp
 bool detectWhittaker(const uint8_t* data, size_t size);
 std::unique_ptr<AmigaSynthPlayer> openWhittaker(const uint8_t* data, size_t size);
+// IFF SMUS (Electronic Arts Deluxe Music Construction Set / Sonix scores: "FORM" .... "SMUS") with external
+// instruments (<name>.instr: Sonix synthesis, SampledSound + <sample>.ss, or IFF 8SVX) read through `files`,
+// iffsmus.cpp. A missing or broken instrument refuses the score (as NostalgicPlayer does); `error` says which.
+bool isIffSmus(const uint8_t* data, size_t size);
+std::unique_ptr<AmigaSynthPlayer> openIffSmus(const uint8_t* data, size_t size, const AmigaFileResolver& files,
+                                              std::string* error = nullptr);

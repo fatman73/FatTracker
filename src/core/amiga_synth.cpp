@@ -2,6 +2,9 @@
 
 #include <cmath>
 #include <cstring>
+#include <cwchar>
+#include <filesystem>
+#include <fstream>
 
 #include "core/amiga_formats.h"
 #include "core/song.h"
@@ -76,6 +79,70 @@ std::unique_ptr<AmigaSynthPlayer> AmigaSynthPlayer::open(const uint8_t* d, size_
     return nullptr;
 }
 
+bool AmigaSynthPlayer::needsFiles(const uint8_t* d, size_t n) { return isIffSmus(d, n); }
+
+std::unique_ptr<AmigaSynthPlayer> AmigaSynthPlayer::openWithFiles(const uint8_t* d, size_t n,
+                                                                  const AmigaFileResolver& files, std::string* error) {
+    if (!d || n < 8 || n > (64u << 20)) return nullptr;
+    if (isIffSmus(d, n)) return openIffSmus(d, n, files, error);
+    return open(d, n);
+}
+
+// ---------------------------------------------------------------- companion files
+bool isPlainFileName(const std::string& name) {
+    if (name.empty() || name.size() > 255 || name.find("..") != std::string::npos) return false;
+    for (const char ch : name) {
+        const unsigned char c = (unsigned char)ch;
+        if (c < 0x20 || c == 0x7F || c == '/' || c == '\\' || c == ':') return false;
+    }
+    return true;
+}
+
+namespace {
+// The regular file in `dir` whose name is `want` (exactly, else ignoring case), read when it is at most `maxBytes`.
+bool readFromFolder(const std::filesystem::path& dir, const std::wstring& want, size_t maxBytes, std::vector<uint8_t>& out) {
+    std::error_code ec;
+    std::filesystem::directory_iterator it(dir, ec);
+    if (ec) return false;
+    std::filesystem::path found;
+    bool exact = false;
+    for (int guard = 0; it != std::filesystem::directory_iterator() && guard < 100000; ++guard) {
+        const std::wstring name = it->path().filename().wstring();
+        const bool same = name == want;
+        if ((same || _wcsicmp(name.c_str(), want.c_str()) == 0) && it->is_regular_file(ec) && !ec) {
+            if (same || found.empty()) found = it->path();
+            exact = exact || same;
+            if (exact) break;
+        }
+        it.increment(ec);
+        if (ec) break;
+    }
+    if (found.empty()) return false;
+    const uintmax_t size = std::filesystem::file_size(found, ec);
+    if (ec || size > maxBytes) return false;
+    std::ifstream in(found, std::ios::binary);
+    if (!in) return false;
+    out.resize((size_t)size);
+    if (size && !in.read(reinterpret_cast<char*>(out.data()), (std::streamsize)size)) {
+        out.clear();
+        return false;
+    }
+    return true;
+}
+}  // namespace
+
+AmigaFileResolver folderFileResolver(const std::wstring& dir) {
+    return [dir](const std::string& name, std::vector<uint8_t>& out) {
+        out.clear();
+        if (!isPlainFileName(name)) return false;
+        std::wstring want;  // the names are Amiga (Latin-1) text
+        for (const char ch : name) want += (wchar_t)(unsigned char)ch;
+        constexpr size_t kMax = 16u << 20;
+        const std::filesystem::path base(dir);
+        return readFromFolder(base, want, kMax, out) || readFromFolder(base / L"Instruments", want, kMax, out);
+    };
+}
+
 bool AmigaSynthPlayer::detect(const uint8_t* d, size_t n) {
     if (!d || n < 8) return false;
     return std::memcmp(d, "BeEp", 4) == 0  // JamCracker
@@ -100,11 +167,17 @@ long AmigaSynthPlayer::measure(double maxSeconds) {
     restart();
     long ticks = 0;
     const long limit = (long)(tickHz_ * maxSeconds);  // 30 minutes at most by default
-    while (!endReached_ && ticks < limit) {
+    // formats that change their tick rate while playing (CIA tempo) are timed tick by tick
+    const double startHz = tickHz_;
+    bool steady = true;
+    double secs = 0;
+    while (!endReached_ && (steady ? ticks < limit : secs < maxSeconds)) {
         playTick();
         ++ticks;
+        secs += 1.0 / tickHz_;
+        steady = steady && tickHz_ == startHz;
     }
-    seconds_ = ticks / tickHz_;
+    seconds_ = steady ? ticks / tickHz_ : secs;
     restart();
     return ticks;
 }
@@ -148,8 +221,8 @@ void AmigaSynthPlayer::render(float* out, uint32_t frames, float gain) {
         tickLeft_ -= 1;
         float l = 0, r = 0;
         for (int v = 0; v < nv; ++v) {
-            const float s = ch_[v].next(rate_) * (nv > 4 && v >= 3 ? 0.25f : 1.f);
-            const int pc = v < 4 ? v : 3;
+            const float s = ch_[v].next(rate_) * (nv > 4 && v >= 3 && !ownChannels_ ? 0.25f : 1.f);
+            const int pc = ownChannels_ ? (v & 3) : v < 4 ? v : 3;
             const bool left = pc == 0 || pc == 3;  // Paula: 0 and 3 left, 1 and 2 right
             l += s * (left ? 1.f : 0.3f);
             r += s * (left ? 0.3f : 1.f);
