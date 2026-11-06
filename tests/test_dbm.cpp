@@ -125,7 +125,7 @@ int countPlayable(const wchar_t* ext1, const wchar_t* ext2) {
         const auto data = readAll(e.path());
         auto r = loadModule(data.data(), data.size());
         if (!r.ok()) {
-            std::printf("  FAIL %ls: %s\n", e.path().filename().c_str(), r.error());
+            std::printf("  FAIL %ls: %s\n", e.path().filename().wstring().c_str(), r.error());
             CHECK(r.ok());
             continue;
         }
@@ -133,7 +133,7 @@ int countPlayable(const wchar_t* ext1, const wchar_t* ext2) {
         renderSong(r.value(), 22050, Interp::Linear, true, 10.f, pcm);
         float peak = 0;
         for (float v : pcm) peak = v > peak ? v : (-v > peak ? -v : peak);
-        if (peak < 0.01f) std::printf("  SILENT %ls\n", e.path().filename().c_str());
+        if (peak < 0.01f) std::printf("  SILENT %ls\n", e.path().filename().wstring().c_str());
         CHECK(peak >= 0.01f);
         ++count;
     }

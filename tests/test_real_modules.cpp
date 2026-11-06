@@ -70,7 +70,7 @@ TEST(real_modules_xm_roundtrip) {
         auto b = loadModule(bytes.data(), bytes.size());
         ++n;
         if (!b.ok() || !sameCells(a.value(), b.value()) || !sameSamples(a.value(), b.value())) {
-            if (bad < 5) std::printf("  roundtrip mismatch: %ls\n", e.path().filename().c_str());
+            if (bad < 5) std::printf("  roundtrip mismatch: %ls\n", e.path().filename().wstring().c_str());
             ++bad;
         }
     }

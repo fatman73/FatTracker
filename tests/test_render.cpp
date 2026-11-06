@@ -104,7 +104,7 @@ TEST(ref_modules_match) {
             std::vector<float> out;
             renderSong(song.value(), w.value().rate, Interp::None, false, 600.f, out);
             double corr = correlation(out.data(), out.size(), w.value().samples.data(), w.value().samples.size());
-            std::printf("  ref %ls: corr=%.4f\n", e.path().filename().c_str(), corr);
+            std::printf("  ref %ls: corr=%.4f\n", e.path().filename().wstring().c_str(), corr);
             CHECK(corr >= 0.98);
             ++compared;
         }
