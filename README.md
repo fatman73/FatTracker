@@ -120,7 +120,9 @@ cmake --build build-mac
 ```
 
 This gives `build-mac/FatTracker.app`, plus `fttest`, `ftapptest`, `ftrender` and `ftplay` (plays a song through
-Core Audio). On the Mac, Command works as Ctrl. Keys a MacBook lacks have their own shortcuts, listed in HELP.
+Core Audio). One universal binary runs on macOS 13 or newer, Apple Silicon and Intel. On the Mac, Command works
+as Ctrl. Keys a MacBook lacks have their own shortcuts, listed in HELP. Settings (`FatTracker.ini`), your own drive
+sounds (`sounds/floppy_*.wav`) and SC68 / YMST replays (`Replay/`) live in `~/Library/Application Support/FatTracker`.
 
 `tools/package_mac.sh [notary-profile]` builds the release `.dmg`. It signs the app with a Developer ID and,
 given a `notarytool` keychain profile, notarizes and staples both the app and the `.dmg`.
