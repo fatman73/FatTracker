@@ -5,7 +5,9 @@
 # usage: tools/package_mac.sh [notary-profile]
 #   without a profile: signed app + signed .dmg (Gatekeeper on another Mac asks once: right click > Open)
 #   with a profile:    also notarized and stapled ("Notarized Developer ID")
-# The profile is made once by the user in Terminal (the password never goes into the repo or a chat):
+# The profile already in the keychain is "FatSlicer" (made for FatSlicer, same Developer ID team):
+#   tools/package_mac.sh FatSlicer
+# A new one is made once by the user in Terminal (the password never goes into the repo or a chat):
 #   xcrun notarytool store-credentials <profile> --apple-id <Apple ID> --team-id F4CUVQSJ8Y
 #
 # Environment: FT_SIGN_IDENTITY (default: the first "Developer ID Application" in the keychain), FT_BUILD (build-mac).
