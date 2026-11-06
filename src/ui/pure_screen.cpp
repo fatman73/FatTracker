@@ -349,6 +349,7 @@ UiAction PlayScreen::pureMouse(float lx, float ly, bool right, Engine& e) {
     }
     if (h >= pure::kButton && h < pure::kButton + 12) {
         const int b = kPureButtons[h - pure::kButton];
+        if (b == 6) return recordButton(right, e);  // RECORD, right click: STEP / LIVE
         if (b >= 0) return pressButton(b, e);
         if (b == -2) return UiAction::ExportWav;
         if (b == -6) return UiAction::OpenFile;  // DISK OP.: the file requester
@@ -463,7 +464,7 @@ void PlayScreen::pureOpDraw(PixelCanvas& c, Engine& e) {
                 const bool on = (it.action >= pure::kOpTrack && it.action <= pure::kOpBlock && transposeScope_ == it.action - pure::kOpTrack) ||
                                 (it.action == pure::kOpOnlySample && transposeOnlySample_);
                 box(c, it.box, on);
-                label(c, it.box, it.label);
+                label(c, it.box, it.action == pure::kOpRecMode ? pure::recModeLabel(recordStep_) : it.label);
             }
         }
     }
@@ -494,6 +495,7 @@ UiAction PlayScreen::pureOpClick(int item, bool right, Engine& e) {
         case pure::kOpSwap: opExchange(true, e); break;
         case pure::kOpNewPat: opNewPattern(false, e); break;
         case pure::kOpClonePat: opNewPattern(true, e); break;
+        case pure::kOpRecMode: toggleRecMode(e); break;
         case pure::kOpMetro:
             if (it.kind == pure::kOpValue) {
                 metronome_ = !metronome_;

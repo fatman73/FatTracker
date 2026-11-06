@@ -8,8 +8,9 @@
 namespace {
 constexpr int kHitEditOp = 800;
 // left column: value rows with arrows
-enum { R_SKIP, R_OCTAVE, R_QUANT, R_METRO, R_PATLEN, R_ROWS };
-const char* const kRowLabels[R_ROWS] = {"EDIT SKIP", "OCTAVE", "REC QUANTIZE", "METRONOME", "PATTERN LENGTH"};
+enum { R_SKIP, R_OCTAVE, R_QUANT, R_METRO, R_PATLEN, R_RECMODE, R_ROWS };
+const char* const kRowLabels[R_ROWS] = {"EDIT SKIP", "OCTAVE", "REC QUANTIZE", "METRONOME", "PATTERN LENGTH",
+                                        "REC MODE"};
 // right side buttons
 enum {
     B_NEWPAT, B_CLONEPAT, B_TR_TRACK, B_TR_PATTERN, B_TR_SONG, B_TR_BLOCK, B_TR_ONLY, B_TR_M12, B_TR_M1, B_TR_P1,
@@ -33,8 +34,8 @@ RectF PlayScreen::editOpCell(int row, int col) const {
 
 static RectF opButton(RectF a, int i) {
     switch (i) {
-        case B_NEWPAT: return {a.x + 14, a.y + 14 + 5 * 48.f, 210, 40};
-        case B_CLONEPAT: return {a.x + 232, a.y + 14 + 5 * 48.f, 210, 40};
+        case B_NEWPAT: return {a.x + 14, a.y + 14 + (int)R_ROWS * 48.f, 210, 40};
+        case B_CLONEPAT: return {a.x + 232, a.y + 14 + (int)R_ROWS * 48.f, 210, 40};
         case B_TR_TRACK: case B_TR_PATTERN: case B_TR_SONG: case B_TR_BLOCK:
             return {a.x + 600 + (i - B_TR_TRACK) * 140.f, a.y + 56, 132, 40};
         case B_TR_ONLY: return {a.x + 600, a.y + 104, 412, 40};
@@ -62,6 +63,7 @@ void PlayScreen::editOpDraw(Gfx& g, Text& tx, const Theme& t) {
             case R_QUANT: std::snprintf(v, sizeof v, quantize_ == 1 ? "OFF" : "%d ROWS", quantize_); break;
             case R_METRO: std::snprintf(v, sizeof v, metronome_ ? "EVERY %d" : "OFF", metroEvery_); break;
             case R_PATLEN: std::snprintf(v, sizeof v, "%d", last_.numChannels ? patternRowsCache_ : 64); break;
+            case R_RECMODE: std::snprintf(v, sizeof v, recordStep_ ? "STEP" : "LIVE"); break;
         }
         g.well(editOpCell(r, 2), t, mixColor(t.panelLight, t.panel, 0.25f));
         tx.draw(g, editOpCell(r, 2), v, 16.f, t.digits, Align::Center, FontRole::Mono);
@@ -105,6 +107,10 @@ UiAction PlayScreen::editOpMouse(float x, float y, bool right, Engine& e) {
     if (editOpCell(R_METRO, 2).contains(x, y)) {
         metronome_ = !metronome_;
         applyMetronome(e);
+        return UiAction::Redraw;
+    }
+    if (editOpCell(R_RECMODE, 2).contains(x, y)) {
+        toggleRecMode(e);
         return UiAction::Redraw;
     }
     for (int i = 0; i < B_COUNT; ++i) {
@@ -161,6 +167,7 @@ void PlayScreen::opStep(int row, int d, bool big, Engine& e) {
             e.edit([&](Song& song) { editor_.setPatternRows(song, pat, rows); });
             break;
         }
+        case R_RECMODE: toggleRecMode(e); break;  // two values: either arrow switches
     }
 }
 
@@ -222,7 +229,7 @@ void PlayScreen::helpDraw(Gfx& g, Text& tx, const Theme& t) {
     static const char* const lines[] = {
         "PLAYBACK",                          "  F5 / RIGHT ALT      PLAY SONG",
         "  RIGHT CTRL          PLAY PATTERN", "  SPACE               STOP / EDIT MODE ON-OFF",
-        "  RECORD button       RECORD WHILE PLAYING", "",
+        "  RECORD button       RECORD (RIGHT CLICK: STEP / LIVE)", "",
         "NAVIGATION",                        "  ARROWS              MOVE CURSOR",
         "  TAB / SHIFT+TAB     NEXT / PREVIOUS TRACK", "  PGUP / PGDN / HOME / END",
         "  CTRL+LEFT/RIGHT     SONG POSITION",  "  F11                 VIEW 4 / 8 / 16 / 32",

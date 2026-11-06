@@ -100,6 +100,7 @@ private:
     void counterStep(int row, int dir, bool big, Engine& e);
     void chipSubsongStep(int dir, Engine& e);  // chip songs: the POS counter selects the sub-song
     UiAction pressButton(int b, Engine& e);  // main button grid (B_PLAY ...)
+    UiAction recordButton(bool right, Engine& e);  // RECORD: start / stop; right click: STEP / LIVE
     void bpmStep(int d, Engine& e);
     // Pure mode screen (pure_screen.cpp)
     void pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e);
@@ -149,7 +150,11 @@ private:
     Editor editor_;
     Clip clip_;
     bool editMode_ = false;
-    bool recordMode_ = false;
+    bool recordMode_ = false;   // RECORD pressed (step or live, see recordStep_)
+    bool recordStep_ = true;    // RECORD mode setting: STEP (the pattern stands, a note moves one row) or LIVE
+    bool stepRecording() const { return recordMode_ && recordStep_ && !last_.playing; }
+    const char* recordStatus() const;  // "RECORD: STEP" / "REC STEP" in Pure mode
+    void toggleRecMode(Engine& e);     // STEP <-> LIVE; ends a recording in progress
     bool scopePattern_ = false;  // side panel operations act on the whole pattern (else track)
     int curCh_ = 0, curCol_ = 0;
     int octave_ = 4;
@@ -193,7 +198,8 @@ private:
     UiAction samplerWaveMouse(float x, float y, bool right, Engine& e);  // selection, loop handles, pencil
     void syncSelection(Engine& e);  // a selection belongs to one sample: forget it when the sample changes
     int selSample_ = -1;
-    // EDIT OP. actions (edit_op.cpp), shared with the Pure screen; row: skip, octave, quantize, metronome, length
+    // EDIT OP. actions (edit_op.cpp), shared with the Pure screen; row: skip, octave, quantize, metronome, length,
+    // record mode
     void opStep(int row, int d, bool big, Engine& e);
     void opNewPattern(bool clone, Engine& e);
     void opTranspose(int semis, Engine& e);
@@ -250,6 +256,7 @@ public:
     void startNameEdit(int which, Engine& e);  // 1 song name, 2 sample name
     bool takeRecordRequest() { const bool r = recordRequested_; recordRequested_ = false; return r; }
     void setRecording(bool on) { sampling_ = on; }
+    void pressRecord(bool right, Engine& e) { recordButton(right, e); }  // dev screenshots
     void setEditOpScreen(int s) { editOpScreen_ = s < 0 ? 0 : s % 3; }  // dev screenshots
     bool recording() const { return sampling_; }       // fixed demo time (dev screenshots), < 0 = clock
     bool takeDirRead() { const bool r = dirRead_; dirRead_ = false; return r; }  // DISK OP. listed a folder

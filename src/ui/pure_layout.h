@@ -53,6 +53,7 @@ enum OpKind { kOpButton, kOpValue, kOpUp, kOpDown, kOpCaption };
 enum OpAction {
     kOpNone, kOpTrack, kOpPattern, kOpSong, kOpBlock, kOpTrM12, kOpTrM1, kOpTrP1, kOpTrP12, kOpOnlySample,
     kOpExchange, kOpReplace, kOpSwap, kOpSkip, kOpOctave, kOpQuant, kOpMetro, kOpPatLen, kOpNewPat, kOpClonePat,
+    kOpRecMode,  // RECORD: step / live
     kOpSample = 100,  // + sampler operation
 };
 struct OpItem {
@@ -87,6 +88,7 @@ Box opArea();
 Box opTitle();
 Box opExit();
 const char* opScreenTitle(int screen);
+const char* recModeLabel(bool step);  // "REC STEP" / "REC LIVE": the EDIT OP. button and the status
 int opCount(int screen);
 OpItem opItem(int screen, int i);
 Box posLine(int i);    // POS ED. list lines, the current position on line kPosLines / 2 - 1
