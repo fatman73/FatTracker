@@ -11,6 +11,9 @@
 #include "formats/formats.h"
 #include "audio/capture.h"
 #include "core/sample_edit.h"
+#include "core/ay_player.h"
+#include "core/hippel_player.h"
+#include "core/sid_player.h"
 #include "core/tfmx_player.h"
 #include "formats/sample_io.h"
 #include "ui/cursor.h"
@@ -147,13 +150,41 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
     else if (hasSuffix(L".smpl")) mdatPath = swapExt(path, 5, L".mdat");
     else if (hasSuffix(L".sam")) mdatPath = swapExt(path, 4, L".tfx");
     if (mdatPath != path && readFileW(mdatPath.c_str(), data)) return false;
-    if (!TfmxPlayer::detect(data.data(), data.size())) return false;
+    // Future Composer / Jochen Hippel: one file with song and samples, played like TFMX
+    // Hippel's probes search the whole file: they count only for FC / Hippel names or a tag at the start,
+    // and the file must really load, else the module loaders get it (a MOD may name a sample "TFMX")
+    auto named = [&](std::initializer_list<const wchar_t*> exts) {
+        for (const wchar_t* x : exts) {
+            const size_t n = wcslen(x);
+            if (file.size() > n && (_wcsicmp(file.c_str() + file.size() - n, x) == 0 || !_wcsnicmp(file.c_str(), x + 1, n - 1) && file[n - 1] == L'.'))
+                return true;
+        }
+        return false;
+    };
+    const bool hippelName = named({L".fc", L".fc13", L".fc14", L".smod", L".hip", L".hipc", L".hip7", L".sog", L".mcmd", L".coso"});
+    const bool hippelTag = data.size() >= 4 && (!std::memcmp(data.data(), "FC14", 4) || !std::memcmp(data.data(), "SMOD", 4) ||
+                                                !std::memcmp(data.data(), "COSO", 4) || !std::memcmp(data.data(), "MCMD", 4));
+    bool hippel = false;  // a one-file chip song (Hippel / FC, C64 SID, AY / YM) that really loads
+    if (!TfmxPlayer::detect(data.data(), data.size()) && mdatPath == path) {
+        if (SidPlayer::detect(data.data(), data.size())) {
+            SidPlayer trial;
+            hippel = trial.load(data.data(), data.size());
+        } else if (AyPlayer::detect(data.data(), data.size())) {  // YM / VTX / PSG (LHA packed YM too)
+            AyPlayer trial;
+            hippel = trial.load(data.data(), data.size());
+        }
+        if (!hippel && (hippelName || hippelTag) && HippelPlayer::detect(data.data(), data.size())) {
+            HippelPlayer trial;
+            hippel = trial.load(data.data(), data.size());
+        }
+    }
+    if (!hippel && !TfmxPlayer::detect(data.data(), data.size())) return false;
     const std::wstring mfile = mdatPath.substr(slash == std::wstring::npos ? 0 : slash + 1);
     if (!_wcsnicmp(mfile.c_str(), L"mdat.", 5)) smplPath = dir + L"smpl." + mfile.substr(5);
     else if (mfile.size() > 5 && !_wcsicmp(mfile.c_str() + mfile.size() - 5, L".mdat")) smplPath = swapExt(mdatPath, 5, L".smpl");
     else if (mfile.size() > 4 && !_wcsicmp(mfile.c_str() + mfile.size() - 4, L".tfx")) smplPath = swapExt(mdatPath, 4, L".sam");
     std::vector<uint8_t> smpl;
-    if (smplPath.empty() || readFileW(smplPath.c_str(), smpl)) {
+    if (!hippel && (smplPath.empty() || readFileW(smplPath.c_str(), smpl))) {
         g_screen.setStatus("TFMX: SMPL FILE NOT FOUND NEXT TO MDAT");
         return true;
     }
@@ -180,8 +211,16 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
 
 bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
                const std::wstring& mdatPath) {
-    if (!g_engine->loadTfmx(mdat.data(), mdat.size(), smpl.data(), smpl.size(), name, false)) {
-        g_screen.setStatus("TFMX: CANNOT PLAY THIS FILE");
+    const bool sid = smpl.empty() && SidPlayer::detect(mdat.data(), mdat.size());
+    AyPlayer ayTrial;
+    const bool ay = !sid && smpl.empty() && AyPlayer::detect(mdat.data(), mdat.size()) && ayTrial.load(mdat.data(), mdat.size());
+    const bool ok = sid  ? g_engine->loadSid(mdat.data(), mdat.size(), "", false)
+                    : ay ? g_engine->loadAy(mdat.data(), mdat.size(), name, false)
+                    : smpl.empty() && HippelPlayer::detect(mdat.data(), mdat.size())
+                        ? g_engine->loadHippel(mdat.data(), mdat.size(), name, false)
+                        : g_engine->loadTfmx(mdat.data(), mdat.size(), smpl.data(), smpl.size(), name, false);
+    if (!ok) {
+        g_screen.setStatus("CANNOT PLAY THIS FILE");
         return false;
     }
     g_screen.songChanged();
@@ -299,7 +338,7 @@ bool saveAsDialog(HWND hwnd, DWORD filter = 1);  // 1 XM, 2 MOD, 3 WAV
 
 bool saveTo(const std::wstring& path, SaveKind kind) {
     if (g_engine->tfmx()) {  // the TFMX display song is not the music: nothing to save
-        g_screen.setStatus("TFMX: PLAYBACK ONLY - NOTHING TO SAVE");
+        g_screen.setStatus("PLAYBACK ONLY - NOTHING TO SAVE");
         g_dirty = true;
         return false;
     }
@@ -400,7 +439,7 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.ym;*.vtx;*.psg;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;

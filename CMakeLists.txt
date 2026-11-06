@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(FatTracker LANGUAGES CXX RC)
+project(FatTracker LANGUAGES C CXX RC)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,7 +14,16 @@ file(GLOB FT_CORE_SOURCES CONFIGURE_DEPENDS src/core/*.cpp src/formats/*.cpp)
 # TFMX decoder adapted from libtfmxaudiodecoder (GPL v2+), see src/core/tfmx/README.txt
 file(GLOB FT_TFMX_SOURCES CONFIGURE_DEPENDS src/core/tfmx/*.cpp)
 set_source_files_properties(${FT_TFMX_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
-add_library(ftcore STATIC ${FT_CORE_SOURCES} ${FT_TFMX_SOURCES})
+# Jochen Hippel / Future Composer decoder from libtfmxaudiodecoder (GPL v2+), see src/core/hippel/README.txt
+file(GLOB FT_HIPPEL_SOURCES CONFIGURE_DEPENDS src/core/hippel/*.cpp)
+set_source_files_properties(${FT_HIPPEL_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
+# C64 SID emulation: cRSID by Hermit (Mihaly Horvath), see src/core/crsid/README.txt; one translation unit
+set(FT_CRSID_SOURCES src/core/crsid/libcRSID.c)
+set_source_files_properties(${FT_CRSID_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1;/TP")  # C++: nested functions became lambdas
+# AY-3-8910 / YM2149 emulation: ayumi by Peter Sovietov (MIT), plain C
+set(FT_AYUMI_SOURCES src/core/ayumi/ayumi.c)
+set_source_files_properties(${FT_AYUMI_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
+add_library(ftcore STATIC ${FT_CORE_SOURCES} ${FT_TFMX_SOURCES} ${FT_HIPPEL_SOURCES} ${FT_CRSID_SOURCES} ${FT_AYUMI_SOURCES})
 target_include_directories(ftcore PUBLIC src)
 
 # Windows-specific modules shared by the app and the test runner

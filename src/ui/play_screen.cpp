@@ -684,7 +684,7 @@ UiAction PlayScreen::pressButton(int b, Engine& e) {
             break;
         case B_EDIT:
             if (e.tfmx()) {
-                setStatus("TFMX: PLAYBACK ONLY");
+                setStatus("PLAYBACK ONLY");
                 break;
             }
             editMode_ = !editMode_;
@@ -692,7 +692,7 @@ UiAction PlayScreen::pressButton(int b, Engine& e) {
             break;
         case B_RECORD:
             if (e.tfmx()) {
-                setStatus("TFMX: PLAYBACK ONLY");
+                setStatus("PLAYBACK ONLY");
                 break;
             }
             recordMode_ = !recordMode_;
@@ -843,7 +843,7 @@ void PlayScreen::startNameEdit(int which, Engine& e) {
     const Song* s = e.song();
     if (!s) return;
     if (e.tfmx()) {
-        setStatus("TFMX: PLAYBACK ONLY");
+        setStatus("PLAYBACK ONLY");
         return;
     }
     if (which == 2) {
