@@ -236,6 +236,11 @@ void Vgm_Emu::set_tempo_( double t )
 blargg_err_t Vgm_Emu::set_sample_rate_( long sample_rate )
 {
 	RETURN_ERR( blip_buf.set_sample_rate( sample_rate, 1000 / 30 ) );
+	for ( int k = 0; k < 2; k++ ) // FatTracker: as blip_buf
+	{
+		RETURN_ERR( ft_bufs [k].set_sample_rate( sample_rate, 1000 / 30 ) );
+		RETURN_ERR( ft_monos [k].set_sample_rate( sample_rate, 1000 / 30 ) );
+	}
 	return Classic_Emu::set_sample_rate_( sample_rate );
 }
 
@@ -297,12 +302,12 @@ void Vgm_Emu::set_voice( int i, Blip_Buffer* c, Blip_Buffer* l, Blip_Buffer* r )
 void Vgm_Emu::mute_voices_( int mask )
 {
 	Classic_Emu::mute_voices_( mask );
-	dac_synth.output( &blip_buf );
+	dac_synth.output( &ft_bufs [0] ); // FatTracker: the DAC and the PSG into their own buffers (see ft_end_frame)
 	if ( uses_fm )
 	{
-		psg[0].output( (mask & 0x80) ? 0 : &blip_buf );
+		psg[0].output( (mask & 0x80) ? 0 : &ft_bufs [1] );
 		if ( psg_dual )
-			psg[1].output( (mask & 0x80) ? 0 : &blip_buf );
+			psg[1].output( (mask & 0x80) ? 0 : &ft_bufs [1] );
 		if ( ym2612[0].enabled() )
 		{
 			dac_synth.volume( (mask & 0x40) ? 0.0 : 0.1115 / 256 * fm_gain * gain() );
@@ -347,6 +352,11 @@ blargg_err_t Vgm_Emu::load_mem_( byte const* new_data, long new_size )
 	psg_t6w28 = ( psg_rate & 0x80000000 ) != 0;
 	psg_rate &= 0x0FFFFFFF;
 	blip_buf.clock_rate( psg_rate );
+	for ( int k = 0; k < 2; k++ ) // FatTracker: as blip_buf
+	{
+		ft_bufs [k].clock_rate( psg_rate );
+		ft_monos [k].clock_rate( psg_rate );
+	}
 
 	data     = new_data;
 	data_end = new_data + new_size;
@@ -482,6 +492,11 @@ blargg_err_t Vgm_Emu::start_track_( int track )
 
 		fm_time_offset = 0;
 		blip_buf.clear();
+		for ( int k = 0; k < 2; k++ ) // FatTracker: as blip_buf
+		{
+			ft_bufs [k].clear();
+			ft_monos [k].clear();
+		}
 		Dual_Resampler::clear();
 	}
 	return 0;

@@ -51,6 +51,14 @@ public:
 
 	static gme_type_t static_type() { return gme_vgm_type; }
 
+	// FatTracker: per-voice meters with a YM2612 (FM 1-6 from the chip, PCM and PSG from the frame buffers)
+	bool ft_uses_ym2612() const { return uses_fm && ym2612 [0].enabled(); }
+	void ft_set_voice_taps( ft_voice_taps_t* taps, Ym2612_Emu::ft_voice_taps_t* fm )
+	{
+		ft_taps = taps;
+		ym2612 [0].ft_set_voice_taps( fm );
+	}
+
 public:
 	// deprecated
 	using Music_Emu::load;

@@ -24,7 +24,7 @@ public:
     void render(float* stereo, uint32_t frames, float gain) override;
     int voices() const override;
     float vu(int v) const override;
-    void scope(int v, float* dst, int n) const override;  // the mixed output (SID voices are not separable)
+    void scope(int v, float* dst, int n) const override;  // each voice's own output (before the filter)
     double seconds() const override { return 0; }      // SID files carry no length
     const char* format() const override;
     bool buildDisplay(Song& out) override;

@@ -252,6 +252,7 @@ void Spc_Dsp::run( int clock_count )
 
 			int brr_header = ram [v->brr_addr];
 			int kon_delay = v->kon_delay;
+			int ft_out = 0; // FatTracker: this voice's output
 
 			// Pitch
 			int pitch = GET_LE16A( &VREG(v_regs,pitchl) ) & 0x3FFF;
@@ -330,6 +331,8 @@ void Spc_Dsp::run( int clock_count )
 
 					main_out_l += l;
 					main_out_r += r;
+
+					ft_out = (l + r) >> 8; // FatTracker
 
 					if ( REG(eon) & vbit )
 					{
@@ -553,12 +556,20 @@ void Spc_Dsp::run( int clock_count )
 				}
 			}
 skip_brr:
+			if ( ft_taps ) // FatTracker
+			{
+				CLAMP16( ft_out );
+				ft_taps->out [ft_taps->pos & (ft_voice_taps_t::size - 1)] [v - m.voices] = (short) ft_out;
+			}
+
 			// Next voice
 			vbit <<= 1;
 			v_regs += 0x10;
 			v++;
 		}
 		while ( vbit < 0x100 );
+		if ( ft_taps ) // FatTracker
+			ft_taps->pos++;
 
 		// Echo position
 		int echo_offset = m.echo_offset;

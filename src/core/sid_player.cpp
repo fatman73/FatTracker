@@ -22,7 +22,8 @@ struct SidPlayer::Impl {
     char format[32] = "C64 SID";
     char title[33] = {};
     float vu[kMaxVoices] = {};
-    float scope[kScopeLen] = {};
+    float scope[kMaxVoices][kScopeLen] = {};  // each voice's own output (cRSID's VoiceOutput)
+    float voicePrev[kMaxVoices] = {}, voiceCur[kMaxVoices] = {};
     uint32_t scopePos = 0;
 
     ~Impl() { release(); }
@@ -36,6 +37,8 @@ struct SidPlayer::Impl {
         c64 = cRSID_init((unsigned short)kEmuRate, 0);
         phase = 1.0;
         prev = cur = 0;
+        std::memset(voicePrev, 0, sizeof voicePrev);
+        std::memset(voiceCur, 0, sizeof voiceCur);
         if (!c64) return false;
         header = cRSID_processSIDfile(c64, file.data(), (int)file.size());
         if (!header) return false;
@@ -99,16 +102,25 @@ void SidPlayer::render(float* out, uint32_t frames, float gain) {
     Impl& m = *impl_;
     if (!m.c64) return;
     const double step = (double)Impl::kEmuRate / m.rate;
+    const int nv = m.voices;
     for (uint32_t f = 0; f < frames; ++f) {
         while (m.phase >= 1.0) {  // linear interpolation between emulator samples
             m.prev = m.cur;
             m.cur = cRSID_generateSample(m.c64) / 32768.f;
             m.phase -= 1.0;
+            for (int v = 0; v < nv; ++v) {  // and the voices' own outputs, at the chip's main volume
+                const cRSID_SIDinstance& sid = m.c64->SID[1 + v / 3];
+                const float master = (sid.BasePtr ? (sid.BasePtr[0x18] & 15) : 15) * (0.8f / 15.f / 32768.f);
+                m.voicePrev[v] = m.voiceCur[v];
+                m.voiceCur[v] = (float)sid.VoiceOutput[v % 3] * master;
+            }
         }
-        const float s = m.prev + (m.cur - m.prev) * (float)m.phase;
+        const float t = (float)m.phase;
+        const float s = m.prev + (m.cur - m.prev) * t;
         m.phase += step;
         out[2 * f] = out[2 * f + 1] = s * gain * 1.6f;
-        m.scope[(m.scopePos + f) & (kScopeLen - 1)] = s * 2.f;
+        const uint32_t at = (m.scopePos + f) & (kScopeLen - 1);
+        for (int v = 0; v < nv; ++v) m.scope[v][at] = m.voicePrev[v] + (m.voiceCur[v] - m.voicePrev[v]) * t;
     }
     m.scopePos = (m.scopePos + frames) & (kScopeLen - 1);
     // meters: the envelope level of each voice, scaled by the master volume
@@ -133,7 +145,7 @@ void SidPlayer::scope(int v, float* dst, int n) const {
         return;
     }
     const uint32_t start = (impl_->scopePos - (uint32_t)n) & (kScopeLen - 1);
-    for (int k = 0; k < n; ++k) dst[k] = impl_->scope[(start + k) & (kScopeLen - 1)];
+    for (int k = 0; k < n; ++k) dst[k] = impl_->scope[v][(start + k) & (kScopeLen - 1)];
 }
 
 const char* SidPlayer::format() const { return impl_->c64 ? impl_->format : ""; }

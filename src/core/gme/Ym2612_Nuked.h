@@ -35,6 +35,13 @@ public:
 	typedef short sample_t;
 	enum { out_chan_count = 2 }; // stereo
 	void run( int pair_count, sample_t* out );
+
+	// FatTracker: each channel's output (left + right of its four slots), one row of 6 per chip sample
+	// (clock / 144), for per-voice meters. Null: off.
+	struct ft_voice_taps_t { enum { size = 8192 }; short out [size] [channel_count]; unsigned pos; };
+	void ft_set_voice_taps( ft_voice_taps_t* taps );
+private:
+	ft_voice_taps_t* ft_taps = nullptr;
 };
 
 #endif

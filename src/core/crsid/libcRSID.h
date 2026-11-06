@@ -133,6 +133,9 @@ struct cRSID_SIDinstance {
     int PrevBandPass;
     // Output-stage:
     signed int PrevVolume;  // lowpass-filtered version of Volume-band register
+    // FatTracker: each voice's own output of the last cRSID_emulateWaves() (waveform * envelope, before the
+    // filter and the main volume; 0 when the voice is not routed anywhere) for per-voice scopes
+    int VoiceOutput[3];
 };
 
 struct cRSID_CIAinstance {

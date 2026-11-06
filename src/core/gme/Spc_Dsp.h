@@ -53,6 +53,11 @@ public:
 
 	void disable_echo( bool disable = true );
 
+	// FatTracker: each voice's output (its enveloped sample at its own left / right volume, mono, before
+	// the main volume and the echo), one row of 8 per DSP sample, for per-voice meters. Null: off.
+	struct ft_voice_taps_t { enum { size = 8192 }; short out [size] [voice_count]; unsigned pos; };
+	void ft_set_voice_taps( ft_voice_taps_t* t ) { ft_taps = t; }
+
 // State
 
 	// Resets DSP and uses supplied values to initialize registers
@@ -148,6 +153,7 @@ private:
 		sample_t extra [extra_size];
 	};
 	state_t m;
+	ft_voice_taps_t* ft_taps = nullptr; // FatTracker
 
 	void init_counter();
 	void run_counter( int );
