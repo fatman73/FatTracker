@@ -101,6 +101,11 @@ protected:
 
     virtual void initSound() = 0;  // song start state (of sub-song subsong_)
     virtual void playTick() = 0;   // one replay call
+    // true: voice v plays on the left (Paula channels 0 and 3; Art Of Noise 8 voices pans its own way)
+    virtual bool leftSide(int v) const {
+        const int pc = ownChannels_ ? (v & 3) : v < 4 ? v : 3;
+        return pc == 0 || pc == 3;
+    }
     // dry run: song length in seconds (stops at the first wrap, or after maxSeconds); returns the ticks run
     long measure(double maxSeconds = 30 * 60);
     void selectLongestSubsong();   // starts on the longest sub-song (the first of equally long ones)
