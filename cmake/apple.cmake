@@ -43,7 +43,8 @@ set(FT_UI_PURE_SOURCES src/ui/viewport.cpp src/ui/pattern_layout.cpp src/ui/curs
 file(GLOB FT_TEST_SOURCES CONFIGURE_DEPENDS tests/*.cpp)
 list(REMOVE_ITEM FT_TEST_SOURCES ${CMAKE_SOURCE_DIR}/tests/test_audio_device.cpp
      ${CMAKE_SOURCE_DIR}/tests/test_capture.cpp)
-add_executable(fttest ${FT_TEST_SOURCES} src/audio/engine.cpp src/mac/audio_out_null.cpp ${FT_UI_PURE_SOURCES})
+add_executable(fttest ${FT_TEST_SOURCES} src/audio/engine.cpp src/mac/audio_out_null.cpp src/mac/keymap_mac.cpp
+    ${FT_UI_PURE_SOURCES})
 target_link_libraries(fttest PRIVATE ftcore)
 target_include_directories(fttest PRIVATE src tests)
 target_compile_definitions(fttest PRIVATE FT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -64,7 +65,7 @@ set(FT_VERSION "0.1.0")
 set(FT_UI_SOURCES ${FT_UI_PURE_SOURCES} src/ui/theme.cpp src/ui/widgets.cpp src/ui/pattern_view.cpp
     src/ui/play_screen.cpp src/ui/play_edit.cpp src/ui/disk_op.cpp src/ui/edit_op.cpp src/ui/setup.cpp
     src/ui/sampler.cpp src/ui/instrument_ed.cpp src/ui/pure_screen.cpp)
-set(FT_MAC_APP_SOURCES src/mac/main_mac.mm src/mac/app_glue.cpp src/mac/gfx_mac.cpp src/mac/text_mac.mm src/mac/audio_out_mac.mm
+set(FT_MAC_APP_SOURCES src/mac/main_mac.mm src/mac/app_glue.cpp src/mac/keymap_mac.cpp src/mac/gfx_mac.cpp src/mac/text_mac.mm src/mac/audio_out_mac.mm
     src/platform/os_posix.cpp src/app/chip_route.cpp src/app/shot.cpp src/audio/engine.cpp)
 configure_file(src/mac/Info.plist.in ${CMAKE_BINARY_DIR}/Info.plist @ONLY)
 add_executable(FatTracker MACOSX_BUNDLE ${FT_UI_SOURCES} ${FT_MAC_APP_SOURCES})
