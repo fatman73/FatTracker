@@ -7,6 +7,7 @@
 
 #include "core/floppy.h"
 #include "core/song.h"
+#include "core/amiga_synth.h"
 #include "core/ay_player.h"
 #include "core/hippel_player.h"
 #include "core/sid_player.h"
@@ -165,6 +166,12 @@ bool Engine::loadAy(const uint8_t* data, size_t size, const char* name, bool pla
         return false;
     }
     return installChip(p, *p->title() ? p->title() : name, play);
+}
+
+bool Engine::loadAmigaSynth(const uint8_t* data, size_t size, const char* name, bool play) {
+    std::unique_ptr<AmigaSynthPlayer> p = AmigaSynthPlayer::open(data, size);
+    if (!p) return false;
+    return installChip(p.release(), name, play);
 }
 
 bool Engine::installChip(ChipPlayer* p, const char* name, bool play) {

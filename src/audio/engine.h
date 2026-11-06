@@ -72,6 +72,8 @@ public:
     bool loadSid(const uint8_t* data, size_t size, const char* name, bool play);
     // AY / YM register dumps (YM, VTX, PSG): playback only
     bool loadAy(const uint8_t* data, size_t size, const char* name, bool play);
+    // Amiga synth formats ported from NostalgicPlayer (JamCracker, ...): playback only
+    bool loadAmigaSynth(const uint8_t* data, size_t size, const char* name, bool play);
     bool tfmx() const { return tfmxOn_; }  // a playback-only chip song (TFMX, FC, Hippel) is loaded
     const char* tfmxFormat() const;
 

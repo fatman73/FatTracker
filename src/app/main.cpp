@@ -11,6 +11,7 @@
 #include "formats/formats.h"
 #include "audio/capture.h"
 #include "core/sample_edit.h"
+#include "core/amiga_synth.h"
 #include "core/ay_player.h"
 #include "core/hippel_player.h"
 #include "core/sid_player.h"
@@ -169,6 +170,8 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
         if (SidPlayer::detect(data.data(), data.size())) {
             SidPlayer trial;
             hippel = trial.load(data.data(), data.size());
+        } else if (AmigaSynthPlayer::detect(data.data(), data.size())) {  // JamCracker, ...
+            hippel = AmigaSynthPlayer::open(data.data(), data.size()) != nullptr;
         } else if (AyPlayer::detect(data.data(), data.size())) {  // YM / VTX / PSG (LHA packed YM too)
             AyPlayer trial;
             hippel = trial.load(data.data(), data.size());
@@ -214,7 +217,9 @@ bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smp
     const bool sid = smpl.empty() && SidPlayer::detect(mdat.data(), mdat.size());
     AyPlayer ayTrial;
     const bool ay = !sid && smpl.empty() && AyPlayer::detect(mdat.data(), mdat.size()) && ayTrial.load(mdat.data(), mdat.size());
-    const bool ok = sid  ? g_engine->loadSid(mdat.data(), mdat.size(), "", false)
+    const bool synth = !sid && !ay && smpl.empty() && AmigaSynthPlayer::detect(mdat.data(), mdat.size());
+    const bool ok = sid    ? g_engine->loadSid(mdat.data(), mdat.size(), "", false)
+                    : synth ? g_engine->loadAmigaSynth(mdat.data(), mdat.size(), name, false)
                     : ay ? g_engine->loadAy(mdat.data(), mdat.size(), name, false)
                     : smpl.empty() && HippelPlayer::detect(mdat.data(), mdat.size())
                         ? g_engine->loadHippel(mdat.data(), mdat.size(), name, false)
@@ -439,7 +444,7 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.ym;*.vtx;*.psg;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.ym;*.vtx;*.psg;*.jam;jam.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;
