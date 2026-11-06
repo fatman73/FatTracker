@@ -19,6 +19,7 @@
 #include "core/song.h"
 #include "formats/formats.h"
 #include "formats/sample_io.h"
+#include "platform/os.h"
 #include "ui/font.h"
 #include "ui/gfx.h"
 #include "ui/play_screen.h"
@@ -330,7 +331,7 @@ TEST(app_diskop_delete) {
     CHECK(PlayScreenProbe::select(a.screen, L"do_usuniecia.txt"));
     a.press(D_DELETE);
     a.screen.answer(0);  // DELETE
-    CHECK(a.status("FILE DELETED"));
+    CHECK(a.status(osDeleteDoneText()));  // "FILE DELETED" on Windows, "MOVED TO TRASH" on the Mac
     CHECK(!fs::exists(victim));
 }
 
