@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/gme/gme.h"
+#include "core/inflate.h"
 #include "core/song.h"
 
 struct GmePlayer::Impl {
@@ -48,8 +49,17 @@ struct GmePlayer::Impl {
 GmePlayer::GmePlayer() : impl_(new Impl) {}
 GmePlayer::~GmePlayer() = default;
 
+namespace {
+constexpr size_t kMaxUnpacked = 64u << 20;
+}
+
 bool GmePlayer::detect(const uint8_t* d, size_t n) {
-    if (!d || n < 16 || n > (64u << 20)) return false;
+    if (!d || n < 16 || n > kMaxUnpacked) return false;
+    if (isGzip(d, n)) {  // .vgz: only the start is needed to see what is inside
+        std::vector<uint8_t> head;
+        gunzip(d, n, head, 64);
+        return head.size() >= 16 && *gme_identify_header(head.data());
+    }
     const char* type = gme_identify_header(d);
     return type && *type;
 }
@@ -58,7 +68,12 @@ bool GmePlayer::load(const uint8_t* data, size_t size, int track) {
     Impl& m = *impl_;
     m.close();
     if (!detect(data, size)) return false;
-    m.file.assign(data, data + size);
+    if (isGzip(data, size)) {
+        if (!gunzip(data, size, m.file, kMaxUnpacked) || m.file.size() < 16) return false;
+    } else {
+        m.file.assign(data, data + size);
+    }
+    data = m.file.data();
     m.track = track < 0 ? 0 : track;
     if (!m.open()) return false;
     gme_info_t* info = nullptr;
