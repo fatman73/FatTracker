@@ -76,6 +76,8 @@ std::unique_ptr<AmigaSynthPlayer> AmigaSynthPlayer::open(const uint8_t* d, size_
     if (auto p = openSoundMon(d, n)) return p;
     if (auto p = openMugician(d, n)) return p;
     if (auto p = openWhittaker(d, n)) return p;
+    if (auto p = openSonicArranger(d, n)) return p;
+    if (auto p = openArtOfNoise(d, n)) return p;
     return nullptr;
 }
 
@@ -148,7 +150,7 @@ bool AmigaSynthPlayer::detect(const uint8_t* d, size_t n) {
     return std::memcmp(d, "BeEp", 4) == 0  // JamCracker
            || isDeltaMusic1(d, n) || isDeltaMusic2(d, n)
            || detectSidMon2(d, n) || detectSidMon1(d, n) || isSoundMon(d, n) || isMugician(d, n)
-           || detectWhittaker(d, n);
+           || detectWhittaker(d, n) || isSonicArranger(d, n) || isArtOfNoise(d, n);
 }
 
 void AmigaSynthPlayer::restart() {
@@ -212,6 +214,8 @@ void AmigaSynthPlayer::render(float* out, uint32_t frames, float gain) {
     std::memset(out, 0, sizeof(float) * 2 * frames);
     float peak[kMaxVoices] = {};
     const int nv = voices_;
+    bool leftOf[kMaxVoices] = {};
+    for (int v = 0; v < nv; ++v) leftOf[v] = leftSide(v);
     for (uint32_t f = 0; f < frames; ++f) {
         if (tickLeft_ <= 0) {
             playTick();
@@ -222,8 +226,7 @@ void AmigaSynthPlayer::render(float* out, uint32_t frames, float gain) {
         float l = 0, r = 0;
         for (int v = 0; v < nv; ++v) {
             const float s = ch_[v].next(rate_) * (nv > 4 && v >= 3 && !ownChannels_ ? 0.25f : 1.f);
-            const int pc = ownChannels_ ? (v & 3) : v < 4 ? v : 3;
-            const bool left = pc == 0 || pc == 3;  // Paula: 0 and 3 left, 1 and 2 right
+            const bool left = leftOf[v];  // Paula: 0 and 3 left, 1 and 2 right
             l += s * (left ? 1.f : 0.3f);
             r += s * (left ? 0.3f : 1.f);
             const float a = std::fabs(s);

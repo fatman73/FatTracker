@@ -42,3 +42,10 @@ std::unique_ptr<AmigaSynthPlayer> openWhittaker(const uint8_t* data, size_t size
 bool isIffSmus(const uint8_t* data, size_t size);
 std::unique_ptr<AmigaSynthPlayer> openIffSmus(const uint8_t* data, size_t size, const AmigaFileResolver& files,
                                               std::string* error = nullptr);
+// Sonic Arranger: the editor format ("SOARV1.0"), its lh.library packed form ("@OARV1.0") and ripped files (a
+// player with the data behind it, or the data alone) whose tables fit the file; with sub-songs, sonicarranger.cpp
+bool isSonicArranger(const uint8_t* data, size_t size);
+std::unique_ptr<AmigaSynthPlayer> openSonicArranger(const uint8_t* data, size_t size);
+// Art Of Noise, 4 or 8 voices ("AON4" / "AON8" and the chunks it needs, fitting the file), artofnoise.cpp
+bool isArtOfNoise(const uint8_t* data, size_t size);
+std::unique_ptr<AmigaSynthPlayer> openArtOfNoise(const uint8_t* data, size_t size);
