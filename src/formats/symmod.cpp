@@ -1,16 +1,31 @@
 // Symphonie / Symphonie Pro ("SymM") loader.
 // Chunk parsing, sample decoding, instrument processing and the position -> pattern expansion follow
-// the OpenMPT SymMOD loader by Devin Acker and the OpenMPT Devs (BSD licence).
+// the OpenMPT SymMOD loader by Devin Acker and the OpenMPT Devs (BSD licence); effect details were
+// checked against the Symphonie Pro assembler source (github.com/MastaTabs/Symphonie).
 // The module becomes an FT2-style Song (linear frequencies, no XM instruments):
 // - every Symphonie position (pattern, start row, length, transpose, speed) becomes its own pattern
 //   (split into 256-row pieces when longer), repeated in the order list as often as it loops;
 // - instrument volume, filters, fades, reversing and sustain repeats are baked into the sample data;
+//   virtual instruments are mixed from their source instruments and transwave instruments rendered
+//   (80 cycles morphing between two loops) at load time, as OpenMPT does;
 // - Symphonie pans channels hard left / right. FT2 takes the panning from the sample on every
 //   instrument change, so an instrument played on both sides gets a second, right-panned sample;
-// - continuous Symphonie slides (volume, pitch) are approximated per row like OpenMPT does,
-//   volume slides in the volume column, pitch slides as 1xx/2xx/E1x/E2x;
-// - DSP (echo, delay, filter), CV, add-pitch/add-volume, emphasis and sample vibrato are dropped;
-//   virtual instruments play their first source sample, transwave instruments are silent.
+// - continuous volume and pitch slides run every tick in the player (Song::symphonieSlides,
+//   effects U/V/W/Y) at the original's rates;
+// - Replay From / From Add are in 1/256 and 1/16384 of the sample; "sample vibrato" is an LFO on the
+//   Replay From start (it is not a pitch vibrato);
+// - the DSP echo (normal, cross, cross 2, center) runs on the final mix (Song::symEcho, effect Qxx).
+// Still approximated or dropped:
+// - Replay From goes through 9xx: 256-frame steps, nothing past frame 65280 of long samples, and the
+//   note restarts at its base pitch (a pitch slide's progress is lost);
+// - Stop Sample is silence rather than a pause; Key Off is a note off (the next row's volume
+//   correction brings a still-playing sample back) instead of playing on past the sustain loop;
+// - the instruments' "no DSP" flag is ignored: every channel goes through the echo;
+// - the echo's pre-filter, DSP delay / hall, the resonant filter command, CV, add pitch / add volume,
+//   emphasis, stereo detune / phase and the 256-instrument limit (255 here) are dropped;
+// - vibrato / tremolo are FT2 4xy / 7xy (speed and depth capped at 15), re-sent every row, and lose a
+//   row when a slide or other command needs the effect column; a slide change that finds the effect
+//   column taken waits for the next free row.
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
