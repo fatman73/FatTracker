@@ -27,8 +27,12 @@ set_source_files_properties(${FT_AYUMI_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1"
 file(GLOB FT_GME_SOURCES CONFIGURE_DEPENDS src/core/gme/*.cpp)
 list(APPEND FT_GME_SOURCES src/core/gme/ext/emu2413.c)
 set_source_files_properties(${FT_GME_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
+# Motorola 68000 for Atari ST SNDH tunes: Musashi by Karl Stenerud (MIT), plain C, opcode tables generated
+# once by m68kmake (see src/core/m68k/README.txt)
+set(FT_M68K_SOURCES src/core/m68k/m68kcpu.c src/core/m68k/m68kops.c)
+set_source_files_properties(${FT_M68K_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
 add_library(ftcore STATIC ${FT_CORE_SOURCES} ${FT_TFMX_SOURCES} ${FT_HIPPEL_SOURCES} ${FT_CRSID_SOURCES} ${FT_AYUMI_SOURCES}
-            ${FT_GME_SOURCES})
+            ${FT_GME_SOURCES} ${FT_M68K_SOURCES})
 target_include_directories(ftcore PRIVATE src/core/gme)
 target_compile_definitions(ftcore PRIVATE BLARGG_LITTLE_ENDIAN=1 VGM_YM2612_NUKED)  # Nuked: the most exact YM2612
 target_include_directories(ftcore PUBLIC src)
