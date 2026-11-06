@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 #include "core/edit.h"
 #include "ui/widgets.h"
@@ -109,8 +110,8 @@ void PatternView::drawText(Gfx& g, Font& f, const Theme& t, RectF area, const Pa
         const bool cur = dr == 0;
         char num[8];
         std::snprintf(num, sizeof num, p.rows > 100 ? "%03d" : "%02d", row);
-        const float nx = o.x0 + (o.l.rowNumW - gl * (float)lstrlenA(num)) * 0.5f;
-        put(nx, y, num, lstrlenA(num), cur ? t.rowBarText : (row % 4 ? t.rowNumber : t.patternText));
+        const float nx = o.x0 + (o.l.rowNumW - gl * (float)std::strlen(num)) * 0.5f;
+        put(nx, y, num, (int)std::strlen(num), cur ? t.rowBarText : (row % 4 ? t.rowNumber : t.patternText));
         for (int k = 0; k < o.l.visible; ++k) {
             const int ch = o.l.firstChannel + k;
             if (ch >= p.channels) break;

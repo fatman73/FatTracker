@@ -8,6 +8,8 @@
 #include <cwctype>
 #include <string>
 
+#include "platform/wcompat.h"  // _wcsnicmp, _wcsicmp
+
 // std::filesystem::path::c_str() is a char* (UTF-8) outside Windows
 inline int _wfopen_s(FILE** f, const char* path, const wchar_t* mode) {
     std::string m;
@@ -18,17 +20,6 @@ inline int _wfopen_s(FILE** f, const char* path, const wchar_t* mode) {
 inline int fopen_s(FILE** f, const char* path, const char* mode) {
     *f = std::fopen(path, mode);
     return *f ? 0 : errno;
-}
-// ASCII case folding, like _wcsnicmp in the "C" locale
-inline int _wcsnicmp(const wchar_t* a, const wchar_t* b, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-        wchar_t ca = a[i], cb = b[i];
-        if (ca >= L'A' && ca <= L'Z') ca += 32;
-        if (cb >= L'A' && cb <= L'Z') cb += 32;
-        if (ca != cb) return ca < cb ? -1 : 1;
-        if (!ca) return 0;
-    }
-    return 0;
 }
 inline int _strnicmp(const char* a, const char* b, size_t n) {
     for (size_t i = 0; i < n; ++i) {
