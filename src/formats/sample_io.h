@@ -1,5 +1,6 @@
 // Loading and saving single samples: WAV (8/16/24-bit PCM, 32-bit float; stereo is mixed
-// to mono; 'smpl' loop chunk) and IFF 8SVX.
+// to mono; 'smpl' loop chunk), IFF 8SVX and AIFF / AIFF-C (8..32-bit PCM, 'sowt', 'fl32';
+// INST sustain loop).
 #pragma once
 #include <cstddef>
 #include <cstdint>

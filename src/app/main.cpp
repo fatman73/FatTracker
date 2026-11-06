@@ -567,7 +567,9 @@ void loadAnyFile(const std::wstring& path) {
         return;
     }
     const bool sampleSig = data.size() >= 12 && ((!memcmp(data.data(), "RIFF", 4) && !memcmp(data.data() + 8, "WAVE", 4)) ||
-                                                  (!memcmp(data.data(), "FORM", 4) && !memcmp(data.data() + 8, "8SVX", 4)));
+                                                  (!memcmp(data.data(), "FORM", 4) && (!memcmp(data.data() + 8, "8SVX", 4) ||
+                                                                                       !memcmp(data.data() + 8, "AIFF", 4) ||
+                                                                                       !memcmp(data.data() + 8, "AIFC", 4))));
     auto smp = loadSampleFile(data.data(), data.size());
     if (sampleSig && !smp.ok()) {
         g_screen.setStatus(smp.error());
