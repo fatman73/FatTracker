@@ -40,7 +40,7 @@ int runShot(int argc, char** argv, Gfx& gfx, Text& text, Font& font, PlayScreen&
         screen.draw(gfx, text, font, t, engine);
         gfx.endFrame();
     };
-    if (argc >= 6 && *argv[5] && loadModuleFile(std::filesystem::path(argv[5]).wstring())) {
+    if (argc >= 6 && loadModuleFile(std::filesystem::path(argv[5]).wstring())) {
         engine.play();
         const int seconds10 = argc >= 7 ? (int)(std::atof(argv[6]) * 10) : 15;
         std::vector<float> buf(4800 * 2);
