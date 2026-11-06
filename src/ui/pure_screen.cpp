@@ -29,8 +29,7 @@ const char kHexDigits[] = "0123456789ABCDEF";
 void box(PixelCanvas& c, const pure::Box& b, bool sunken = false) { c.bevel(b.x, b.y, b.w, b.h, kFace, kLight, kDark, sunken); }
 
 void label(PixelCanvas& c, const pure::Box& b, const char* s) {  // embossed, centred
-    const int w = (int)std::strlen(s) * 8 - 1;
-    c.textShadow(b.x + (b.w - w) / 2, b.y + (b.h - 5) / 2, s, kLabelInk, kLabelShadow, kSmall);
+    pure::drawLabel(c, b, s, kLabelInk, kLabelShadow);
 }
 
 void value(PixelCanvas& c, const pure::Box& b, const char* s) {  // black, right aligned
@@ -111,12 +110,10 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     c.clear(kBlack);
 
     // ---- counters: embossed labels, black values
-    static const char* const kLabels[9] = {"POS", "PATTERN", "LENGTH", "FINETUNE", "SAMPLE",
-                                           "VOLUME", "LENGTH", "REPEAT", "REPLEN"};
     const int pat = s && viewPattern_ < (int)s->patterns.size() ? viewPattern_ : 0;
     for (int r = 0; r < pure::kCounterRows; ++r) {
         box(c, pure::counterLabel(r));
-        label(c, pure::counterLabel(r), kLabels[r]);
+        label(c, pure::counterLabel(r), pure::counterText(r));
         box(c, pure::counterValue(r));
         switch (r) {
             case 0: std::snprintf(buf, sizeof buf, "%04d", tel.subsongs ? tel.subsong + 1 : viewOrder_); break;  // chip: sub-song
@@ -178,15 +175,20 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
             c.set(sb.x + x, std::clamp(mid - (int)(scopeBuf_[x] * (sb.h / 2 - 1) * 1.6f), sb.y + 1, sb.y + sb.h - 2),
                   kScope);
     }
-    // machine line: name and the power / drive LEDs of the A500 case, then EXIT
+    // machine line: name and the power / drive LEDs of the A500 case, a "?" box (the line opens the
+    // credits: pressed while the pointer is on the line or the credits are shown), then EXIT
     const pure::Box cl = pure::creditLine();
     c.bevel(cl.x, cl.y, cl.w, cl.h, kFace, kFace, kFace);
-    c.textShadow(cl.x + 4, cl.y + 3, pure_ == 2 ? "A1200" : "A500", kLabelInk, kLabelShadow, kSmall);
+    c.textShadow(pure::machineNameX(), cl.y + 3, pure::machineName(pure_), kLabelInk, kLabelShadow, kSmall);
     const uint32_t power = tel.led ? argb(0x33FF44) : argb(0x1C7A24);  // dims with the filter, like the A500
     const uint32_t drive = tel.drive ? argb(0xFFA020) : argb(0x5A3A10);
-    c.bevel(cl.x + 52, cl.y + 3, 14, 5, power, power, kDark, true);
-    c.bevel(cl.x + 72, cl.y + 3, 14, 5, drive, drive, kDark, true);
-    c.textShadow(cl.x + 92, cl.y + 3, "DF0", kLabelInk, kLabelShadow, kSmall);
+    for (int i = 0; i < 2; ++i) {
+        const pure::Box led = pure::machineLed(i);
+        c.bevel(led.x, led.y, led.w, led.h, i ? drive : power, i ? drive : power, kDark, true);
+    }
+    c.textShadow(pure::machineDriveX(), cl.y + 3, "DF0", kLabelInk, kLabelShadow, kSmall);
+    box(c, pure::creditHint(), credits_ || hover_ == kPureCreditsHover);
+    label(c, pure::creditHint(), "?");
     box(c, pure::exitButton(), hover_ == kPureExitHover);
     label(c, pure::exitButton(), "EXIT PURE");
     }
@@ -218,9 +220,9 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
     // ---- info line: edit skip, tempo, status, tune size, timing
     const pure::Box info = pure::infoArea();
     box(c, info);
-    c.bevel(8, info.y + 5, 22, 11, kFace, kDark, kLight);
-    std::snprintf(buf, sizeof buf, "%2d", editSkip_);
-    c.text(11, info.y + 8, buf, kValueInk, kMedium);
+    c.bevel(pure::editSkipBox().x, pure::editSkipBox().y, pure::editSkipBox().w, pure::editSkipBox().h, kFace, kDark, kLight);
+    std::snprintf(buf, sizeof buf, "%d", editSkip_);
+    value(c, pure::editSkipBox(), buf);
     std::snprintf(buf, sizeof buf, "%3d", tel.playing ? tel.bpm : (s ? s->initialBpm : 125));
     c.text(36, info.y + 2, buf, kValueInk, kMedium);
     c.textShadow(pure::tempoArrow(0).x, pure::tempoArrow(0).y + 1, "\x01", kLabelInk, kLabelShadow, kSmall);

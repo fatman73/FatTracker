@@ -134,7 +134,7 @@ void PlayScreen::setPure(int mode, Engine& e) {
         panel_ = Panel::Main;
     drag_ = 0;
     e.setPure(mode);
-    setStatus(mode == 0 ? "PURE MODE OFF" : mode == 1 ? "PURE MODE: AMIGA 500" : "PURE MODE: AMIGA 1200");
+    setStatus(mode == 0 ? "PURE MODE OFF" : mode == 1 ? "AMIGA 500" : "AMIGA 1200");  // Pure's STATUS shows 10 characters
 }
 
 void PlayScreen::applyMixing(Engine& e) {

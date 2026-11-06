@@ -34,3 +34,5 @@ private:
 // '\x01' / '\x02' are the up / down arrows of the counters.
 const uint8_t* amigaGlyph(char c);
 int glyphRows(FontSize size);  // 5, 6, 7 or 9
+// Columns a glyph uses in any row (bit 6 = leftmost column), e.g. to measure the ink of a caption.
+uint8_t glyphColumns(char c, FontSize size);
