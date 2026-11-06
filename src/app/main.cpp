@@ -12,6 +12,7 @@
 #include "audio/capture.h"
 #include "core/sample_edit.h"
 #include "core/hippel_player.h"
+#include "core/sid_player.h"
 #include "core/tfmx_player.h"
 #include "formats/sample_io.h"
 #include "ui/cursor.h"
@@ -150,7 +151,7 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
     if (mdatPath != path && readFileW(mdatPath.c_str(), data)) return false;
     // Future Composer / Jochen Hippel: one file with song and samples, played like TFMX
     const bool hippel = !TfmxPlayer::detect(data.data(), data.size()) && mdatPath == path &&
-                        HippelPlayer::detect(data.data(), data.size());
+                        (HippelPlayer::detect(data.data(), data.size()) || SidPlayer::detect(data.data(), data.size()));
     if (!hippel && !TfmxPlayer::detect(data.data(), data.size())) return false;
     const std::wstring mfile = mdatPath.substr(slash == std::wstring::npos ? 0 : slash + 1);
     if (!_wcsnicmp(mfile.c_str(), L"mdat.", 5)) smplPath = dir + L"smpl." + mfile.substr(5);
@@ -184,7 +185,9 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
 
 bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
                const std::wstring& mdatPath) {
-    const bool ok = smpl.empty() && HippelPlayer::detect(mdat.data(), mdat.size())
+    const bool sid = smpl.empty() && SidPlayer::detect(mdat.data(), mdat.size());
+    const bool ok = sid ? g_engine->loadSid(mdat.data(), mdat.size(), "", false)
+                    : smpl.empty() && HippelPlayer::detect(mdat.data(), mdat.size())
                         ? g_engine->loadHippel(mdat.data(), mdat.size(), name, false)
                         : g_engine->loadTfmx(mdat.data(), mdat.size(), smpl.data(), smpl.size(), name, false);
     if (!ok) {
@@ -407,7 +410,7 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;*.sog;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;*.sog;*.sid;*.psid;*.rsid;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;

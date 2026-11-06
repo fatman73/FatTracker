@@ -8,6 +8,7 @@
 #include "core/floppy.h"
 #include "core/song.h"
 #include "core/hippel_player.h"
+#include "core/sid_player.h"
 #include "core/tfmx_player.h"
 #include "core/mixer.h"
 #include "core/player.h"
@@ -143,6 +144,16 @@ bool Engine::loadHippel(const uint8_t* data, size_t size, const char* name, bool
         return false;
     }
     return installChip(p, name, play);
+}
+
+bool Engine::loadSid(const uint8_t* data, size_t size, const char* name, bool play) {
+    SidPlayer* p = new SidPlayer;
+    p->setRate(mixer_->rate());  // the emulated C64 is built for one output rate
+    if (!p->load(data, size)) {
+        delete p;
+        return false;
+    }
+    return installChip(p, name && *name ? name : p->title(), play);
 }
 
 bool Engine::installChip(ChipPlayer* p, const char* name, bool play) {

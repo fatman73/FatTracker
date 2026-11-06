@@ -68,6 +68,8 @@ public:
                   bool play);  // play = start at once (else PLAY starts it)
     // Future Composer / Jochen Hippel: one file, playback only like TFMX
     bool loadHippel(const uint8_t* data, size_t size, const char* name, bool play);
+    // Commodore 64 SID tune (PSID / RSID) on the emulated C64: playback only
+    bool loadSid(const uint8_t* data, size_t size, const char* name, bool play);
     bool tfmx() const { return tfmxOn_; }  // a playback-only chip song (TFMX, FC, Hippel) is loaded
     const char* tfmxFormat() const;
 
