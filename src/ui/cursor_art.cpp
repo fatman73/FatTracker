@@ -1,6 +1,7 @@
 #include "ui/cursor_art.h"
 
 #include <cmath>
+#include <cstddef>
 
 namespace {
 // Pointer outline in a 16x16 unit grid (Workbench-style arrow).
