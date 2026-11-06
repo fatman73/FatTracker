@@ -70,6 +70,7 @@ std::unique_ptr<AmigaSynthPlayer> AmigaSynthPlayer::open(const uint8_t* d, size_
     if (auto p = openDeltaMusic2(d, n)) return p;
     if (auto p = openSidMon2(d, n)) return p;
     if (auto p = openSidMon1(d, n)) return p;
+    if (auto p = openWhittaker(d, n)) return p;
     return nullptr;
 }
 
@@ -77,7 +78,7 @@ bool AmigaSynthPlayer::detect(const uint8_t* d, size_t n) {
     if (!d || n < 8) return false;
     return std::memcmp(d, "BeEp", 4) == 0  // JamCracker
            || isDeltaMusic1(d, n) || isDeltaMusic2(d, n)
-           || detectSidMon2(d, n) || detectSidMon1(d, n);
+           || detectSidMon2(d, n) || detectSidMon1(d, n) || detectWhittaker(d, n);
 }
 
 void AmigaSynthPlayer::restart() {

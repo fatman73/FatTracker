@@ -122,7 +122,7 @@ void PlayScreen::diskRefresh() {
                 if (!isDir) {
                     const bool mod = hasExt(n, {L".mod", L".xm", L".stk", L".s3m", L".it", L".mtm", L".669", L".fc", L".fc13", L".fc14", L".smod", L".hip", L".hipc", L".hip7", L".sog", L".mcmd", L".coso", L".sid", L".psid", L".rsid", L".ym", L".vtx", L".psg", L".pt3", L".jam", L".spc", L".vgm", L".vgz", L".gym", L".sap", L".ay", L".nsf", L".nsfe", L".gbs", L".hes", L".kss", L".mdat", L".mmd0",
                                                 L".mmd1", L".mmd2", L".mmd3", L".med", L".symmod", L".dbm",
-                                                L".digi", L".tfx", L".dm", L".dm1", L".dm2", L".sid1", L".sid2", L".sd1", L".sd2", L".smn"}) ||
+                                                L".digi", L".tfx", L".dm", L".dm1", L".dm2", L".sid1", L".sid2", L".sd1", L".sd2", L".smn", L".dw", L".dwold"}) ||
                                      !_wcsnicmp(n.c_str(), L"mdat.", 5) || !_wcsnicmp(n.c_str(), L"mod.", 4) ||
                                      !_wcsnicmp(n.c_str(), L"fc.", 3) || !_wcsnicmp(n.c_str(), L"smod.", 5) ||
                                      !_wcsnicmp(n.c_str(), L"hip.", 4) || !_wcsnicmp(n.c_str(), L"hipc.", 5) ||
@@ -131,7 +131,8 @@ void PlayScreen::diskRefresh() {
                                      !_wcsnicmp(n.c_str(), L"jam.", 4) || !_wcsnicmp(n.c_str(), L"dm.", 3) ||
                                      !_wcsnicmp(n.c_str(), L"dm1.", 4) || !_wcsnicmp(n.c_str(), L"dm2.", 4) ||
                                      !_wcsnicmp(n.c_str(), L"sid.", 4) || !_wcsnicmp(n.c_str(), L"sid1.", 5) ||
-                                     !_wcsnicmp(n.c_str(), L"sid2.", 5) || !_wcsnicmp(n.c_str(), L"smn.", 4);
+                                     !_wcsnicmp(n.c_str(), L"sid2.", 5) || !_wcsnicmp(n.c_str(), L"smn.", 4) ||
+                                     !_wcsnicmp(n.c_str(), L"dw.", 3) || !_wcsnicmp(n.c_str(), L"dwold.", 6);
                     const bool smp = hasExt(n, {L".wav", L".iff", L".8svx", L".aiff"});
                     if (diskFilter_ == 0 && !mod) continue;
                     if (diskFilter_ == 1 && !smp) continue;

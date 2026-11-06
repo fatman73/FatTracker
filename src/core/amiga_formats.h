@@ -1,5 +1,5 @@
-// The ported Amiga synth replayers (one source file each: JamCracker, SidMon 1.0, SidMon 2.0);
-// AmigaSynthPlayer::open tries them in turn.
+// The ported Amiga synth replayers (one source file each: JamCracker, Delta Music 1.0 / 2.0, SidMon 1.0 / 2.0,
+// David Whittaker); AmigaSynthPlayer::open tries them in turn.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -21,3 +21,8 @@ std::unique_ptr<AmigaSynthPlayer> openSidMon2(const uint8_t* data, size_t size);
 // Cheap signature checks for AmigaSynthPlayer::detect.
 bool detectSidMon1(const uint8_t* data, size_t size);  // the replay routine's instructions (never PSID / RSID)
 bool detectSidMon2(const uint8_t* data, size_t size);  // "SIDMON II - THE MIDI VERSION" at 58
+
+// David Whittaker (player-and-data files, found by the replay routine's 68000 instructions, never PSID / RSID /
+// SC68; files with sub-songs play the first one), whittaker.cpp
+bool detectWhittaker(const uint8_t* data, size_t size);
+std::unique_ptr<AmigaSynthPlayer> openWhittaker(const uint8_t* data, size_t size);
