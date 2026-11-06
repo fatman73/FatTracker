@@ -74,6 +74,8 @@ public:
     bool loadAy(const uint8_t* data, size_t size, const char* name, bool play);
     // Amiga synth formats ported from NostalgicPlayer (JamCracker, ...): playback only
     bool loadAmigaSynth(const uint8_t* data, size_t size, const char* name, bool play);
+    // consoles and 8-bit computers through Game_Music_Emu (SPC, VGM, SAP, AY, NSF, GBS, ...): playback only
+    bool loadGme(const uint8_t* data, size_t size, const char* name, bool play);
     bool tfmx() const { return tfmxOn_; }  // a playback-only chip song (TFMX, FC, Hippel) is loaded
     const char* tfmxFormat() const;
 

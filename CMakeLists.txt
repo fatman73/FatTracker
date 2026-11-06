@@ -23,7 +23,14 @@ set_source_files_properties(${FT_CRSID_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1;
 # AY-3-8910 / YM2149 emulation: ayumi by Peter Sovietov (MIT), plain C
 set(FT_AYUMI_SOURCES src/core/ayumi/ayumi.c)
 set_source_files_properties(${FT_AYUMI_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
-add_library(ftcore STATIC ${FT_CORE_SOURCES} ${FT_TFMX_SOURCES} ${FT_HIPPEL_SOURCES} ${FT_CRSID_SOURCES} ${FT_AYUMI_SOURCES})
+# Game_Music_Emu by Shay Green and the libgme authors (LGPL 2.1, see src/core/gme/README.txt): SPC, VGM, SAP, AY, NSF, GBS ...
+file(GLOB FT_GME_SOURCES CONFIGURE_DEPENDS src/core/gme/*.cpp)
+list(APPEND FT_GME_SOURCES src/core/gme/ext/emu2413.c)
+set_source_files_properties(${FT_GME_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
+add_library(ftcore STATIC ${FT_CORE_SOURCES} ${FT_TFMX_SOURCES} ${FT_HIPPEL_SOURCES} ${FT_CRSID_SOURCES} ${FT_AYUMI_SOURCES}
+            ${FT_GME_SOURCES})
+target_include_directories(ftcore PRIVATE src/core/gme)
+target_compile_definitions(ftcore PRIVATE BLARGG_LITTLE_ENDIAN=1 VGM_YM2612_NUKED)  # Nuked: the most exact YM2612
 target_include_directories(ftcore PUBLIC src)
 
 # Windows-specific modules shared by the app and the test runner

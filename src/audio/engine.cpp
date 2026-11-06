@@ -9,6 +9,7 @@
 #include "core/song.h"
 #include "core/amiga_synth.h"
 #include "core/ay_player.h"
+#include "core/gme_player.h"
 #include "core/hippel_player.h"
 #include "core/sid_player.h"
 #include "core/tfmx_player.h"
@@ -172,6 +173,16 @@ bool Engine::loadAmigaSynth(const uint8_t* data, size_t size, const char* name, 
     std::unique_ptr<AmigaSynthPlayer> p = AmigaSynthPlayer::open(data, size);
     if (!p) return false;
     return installChip(p.release(), name, play);
+}
+
+bool Engine::loadGme(const uint8_t* data, size_t size, const char* name, bool play) {
+    GmePlayer* p = new GmePlayer;
+    p->setRate(mixer_->rate());
+    if (!p->load(data, size)) {
+        delete p;
+        return false;
+    }
+    return installChip(p, *p->title() ? p->title() : name, play);
 }
 
 bool Engine::installChip(ChipPlayer* p, const char* name, bool play) {
