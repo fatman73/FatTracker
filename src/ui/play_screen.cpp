@@ -564,6 +564,9 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
         if (last_.playing) {
             e.stop();
             recordMode_ = false;
+        } else if (recordMode_) {  // STEP record: space leaves it and edit mode
+            recordMode_ = editMode_ = false;
+            setStatus("ALL RIGHT");
         } else {
             editMode_ = !editMode_;
             setStatus(editMode_ ? "EDIT MODE" : "ALL RIGHT");
@@ -709,20 +712,7 @@ UiAction PlayScreen::pressButton(int b, Engine& e) {
             setStatus(editMode_ ? "EDIT MODE" : "ALL RIGHT");
             break;
         case B_RECORD:
-            if (e.tfmx()) {
-                setStatus("PLAYBACK ONLY");
-                break;
-            }
-            recordMode_ = !recordMode_;
-            if (recordMode_) {
-                editMode_ = true;
-                e.playPattern((uint16_t)viewPattern_);
-                setStatus("RECORDING");
-            } else {
-                e.stop();
-                setStatus("ALL RIGHT");
-            }
-            break;
+            return recordButton(false, e);
         case B_CLEAR:
             ask("CLEAR WHAT?", {"SONG", "SAMPLES", "ALL", "CANCEL"}, [this, &e](int a) {
                 if (a == 3) return;
@@ -761,6 +751,43 @@ UiAction PlayScreen::pressButton(int b, Engine& e) {
     return UiAction::Redraw;
 }
 
+const char* PlayScreen::recordStatus() const {
+    return pure_ ? pure::recModeLabel(recordStep_) : recordStep_ ? "RECORD: STEP" : "RECORD: LIVE";
+}
+
+// STEP: the pattern stands still and each note moves it down one row (drums);
+// LIVE: the pattern plays and the notes land on the playing row.
+UiAction PlayScreen::recordButton(bool right, Engine& e) {
+    if (right) {
+        toggleRecMode(e);
+        return UiAction::Redraw;
+    }
+    if (e.tfmx()) {
+        setStatus("PLAYBACK ONLY");
+        return UiAction::Redraw;
+    }
+    recordMode_ = !recordMode_;
+    if (recordMode_) {
+        editMode_ = true;
+        if (!recordStep_) e.playPattern((uint16_t)viewPattern_);
+        else if (last_.playing) e.stop();  // the cursor stays on the row that was playing
+        setStatus(recordStatus());
+    } else {
+        if (!recordStep_) e.stop();
+        setStatus("ALL RIGHT");
+    }
+    return UiAction::Redraw;
+}
+
+void PlayScreen::toggleRecMode(Engine& e) {
+    if (recordMode_) recordButton(false, e);  // a recording ends in the mode it started in
+    recordStep_ = !recordStep_;
+    char m[32];
+    if (pure_) std::snprintf(m, sizeof m, "%s", pure::recModeLabel(recordStep_));
+    else std::snprintf(m, sizeof m, "REC MODE: %s", recordStep_ ? "STEP" : "LIVE");
+    setStatus(m);
+}
+
 UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
     if (nameEdit_ && !dialog_.open) finishNameEdit(e, true);
     if (pure_ && !dialog_.open) return pureMouse(x, y, right, e);
@@ -791,6 +818,7 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
         demo_.next();  // click the demo: next effect
         return UiAction::Redraw;
     }
+    if (h == H_BUTTON + B_RECORD) return recordButton(right, e);
     if (h >= H_BUTTON && h < H_BUTTON + 12) return pressButton(h - H_BUTTON, e);
     if (h >= H_ARROW && h < H_ARROW + 20) {
         const int row = (h - H_ARROW) / 2;

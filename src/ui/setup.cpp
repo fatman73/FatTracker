@@ -240,6 +240,7 @@ void PlayScreen::loadSettings(const wchar_t* ini, Engine& e) {
     setViewMode(readInt(ini, L"View", 8));
     octave_ = std::clamp(readInt(ini, L"Octave", 4), 0, 6);
     editSkip_ = std::clamp(readInt(ini, L"EditSkip", 1), 0, 16);
+    recordStep_ = readInt(ini, L"RecordLive", 0) == 0;  // STEP unless LIVE was chosen
     quantize_ = std::clamp(readInt(ini, L"RecordQuantize", 1), 1, 16);
     metronome_ = readInt(ini, L"Metronome", 0) != 0;
     metroEvery_ = std::clamp(readInt(ini, L"MetronomeRows", 4), 1, 16);
@@ -268,6 +269,7 @@ void PlayScreen::saveSettings(const wchar_t* ini) const {
     writeInt(ini, L"View", viewMode_);
     writeInt(ini, L"Octave", octave_);
     writeInt(ini, L"EditSkip", editSkip_);
+    writeInt(ini, L"RecordLive", recordStep_ ? 0 : 1);
     writeInt(ini, L"RecordQuantize", quantize_);
     writeInt(ini, L"Metronome", metronome_ ? 1 : 0);
     writeInt(ini, L"MetronomeRows", metroEvery_);

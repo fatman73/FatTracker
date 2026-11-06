@@ -207,6 +207,23 @@ TEST(pure_edit_op_covers_the_scopes) {
     CHECK(opExit().x + opExit().w <= sideButton(4).x);
 }
 
+TEST(pure_edit_options_switch_the_record_mode) {
+    using namespace pure;
+    int found = -1;
+    for (int i = 0; i < opCount(1); ++i)
+        if (opItem(1, i).action == kOpRecMode) found = i;
+    CHECK(found >= 0);
+    const OpItem it = opItem(1, found);
+    CHECK_EQ(it.kind, (int)kOpButton);
+    CHECK(std::strcmp(recModeLabel(true), "REC STEP") == 0);
+    CHECK(std::strcmp(recModeLabel(false), "REC LIVE") == 0);
+    for (bool step : {true, false}) {
+        CHECK((int)std::strlen(recModeLabel(step)) * 8 - 1 <= it.box.w - 6);  // the drawn label keeps 3 px of face
+        CHECK(std::strlen(recModeLabel(step)) <= 10);                       // fits the STATUS field too
+    }
+    CHECK_EQ(hitTest(it.box.x + it.box.w / 2, it.box.y + it.box.h / 2, kViewEditOp, 1), kOpItem + found);
+}
+
 TEST(pure_position_editor_lines) {
     using namespace pure;
     for (int i = 0; i < kPosLines; ++i) {

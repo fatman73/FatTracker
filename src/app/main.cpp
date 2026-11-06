@@ -844,6 +844,11 @@ int screenshotMode() {
                     drawFrame();
                     continue;
                 }
+                if (!lstrcmpW(tok, L"REC") || !lstrcmpW(tok, L"RECMODE")) {  // RECORD button (RECMODE: right click)
+                    g_screen.pressRecord(tok[3] != 0, *g_engine);
+                    drawFrame();
+                    continue;
+                }
                 if (!wcsncmp(tok, L"OP:", 3)) {  // Pure EDIT OP. screen 0..2
                     g_screen.setEditOpScreen(_wtoi(tok + 3));
                     drawFrame();

@@ -37,6 +37,8 @@ const char* opScreenTitle(int screen) {
     return screen >= 0 && screen < kOpScreens ? kTitles[screen] : "";
 }
 
+const char* recModeLabel(bool step) { return step ? "REC STEP" : "REC LIVE"; }
+
 namespace {
 constexpr int kY1 = 5 * kRowH, kY2 = 6 * kRowH, kY3 = 7 * kRowH, kY4 = 8 * kRowH, kX = kGridX;
 const OpItem kTranspose[] = {
@@ -60,7 +62,8 @@ const OptionRow kOptionRow[kOptionRows] = {{kX, kY1, "SKIP", kOpSkip},   {kX + 1
                                            {kX, kY2, "QUANT", kOpQuant}, {kX + 100, kY2, "METRO", kOpMetro},
                                            {kX, kY3, "ROWS", kOpPatLen}};
 const OpItem kOptionButtons[] = {{{kX, kY4, 100, kRowH}, "NEW PAT", kOpNewPat, kOpButton},
-                                 {{kX + 100, kY4, 100, kRowH}, "CLONE PAT", kOpClonePat, kOpButton}};
+                                 {{kX + 100, kY4, 100, kRowH}, "CLONE PAT", kOpClonePat, kOpButton},
+                                 {{kX + 100, kY3, 100, kRowH}, "REC LIVE", kOpRecMode, kOpButton}};  // label drawn per mode
 OpItem optionItem(int i) {
     if (i >= kOptionRows * 4) return kOptionButtons[i - kOptionRows * 4];
     const OptionRow& r = kOptionRow[i / 4];
@@ -86,7 +89,7 @@ const char* const kSamplerLabels[kSamplerButtons] = {  // at most 5 characters: 
 int opCount(int screen) {
     switch (screen) {
         case 0: return (int)(sizeof kTranspose / sizeof kTranspose[0]);
-        case 1: return kOptionRows * 4 + 2;
+        case 1: return kOptionRows * 4 + 3;
         case 2: return 16;
     }
     return 0;

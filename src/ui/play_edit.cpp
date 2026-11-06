@@ -217,7 +217,8 @@ UiAction PlayScreen::editKey(unsigned vk, bool shift, bool ctrl, bool alt, bool 
             if (editMode_) {
                 const uint8_t instr = note == NOTE_OFF ? 0 : (uint8_t)(sample_ + 1);
                 e.edit([&](Song& song) { editor_.setNote(song, pat, row, curCh_, (uint8_t)note, instr); });
-                advance(e);
+                if (stepRecording()) moveCursor(1, 0, e);  // STEP record: one row per note, whatever the skip
+                else advance(e);
             }
             return UiAction::Redraw;
         }
