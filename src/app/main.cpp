@@ -170,7 +170,7 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
         if (SidPlayer::detect(data.data(), data.size())) {
             SidPlayer trial;
             hippel = trial.load(data.data(), data.size());
-        } else if (AmigaSynthPlayer::detect(data.data(), data.size())) {  // JamCracker, ...
+        } else if (AmigaSynthPlayer::detect(data.data(), data.size())) {  // JamCracker, SidMon 1 / 2, ...
             hippel = AmigaSynthPlayer::open(data.data(), data.size()) != nullptr;
         } else if (AyPlayer::detect(data.data(), data.size())) {  // YM / VTX / PSG (LHA packed YM too)
             AyPlayer trial;
@@ -444,7 +444,7 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.ym;*.vtx;*.psg;*.jam;jam.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.ym;*.vtx;*.psg;*.jam;jam.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;

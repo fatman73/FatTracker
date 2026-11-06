@@ -35,7 +35,7 @@ void AmigaChannel::setLoop(uint32_t start, uint32_t length) {
 float AmigaChannel::next(double rate) {
     if (!active_ || !data_ || period_ < 2) return 0.f;
     const uint32_t i = (uint32_t)pos_;
-    const float s = (i < end_ ? data_[i] : 0) / 128.f * volume_ / 64.f;
+    const float s = (i < end_ ? data_[i] : 0) / 128.f * volume_ / 256.f;
     pos_ += kPaulaClock / period_ / rate;
     if ((uint32_t)pos_ >= end_) {
         if (pending_) {  // a queued sample replaces the loop (Paula reloads at the end of the buffer)
@@ -61,11 +61,15 @@ float AmigaChannel::next(double rate) {
 std::unique_ptr<AmigaSynthPlayer> AmigaSynthPlayer::open(const uint8_t* d, size_t n) {
     if (!d || n < 8 || n > (64u << 20)) return nullptr;
     if (auto p = openJamCracker(d, n)) return p;
+    if (auto p = openSidMon2(d, n)) return p;
+    if (auto p = openSidMon1(d, n)) return p;
     return nullptr;
 }
 
 bool AmigaSynthPlayer::detect(const uint8_t* d, size_t n) {
-    return d && n >= 8 && std::memcmp(d, "BeEp", 4) == 0;  // JamCracker
+    if (!d || n < 8) return false;
+    return std::memcmp(d, "BeEp", 4) == 0  // JamCracker
+           || detectSidMon2(d, n) || detectSidMon1(d, n);
 }
 
 void AmigaSynthPlayer::restart() {

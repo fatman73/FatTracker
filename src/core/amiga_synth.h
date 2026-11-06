@@ -19,10 +19,11 @@ struct AmigaChannel {
     void setSample(const int8_t* data, uint32_t start, uint32_t length);   // takes effect at the next loop
     void setLoop(uint32_t start, uint32_t length);                           // repeat part (same data)
     void setAmigaPeriod(uint32_t period) { period_ = period; }
-    void setAmigaVolume(uint32_t volume) { volume_ = volume > 64 ? 64 : volume; }
+    void setAmigaVolume(uint32_t volume) { volume_ = (volume > 64 ? 64 : volume) * 4; }  // 0..64
+    void setVolume(uint32_t volume) { volume_ = volume > 256 ? 256 : volume; }            // 0..256 (IChannel.SetVolume)
     void mute() { active_ = false; }
     bool active() const { return active_; }
-    uint32_t volume() const { return volume_; }
+    uint32_t volume() const { return volume_ / 4; }  // 0..64
     float next(double rate);  // one output sample, volume applied
 
 private:
@@ -31,7 +32,7 @@ private:
     uint32_t end_ = 0, loopStart_ = 0, loopEnd_ = 0, nextStart_ = 0, nextLen_ = 0;
     double pos_ = 0;
     bool active_ = false, loop_ = false, pending_ = false;
-    uint32_t period_ = 0, volume_ = 0;
+    uint32_t period_ = 0, volume_ = 0;  // volume in 1/256
 };
 
 class AmigaSynthPlayer : public ChipPlayer {
