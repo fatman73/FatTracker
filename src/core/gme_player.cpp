@@ -12,6 +12,7 @@
 struct GmePlayer::Impl {
     Music_Emu* emu = nullptr;
     std::vector<uint8_t> file;  // emulators may keep pointers into the loaded data
+    size_t size = 0;            // of the data in file (the rest is padding)
     uint32_t rate = 48000;
     int track = 0, voices = 4;
     double seconds = 0;
@@ -28,7 +29,7 @@ struct GmePlayer::Impl {
     }
     bool open() {
         close();
-        if (gme_open_data(file.data(), (long)file.size(), &emu, (int)rate) || !emu) {
+        if (gme_open_data(file.data(), (long)size, &emu, (int)rate) || !emu) {
             close();
             return false;
         }
@@ -73,7 +74,9 @@ bool GmePlayer::load(const uint8_t* data, size_t size, int track) {
     } else {
         m.file.assign(data, data + size);
     }
-    data = m.file.data();
+    m.size = m.file.size();
+    m.file.resize(m.size + 4096, 0);  // zero padding: short over-reads in the emulators stay inside the buffer
+    data = m.file.data();             // (after the resize, which may move the buffer)
     m.track = track < 0 ? 0 : track;
     if (!m.open()) return false;
     gme_info_t* info = nullptr;

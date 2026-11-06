@@ -211,6 +211,11 @@ blargg_err_t Ay_Emu::start_track_( int track )
 		}
 		check( len );
 		byte const* in = get_data( file, blocks, 0 ); blocks += 2;
+		if ( !in ) // FatTracker: block offset outside the file (truncated / broken file)
+		{
+			set_warning( "Missing file data" );
+			break;
+		}
 		if ( len > uint32_t (file.end - in) )
 		{
 			set_warning( "Missing file data" );

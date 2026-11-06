@@ -59,7 +59,7 @@ TEST(gme_real_files_play) {
             std::printf("  %s: %s \"%s\", %d voices, peak %.2f\n", e.path().filename().string().c_str(), p.format(),
                         p.title(), p.voices(), pk);
             ++n;
-            for (size_t cut : {d.size() / 2, (size_t)300}) {  // cut files: refused or played, never a crash
+            for (size_t cut = 16; cut < d.size(); cut += d.size() / 7 + 1) {  // cut files: refused or played, never a crash
                 GmePlayer q;
                 q.setRate(48000);
                 if (q.load(d.data(), cut)) peakOf(q, 0.2);
