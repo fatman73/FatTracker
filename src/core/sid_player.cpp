@@ -1,6 +1,7 @@
 #include "core/sid_player.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -68,12 +69,12 @@ bool SidPlayer::load(const uint8_t* data, size_t size, int subtune) {
     m.title[32] = 0;
     for (char& c : m.title)
         if (c && (c < 32 || c > 126)) c = ' ';
-    std::strcpy(m.format, data[0] == 'R' ? "C64 RSID" : "C64 PSID");
     if (!m.start()) {
         m.release();
         return false;
     }
-    std::strcat(m.format, m.voices > 3 ? (m.voices > 6 ? " 3SID" : " 2SID") : "");
+    std::snprintf(m.format, sizeof m.format, "C64 %s%s", data[0] == 'R' ? "RSID" : "PSID",
+                  m.voices > 3 ? (m.voices > 6 ? " 3SID" : " 2SID") : "");
     return true;
 }
 
