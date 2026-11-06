@@ -55,8 +55,8 @@ public:
     void setRate(uint32_t hz) override { rate_ = hz ? hz : 48000; }
     void clearMeters() override;
     void render(float* stereo, uint32_t frames, float gain) override;
-    int voices() const override { return 4; }
-    float vu(int v) const override { return v >= 0 && v < 4 ? vu_[v] : 0.f; }
+    int voices() const override { return voices_; }
+    float vu(int v) const override { return v >= 0 && v < voices_ ? vu_[v] : 0.f; }
     void scope(int v, float* dst, int n) const override;
     double seconds() const override { return seconds_; }
     const char* format() const override { return format_.c_str(); }
@@ -64,7 +64,10 @@ public:
     int tick() const override { return 0; }
 
 protected:
-    AmigaChannel ch_[4];
+    // Paula channels 0-3; 7 voice formats (Digital Mugician 2) set voices_ = 7 and voices 3..6 are mixed
+    // into channel 3, each at a quarter (as HippelPlayer does).
+    AmigaChannel ch_[kMaxVoices];
+    int voices_ = 4;
     std::string format_;
     double tickHz_ = 50.0;  // replay calls per second (VBlank)
     bool endReached_ = false;  // set by playTick when the song wrapped around
@@ -76,7 +79,7 @@ protected:
 private:
     uint32_t rate_ = 48000;
     double tickLeft_ = 0, seconds_ = 0;
-    float vu_[4] = {};
-    float scope_[4][kScopeLen] = {};
+    float vu_[kMaxVoices] = {};
+    float scope_[kMaxVoices][kScopeLen] = {};
     uint32_t scopePos_ = 0;
 };
