@@ -14,6 +14,7 @@
 #include "core/hippel_player.h"
 #include "core/sid_player.h"
 #include "core/sndh_player.h"
+#include "core/sc68_player.h"
 #include "core/tfmx_player.h"
 #include "core/mixer.h"
 #include "core/player.h"
@@ -175,6 +176,17 @@ bool Engine::loadSndh(const uint8_t* data, size_t size, const char* name, bool p
     SndhPlayer* p = new SndhPlayer;
     p->setRate(mixer_->rate());
     if (!p->load(data, size)) {
+        delete p;
+        return false;
+    }
+    return installChip(p, *p->title() ? p->title() : name, play);
+}
+
+bool Engine::loadSc68(const uint8_t* data, size_t size, const AmigaFileResolver& files, const char* name, bool play,
+                      std::string* error) {
+    Sc68Player* p = new Sc68Player;
+    p->setRate(mixer_->rate());
+    if (!p->load(data, size, files, -1, error)) {
         delete p;
         return false;
     }

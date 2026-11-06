@@ -76,6 +76,9 @@ public:
     bool loadAy(const uint8_t* data, size_t size, const char* name, bool play);
     // Atari ST SNDH tune (its 68000 player on an emulated ST, ICE! packed too): playback only
     bool loadSndh(const uint8_t* data, size_t size, const char* name, bool play);
+    // Atari ST SC68 / YMST tune on the same emulated ST; external replays read through `files`, `error` says why not
+    bool loadSc68(const uint8_t* data, size_t size, const AmigaFileResolver& files, const char* name, bool play,
+                  std::string* error = nullptr);
     // ZX Spectrum Pro Tracker 3 / Vortex Tracker II modules (.pt3) on the AY: playback only
     bool loadPt3(const uint8_t* data, size_t size, const char* name, bool play);
     // Amiga synth formats ported from NostalgicPlayer (JamCracker, ...): playback only
