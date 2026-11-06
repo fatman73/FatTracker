@@ -5,3 +5,4 @@ tests/ref/*.xm
 tests/ref/*.wav
 modules/
 .claude/
+build-mac/
