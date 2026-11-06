@@ -72,6 +72,8 @@ public:
     bool loadSid(const uint8_t* data, size_t size, const char* name, bool play);
     // AY / YM register dumps (YM, VTX, PSG): playback only
     bool loadAy(const uint8_t* data, size_t size, const char* name, bool play);
+    // ZX Spectrum Pro Tracker 3 / Vortex Tracker II modules (.pt3) on the AY: playback only
+    bool loadPt3(const uint8_t* data, size_t size, const char* name, bool play);
     // Amiga synth formats ported from NostalgicPlayer (JamCracker, ...): playback only
     bool loadAmigaSynth(const uint8_t* data, size_t size, const char* name, bool play);
     // consoles and 8-bit computers through Game_Music_Emu (SPC, VGM, SAP, AY, NSF, GBS, ...): playback only
