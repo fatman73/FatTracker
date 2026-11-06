@@ -123,7 +123,8 @@ void PlayScreen::diskRefresh() {
                     const bool mod = hasExt(n, {L".mod", L".xm", L".stk", L".s3m", L".it", L".mtm", L".669", L".fc", L".fc13", L".fc14", L".smod", L".hip", L".hipc", L".hip7", L".sog", L".mcmd", L".coso", L".sid", L".psid", L".rsid", L".sndh", L".ahx", L".thx", L".hvl", L".ym", L".vtx", L".psg", L".pt3", L".jam", L".spc", L".vgm", L".vgz", L".gym", L".sap", L".ay", L".nsf", L".nsfe", L".gbs", L".hes", L".kss", L".mdat", L".mmd0",
                                                 L".mmd1", L".mmd2", L".mmd3", L".med", L".symmod", L".dbm",
                                                 L".digi", L".tfx", L".dm", L".dm1", L".dm2", L".sid1", L".sid2", L".sd1", L".sd2", L".smn",
-                                                L".bp", L".bp2", L".bp3", L".sndmon", L".dmu", L".dmu2", L".mug", L".mug2", L".dw", L".dwold", L".smus"}) ||
+                                                L".bp", L".bp2", L".bp3", L".sndmon", L".dmu", L".dmu2", L".mug", L".mug2", L".dw", L".dwold", L".smus",
+                                                L".pt2", L".stc", L".st11", L".st13", L".asc", L".sqt"}) ||
                                      !_wcsnicmp(n.c_str(), L"mdat.", 5) || !_wcsnicmp(n.c_str(), L"mod.", 4) ||
                                      !_wcsnicmp(n.c_str(), L"fc.", 3) || !_wcsnicmp(n.c_str(), L"smod.", 5) ||
                                      !_wcsnicmp(n.c_str(), L"hip.", 4) || !_wcsnicmp(n.c_str(), L"hipc.", 5) ||

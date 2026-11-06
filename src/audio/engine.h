@@ -80,6 +80,8 @@ public:
     bool loadHvl(const uint8_t* data, size_t size, const char* name, bool play);
     // ZX Spectrum Pro Tracker 3 / Vortex Tracker II modules (.pt3) on the AY: playback only
     bool loadPt3(const uint8_t* data, size_t size, const char* name, bool play);
+    // ZX Spectrum AY tracker modules (STC, Sound Tracker 1.1, PT2, ASC, SQT) on the AY: playback only
+    bool loadZxTracker(const uint8_t* data, size_t size, const char* name, bool play);
     // Amiga synth formats ported from NostalgicPlayer (JamCracker, ...): playback only
     bool loadAmigaSynth(const uint8_t* data, size_t size, const char* name, bool play);
     // the same with companion files (IFF SMUS instruments) read through `files`; `error` (if given) says why not
