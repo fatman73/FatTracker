@@ -1,4 +1,4 @@
-// Reading and writing files for the app (Windows): modules, XM/MOD/WAV saving.
+// Reading and writing files for the app: modules, XM/MOD/WAV saving.
 #pragma once
 #include <cstdint>
 #include <string>

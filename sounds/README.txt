@@ -7,4 +7,5 @@ Put your own Amiga drive recordings here (WAV or IFF 8SVX, mono or stereo):
   floppy_insert.wav  - disk being inserted
 
 Missing files are replaced by built-in synthesized sounds.
-The folder is searched next to FatTracker.exe first, then in the working folder.
+Windows: the folder is searched next to FatTracker.exe first, then in the working folder.
+macOS: ~/Library/Application Support/FatTracker/sounds first, then the app's Resources/sounds.

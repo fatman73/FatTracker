@@ -7,7 +7,9 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 
+#include "platform/os.h"
 #include "ui/widgets.h"
 
 namespace {
@@ -308,14 +310,14 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
         tx.draw(g, {scopeRects[i].x + 2, scopeRects[i].y + 2, 40, 18}, buf, 11.f, withAlpha(t.scopeLine, 0.55f),
                 Align::Left, FontRole::Mono);
     }
-    SYSTEMTIME st;
-    GetLocalTime(&st);
+    std::tm st;
+    osLocalTime(st);
     static const char* const mon[] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN",
                                       "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
     const unsigned playSec = tel.rate ? (unsigned)(tel.playFrames / tel.rate) : 0u;
     g.well(L_.clock, t, mixColor(t.panelLight, t.panel, 0.25f));
-    std::snprintf(buf, sizeof buf, "DATE %02u-%s-%02u     TIME %02u:%02u:%02u     PLAY %02u:%02u", st.wDay,
-                  mon[(st.wMonth + 11) % 12], st.wYear % 100, st.wHour, st.wMinute, st.wSecond, playSec / 60,
+    std::snprintf(buf, sizeof buf, "DATE %02u-%s-%02u     TIME %02u:%02u:%02u     PLAY %02u:%02u", (unsigned)st.tm_mday,
+                  mon[st.tm_mon % 12], (unsigned)(st.tm_year % 100), (unsigned)st.tm_hour, (unsigned)st.tm_min, (unsigned)st.tm_sec, playSec / 60,
                   playSec % 60);
     tx.draw(g, L_.clock, buf, 16.f, t.digits, Align::Center, FontRole::Mono);
 

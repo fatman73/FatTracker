@@ -13,8 +13,6 @@
 
 #include "app/chip_route.h"
 #include "audio/engine.h"
-#include "core/song.h"
-#include "formats/formats.h"
 #include "formats/wav.h"
 
 int main(int argc, char** argv) {
@@ -36,32 +34,17 @@ int main(int argc, char** argv) {
     const std::filesystem::path exe = std::filesystem::absolute(std::filesystem::path(argv[0]), ec);
     const std::wstring replayDir = ec ? std::wstring() : (exe.parent_path() / "Replay").wstring();
 
-    std::vector<uint8_t> data;
-    if (const char* err = readWholeFile(path, data)) {
-        std::printf("%s\n", err);
-        return 1;
-    }
     Engine e;  // no audio device: the mixer runs at 48 kHz
-    const ChipRoute route = routeChipFile(path, data, replayDir);
-    if (route.kind == ChipRoute::Error) {
-        std::printf("ERROR: %s\n", route.error.c_str());
+    std::string error;
+    if (!loadSongFile(e, path, replayDir, &error)) {
+        std::printf("%s\n", error.c_str());
         return 1;
     }
-    if (route.kind == ChipRoute::Ok) {
-        if (!loadRoutedChip(e, route, data, replayDir, false)) {
-            std::printf("ERROR: CANNOT PLAY THIS FILE\n");
-            return 1;
-        }
+    if (e.tfmx()) {
         std::printf("%s", e.tfmxFormat());
         if (e.chipSubsongs() > 1) std::printf(" (%d sub-songs)", e.chipSubsongs());
         std::printf("\n");
     } else {
-        auto r = loadModule(data.data(), data.size());
-        if (!r.ok()) {
-            std::printf("ERROR: %s\n", r.error());
-            return 1;
-        }
-        e.setSong(std::make_unique<Song>(static_cast<Song&&>(r.value())));
         std::printf("module\n");
     }
     if (subsong >= 0 && !e.selectChipSubsong(subsong)) {

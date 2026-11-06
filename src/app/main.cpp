@@ -1,30 +1,15 @@
-// FatTracker entry point: window, message loop, file loading, input routing.
+// FatTracker entry point (Windows): window, message loop, input routing. The file and song logic is shared
+// with macOS in src/app/app_logic.cpp; WinShell gives it the Win32 dialogs, timer, cursor and title.
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
+#include <cwctype>
+#include <functional>
 #include <memory>
 #include <vector>
 
-#include <functional>
-
-#include "app/document.h"
-#include "formats/writers.h"
-#include "audio/engine.h"
-#include "formats/formats.h"
+#include "app/app_logic.h"
 #include "audio/capture.h"
-#include "core/sample_edit.h"
-#include "core/amiga_synth.h"
-#include "core/ay_player.h"
-#include "core/gme_player.h"
-#include "core/hippel_player.h"
-#include "core/hvl_player.h"
-#include "core/pt3_player.h"
-#include "core/zx_trackers.h"
-#include "core/sid_player.h"
-#include "core/sndh_player.h"
-#include "core/sc68_player.h"
-#include "core/tfmx_player.h"
-#include "formats/sample_io.h"
+#include "audio/engine.h"
 #include "ui/cursor.h"
 #include "ui/font.h"
 #include "ui/gfx.h"
@@ -79,8 +64,6 @@ bool drawFrame() {
     return true;
 }
 
-std::wstring g_path;  // file of the current song ("" = untitled)
-
 std::wstring iniPath() {
     wchar_t buf[MAX_PATH];
     GetModuleFileNameW(nullptr, buf, MAX_PATH);
@@ -88,541 +71,66 @@ std::wstring iniPath() {
     return p.substr(0, p.find_last_of(L'\\') + 1) + L"FatTracker.ini";
 }
 
-void updateTitle() {
-    if (!g_hwnd) return;
-    const wchar_t* name = g_path.empty() ? L"untitled" : g_path.c_str();
-    for (const wchar_t* p = name; *p; ++p)
-        if (*p == L'\\' || *p == L'/') name = p + 1;
-    wchar_t title[300];
-    wsprintfW(title, L"FatTracker \x2014 %s%s", name, g_screen.dirty() ? L" *" : L"");
-    SetWindowTextW(g_hwnd, title);
-}
-
-std::unique_ptr<Song> g_pending;  // Pure mode: loaded song waiting for the floppy
-std::wstring g_pendingPath;
-bool g_pendingTruncated = false;
-// Pure mode: a TFMX pair waiting for the floppy (it has its own player, so it is kept as files)
-bool g_pendingTfmx = false;
-std::vector<uint8_t> g_pendingMdat, g_pendingSmpl;
-char g_pendingName[21] = {};
-bool loadPending() { return g_pending || g_pendingTfmx; }
-// The playback-only player a file goes to; chosen once in loadTfmxPair (with trial loads), used by applyTfmx.
-enum class Chip { Tfmx, Sid, Pt3, Gme, Synth, SynthFiles, Ay, Hippel, Sndh, Hvl, ZxTracker, Sc68 };  // SynthFiles: with companion files
-Chip g_pendingChip = Chip::Tfmx;
-bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
-               const std::wstring& mdatPath, Chip chip);
-void applyLoaded(std::unique_ptr<Song> song, const std::wstring& path, bool truncated);
-void finishPendingLoad();
-
-// Size of a file on disk (0 if unknown) - drives the floppy write sound.
-uint32_t fileSize(const wchar_t* path) {
-    WIN32_FILE_ATTRIBUTE_DATA a;
-    return GetFileAttributesExW(path, GetFileExInfoStandard, &a) ? a.nFileSizeLow : 0;
-}
-
-// Pure mode floppy sounds supplied by the user: sounds/floppy_*.wav next to the exe or in the working folder.
-void loadFloppySounds() {
+std::wstring exeDir() {
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    const std::wstring exeDir = std::wstring(exe).substr(0, std::wstring(exe).find_last_of(L'\\') + 1);
-    const std::wstring dirs[2] = {exeDir + L"sounds\\", L"sounds\\"};
-    static Sample snd[3];
-    const Sample* use[3] = {};
-    const wchar_t* names[3] = {L"floppy_motor.wav", L"floppy_step.wav", L"floppy_insert.wav"};
-    for (int i = 0; i < 3; ++i)
-        for (const std::wstring& d : dirs) {
-            std::vector<uint8_t> data;
-            if (readFileW((d + names[i]).c_str(), data)) continue;
-            auto r = loadSampleFile(data.data(), data.size());
-            if (!r.ok()) continue;
-            snd[i] = static_cast<Sample&&>(r.value());
-            use[i] = &snd[i];
-            break;
-        }
-    g_engine->setFloppySounds(use[0], use[1], use[2]);  // copies (trimmed) what it uses
-    for (Sample& s : snd) s = Sample{};
+    return std::wstring(exe).substr(0, std::wstring(exe).find_last_of(L'\\') + 1);
 }
 
-// Companion files of a song (IFF SMUS instruments): plain names in the song's own folder (or its Instruments
-// subfolder), nothing else.
-AmigaFileResolver songFolderFiles(const std::wstring& songPath) {
-    const size_t slash = songPath.find_last_of(L"\\/");
-    return folderFileResolver(slash == std::wstring::npos ? L"." : songPath.substr(0, slash + 1));
-}
-
-// External replays of SC68 / YMST tunes: plain file names (no paths) in the song's folder, its Replay subfolder
-// or the Replay folder next to the exe.
-AmigaFileResolver replayFiles(const std::wstring& songPath) {
-    const size_t slash = songPath.find_last_of(L"\\/");
-    const std::wstring dir = slash == std::wstring::npos ? L".\\" : songPath.substr(0, slash + 1);
-    wchar_t exe[MAX_PATH];
-    GetModuleFileNameW(nullptr, exe, MAX_PATH);
-    const std::wstring exeDir = std::wstring(exe).substr(0, std::wstring(exe).find_last_of(L'\\') + 1);
-    const AmigaFileResolver in[3] = {folderFileResolver(dir), folderFileResolver(dir + L"Replay"),
-                                     folderFileResolver(exeDir + L"Replay")};
-    return [in](const std::string& name, std::vector<uint8_t>& out) {
-        if (!isPlainFileName(name)) return false;
-        for (const AmigaFileResolver& r : in)
-            if (r(name, out)) return true;
-        return false;
-    };
-}
-
-// TFMX songs are two files: mdat.<name> (song) and smpl.<name> (samples), or .mdat/.smpl, .tfx/.sam.
-// Either one may be chosen; returns false when this is not TFMX at all.
-bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
-    const size_t slash = path.find_last_of(L"\\/");
-    const std::wstring dir = slash == std::wstring::npos ? L"" : path.substr(0, slash + 1);
-    const std::wstring file = slash == std::wstring::npos ? path : path.substr(slash + 1);
-    std::wstring mdatPath = path, smplPath;
-    auto swapPrefix = [&](const wchar_t* from, const wchar_t* to) {
-        return dir + to + file.substr(wcslen(from));
-    };
-    auto swapExt = [&](const std::wstring& p, size_t extLen, const wchar_t* to) { return p.substr(0, p.size() - extLen) + to; };
-    auto hasSuffix = [&](const wchar_t* s) {
-        const size_t n = wcslen(s);
-        return file.size() > n && _wcsicmp(file.c_str() + file.size() - n, s) == 0;
-    };
-    if (!_wcsnicmp(file.c_str(), L"smpl.", 5)) mdatPath = swapPrefix(L"smpl.", L"mdat.");
-    else if (hasSuffix(L".smpl")) mdatPath = swapExt(path, 5, L".mdat");
-    else if (hasSuffix(L".sam")) mdatPath = swapExt(path, 4, L".tfx");
-    if (mdatPath != path && readFileW(mdatPath.c_str(), data)) return false;
-    // Future Composer / Jochen Hippel: one file with song and samples, played like TFMX
-    // Hippel's probes search the whole file: they count only for FC / Hippel names or a tag at the start,
-    // and the file must really load, else the module loaders get it (a MOD may name a sample "TFMX")
-    auto named = [&](std::initializer_list<const wchar_t*> exts) {
-        for (const wchar_t* x : exts) {
-            const size_t n = wcslen(x);
-            if (file.size() > n && (_wcsicmp(file.c_str() + file.size() - n, x) == 0 || !_wcsnicmp(file.c_str(), x + 1, n - 1) && file[n - 1] == L'.'))
-                return true;
-        }
-        return false;
-    };
-    const bool hippelName = named({L".fc", L".fc13", L".fc14", L".smod", L".hip", L".hipc", L".hip7", L".sog", L".mcmd", L".coso"});
-    const bool hippelTag = data.size() >= 4 && (!std::memcmp(data.data(), "FC14", 4) || !std::memcmp(data.data(), "SMOD", 4) ||
-                                                !std::memcmp(data.data(), "COSO", 4) || !std::memcmp(data.data(), "MCMD", 4));
-    // a one-file chip song that really loads; each format in turn, the first that loads wins
-    bool hippel = false;
-    Chip chip = Chip::Tfmx;
-    if (!TfmxPlayer::detect(data.data(), data.size()) && mdatPath == path) {
-        const uint8_t* d = data.data();
-        const size_t n = data.size();
-        auto pick = [&](Chip c, bool loads) {
-            if (!hippel && loads) hippel = true, chip = c;
-        };
-        if (SidPlayer::detect(d, n)) {  // C64 PSID / RSID
-            SidPlayer trial;
-            pick(Chip::Sid, trial.load(d, n));
-        }
-        if (!hippel && HvlPlayer::detect(d, n)) {  // Amiga AHX ("THX") / HivelyTracker ("HVL")
-            HvlPlayer trial;
-            pick(Chip::Hvl, trial.load(d, n));
-        }
-        if (!hippel && SndhPlayer::detect(d, n)) {  // Atari ST SNDH (its 68000 player; ICE! packed too)
-            SndhPlayer trial;
-            pick(Chip::Sndh, trial.load(d, n));
-        }
-        if (!hippel && (Sc68Player::detect(d, n) || Sc68Player::detectYmst(d, n))) {  // Atari ST SC68 / YMST
-            Sc68Player trial;
-            std::string err;
-            if (!trial.load(d, n, replayFiles(path), -1, &err)) {  // e.g. its external replay is missing
-                static char msg[100];
-                std::snprintf(msg, sizeof msg, "%s", err.c_str());
-                for (char* c = msg; *c; ++c) *c = (unsigned char)*c < 127 ? (char)toupper((unsigned char)*c) : '_';
-                g_screen.setStatus(msg);
-                g_engine->floppyDir();
-                return true;
-            }
-            pick(Chip::Sc68, true);
-        }
-        if (!hippel && Pt3Player::detect(d, n)) {  // ZX Spectrum Pro Tracker 3 / Vortex Tracker II
-            Pt3Player trial;
-            pick(Chip::Pt3, trial.load(d, n));
-        }
-        if (!hippel && GmePlayer::detect(d, n)) {  // SPC, VGM, SAP, AY, NSF, GBS, ...
-            GmePlayer trial;
-            pick(Chip::Gme, trial.load(d, n));
-        }
-        if (!hippel && AmigaSynthPlayer::detect(d, n))  // JamCracker, Delta Music, SidMon, SoundMon, Mugician, Whittaker, Sonic Arranger, Art Of Noise
-            pick(Chip::Synth, AmigaSynthPlayer::open(d, n) != nullptr);
-        if (!hippel && AmigaSynthPlayer::needsFiles(d, n)) {  // IFF SMUS: its instruments are files next to it
-            std::string err;
-            if (!AmigaSynthPlayer::openWithFiles(d, n, songFolderFiles(path), &err)) {
-                static char msg[100];
-                std::snprintf(msg, sizeof msg, "IFF SMUS: %s", err.c_str());
-                for (char* c = msg; *c; ++c) *c = (unsigned char)*c < 127 ? (char)toupper((unsigned char)*c) : '_';
-                g_screen.setStatus(msg);
-                g_engine->floppyDir();  // the drive still looked at it
-                return true;
-            }
-            pick(Chip::SynthFiles, true);
-        }
-        if (!hippel && AyPlayer::detect(d, n)) {  // YM / VTX / PSG (LHA packed YM too)
-            AyPlayer trial;
-            pick(Chip::Ay, trial.load(d, n));
-        }
-        if (!hippel && (hippelName || hippelTag) && HippelPlayer::detect(d, n)) {  // FC / Jochen Hippel
-            HippelPlayer trial;
-            pick(Chip::Hippel, trial.load(d, n));
-        }
-        if (!hippel && ZxTrackerPlayer::detect(d, n)) {  // ZX STC / Sound Tracker 1.1 / PT2 / ASC / SQT (no tags)
-            ZxTrackerPlayer trial;
-            pick(Chip::ZxTracker, trial.load(d, n));
-        }
+// The window system for the shared app logic (src/app/app_logic.cpp): the Win32 calls main.cpp made itself before.
+struct WinShell : AppShell {
+    void redraw() override { g_dirty = true; }
+    void setTitle(const std::wstring& name, bool dirty) override {
+        if (!g_hwnd) return;
+        wchar_t title[300];
+        wsprintfW(title, L"FatTracker \x2014 %s%s", name.c_str(), dirty ? L" *" : L"");
+        SetWindowTextW(g_hwnd, title);
     }
-    if (!hippel && !TfmxPlayer::detect(data.data(), data.size())) return false;
-    const std::wstring mfile = mdatPath.substr(slash == std::wstring::npos ? 0 : slash + 1);
-    if (!_wcsnicmp(mfile.c_str(), L"mdat.", 5)) smplPath = dir + L"smpl." + mfile.substr(5);
-    else if (mfile.size() > 5 && !_wcsicmp(mfile.c_str() + mfile.size() - 5, L".mdat")) smplPath = swapExt(mdatPath, 5, L".smpl");
-    else if (mfile.size() > 4 && !_wcsicmp(mfile.c_str() + mfile.size() - 4, L".tfx")) smplPath = swapExt(mdatPath, 4, L".sam");
-    std::vector<uint8_t> smpl;
-    if (!hippel && (smplPath.empty() || readFileW(smplPath.c_str(), smpl))) {
-        g_screen.setStatus("TFMX: SMPL FILE NOT FOUND NEXT TO MDAT");
-        return true;
+    void setBusy(bool busy) override {
+        g_busy = busy;
+        SetCursor(busy ? g_cursors.busy() : g_cursors.arrow());
     }
-    char name[21] = {};
-    const std::wstring shown = !_wcsnicmp(mfile.c_str(), L"mdat.", 5) ? mfile.substr(5) : mfile;
-    for (size_t i = 0; i < 20 && i < shown.size(); ++i) name[i] = shown[i] < 127 ? (char)towupper(shown[i]) : '_';
-    // Pure mode: the drive reads both files first; the music waits for PLAY
-    const double wait = g_engine->floppyRead((uint32_t)(data.size() + smpl.size()));
-    if (wait > 0.05) {
-        g_pendingTfmx = true;
-        g_pendingChip = chip;
-        g_pendingMdat = data;
-        g_pendingSmpl = static_cast<std::vector<uint8_t>&&>(smpl);
-        std::memcpy(g_pendingName, name, sizeof g_pendingName);
-        g_pendingPath = mdatPath;
-        g_busy = true;
-        SetCursor(g_cursors.busy());
-        g_screen.setStatus("LOADING...");
-        SetTimer(g_hwnd, kTimerFloppy, (UINT)(wait * 1000), nullptr);
-        return true;
-    }
-    applyTfmx(data, smpl, name, mdatPath, chip);
-    return true;
-}
-
-bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
-               const std::wstring& mdatPath, Chip chip) {
-    const uint8_t* d = mdat.data();
-    const size_t n = mdat.size();
-    bool ok = false;
-    switch (chip) {  // decided by loadTfmxPair's trial loads
-        case Chip::Sid: ok = g_engine->loadSid(d, n, "", false); break;
-        case Chip::Pt3: ok = g_engine->loadPt3(d, n, name, false); break;
-        case Chip::ZxTracker: ok = g_engine->loadZxTracker(d, n, name, false); break;
-        case Chip::Gme: ok = g_engine->loadGme(d, n, name, false); break;
-        case Chip::Synth: ok = g_engine->loadAmigaSynth(d, n, name, false); break;
-        case Chip::SynthFiles: ok = g_engine->loadAmigaSynth(d, n, songFolderFiles(mdatPath), name, false); break;
-        case Chip::Ay: ok = g_engine->loadAy(d, n, name, false); break;
-        case Chip::Sndh: ok = g_engine->loadSndh(d, n, name, false); break;
-        case Chip::Hvl: ok = g_engine->loadHvl(d, n, name, false); break;
-        case Chip::Sc68: ok = g_engine->loadSc68(d, n, replayFiles(mdatPath), name, false); break;
-        case Chip::Hippel: ok = g_engine->loadHippel(d, n, name, false); break;
-        case Chip::Tfmx: ok = g_engine->loadTfmx(d, n, smpl.data(), smpl.size(), name, false); break;
-    }
-    if (!ok) {
-        g_screen.setStatus("CANNOT PLAY THIS FILE");
-        return false;
-    }
-    g_screen.songChanged();
-    static char msg[128];
-    const int songs = g_engine->chipSubsongs();  // more than one: POS steps through them
-    if (songs > 1) wsprintfA(msg, "%s - %d SONGS (POS) - PLAYBACK ONLY", g_engine->tfmxFormat(), songs);
-    else wsprintfA(msg, "%s - PLAYBACK ONLY", g_engine->tfmxFormat());
-    g_screen.setStatus(msg);
-    g_path.clear();  // nothing to save over
-    g_screen.setCurrentPath(mdatPath);
-    updateTitle();
-    return true;
-}
-
-// The sampler's SAMPLE button: first press records, second press puts the recording in the slot.
-void finishRecording() {
-    const uint32_t rate = g_capture.rate();
-    const bool lost = g_capture.lost(), full = g_capture.full();
-    std::vector<float> rec = g_capture.take();
-    g_screen.setRecording(false);
-    if (rec.size() < rate / 50) {
-        g_screen.setStatus("NOTHING RECORDED");
-        return;
-    }
-    const double secs = (double)rec.size() / rate;
-    g_screen.sampleLoaded(*g_engine, sampleFromRecording(rec.data(), rec.size(), rate), L"RECORDING");
-    static char msg[48];
-    wsprintfA(msg, lost ? "INPUT LOST - KEPT %d.%d S" : full ? "60 S LIMIT - RECORDED %d.%d S" : "RECORDED %d.%d S",
-              (int)secs, (int)(secs * 10) % 10);
-    g_screen.setStatus(msg);
-}
-
-void toggleRecording() {
-    if (g_screen.recording()) return finishRecording();  // also right after the time limit stopped it
-    if (!g_capture.start()) {
-        g_screen.setStatus("NO AUDIO INPUT TO RECORD FROM");
-        return;
-    }
-    g_screen.setRecording(true);
-    g_screen.setStatus("RECORDING... PRESS SAMPLE TO STOP");
-}
-
-bool loadModuleFile(const wchar_t* path) {
-    finishPendingLoad();  // a load in progress lands first
-    g_engine->stop();     // a file was chosen: the music that plays now stops
-    std::vector<uint8_t> data;
-    if (const char* err = readFileW(path, data)) {
-        g_screen.setStatus(err);
-        return false;
-    }
-    if (loadTfmxPair(path, data)) return true;
-    auto r = loadModule(data.data(), data.size());
-    if (!r.ok()) {
-        static char msg[96];
-        const wchar_t* name = path;
-        for (const wchar_t* p = path; *p; ++p)
-            if (*p == L'\\' || *p == L'/') name = p + 1;
-        if (!_wcsnicmp(name, L"smpl.", 5))
-            wsprintfA(msg, "THIS IS A TFMX SAMPLE FILE - LOAD THE MDAT FILE");
-        else
-            wsprintfA(msg, "ERROR: %s", r.error());
-        g_screen.setStatus(msg);
-        g_engine->floppyDir();  // the drive still looked at it
-        return false;
-    }
-    const bool truncated = (r.value().loadFlags & LOAD_TRUNCATED) != 0;
-    auto song = std::make_unique<Song>(static_cast<Song&&>(r.value()));
-    // Pure mode: the song arrives when the simulated floppy has read it (a key or click skips the wait)
-    const double wait = g_engine->floppyRead((uint32_t)data.size());
-    if (wait > 0.05) {
-        g_pending = static_cast<std::unique_ptr<Song>&&>(song);
-        g_pendingPath = path;
-        g_pendingTruncated = truncated;
-        g_busy = true;
-        SetCursor(g_cursors.busy());
-        g_screen.setStatus("LOADING...");
-        SetTimer(g_hwnd, kTimerFloppy, (UINT)(wait * 1000), nullptr);
-        return true;
-    }
-    applyLoaded(static_cast<std::unique_ptr<Song>&&>(song), path, truncated);
-    return true;
-}
-
-void applyLoaded(std::unique_ptr<Song> song, const std::wstring& path, bool truncated) {
-    g_engine->setSong(static_cast<std::unique_ptr<Song>&&>(song));
-    g_screen.songChanged();
-    g_screen.setStatus(truncated ? "LOADED: FILE TRUNCATED" : "ALL RIGHT");
-    g_path = path;
-    g_screen.setCurrentPath(path);
-    updateTitle();
-}
-
-bool g_dropChar = false;  // the key that skipped a load must not also type
-
-void finishPendingLoad() {
-    KillTimer(g_hwnd, kTimerFloppy);
-    if (!loadPending()) return;
-    g_engine->floppyCancel();
-    g_busy = false;
-    SetCursor(g_cursors.arrow());
-    if (g_pendingTfmx) {
-        g_pendingTfmx = false;
-        applyTfmx(g_pendingMdat, g_pendingSmpl, g_pendingName, g_pendingPath, g_pendingChip);
-        g_pendingMdat.clear();
-        g_pendingSmpl.clear();
-    } else {
-        applyLoaded(static_cast<std::unique_ptr<Song>&&>(g_pending), g_pendingPath, g_pendingTruncated);
-        g_pending.reset();
-    }
-    g_dirty = true;
-}
-
-// Runs `then` right away, or after asking to save unsaved changes.
-void confirmDiscard(HWND hwnd, std::function<void()> then);
-
-bool saveAsDialog(HWND hwnd, DWORD filter = 1);  // 1 XM, 2 MOD, 3 WAV
-
-bool saveTo(const std::wstring& path, SaveKind kind) {
-    if (g_engine->tfmx()) {  // the TFMX display song is not the music: nothing to save
-        g_screen.setStatus("PLAYBACK ONLY - NOTHING TO SAVE");
-        g_dirty = true;
-        return false;
-    }
-    g_busy = true;
-    SetCursor(g_cursors.busy());
-    SaveResult r = saveSong(*g_engine, path, kind);
-    if (r.ok) g_engine->floppyWrite(fileSize(path.c_str()));
-    g_busy = false;
-    SetCursor(g_cursors.arrow());
-    g_screen.setStatus(r.message);
-    if (r.ok && kind == SaveKind::Xm) {
-        g_path = path;
-        g_screen.editor().setClean();
-    }
-    updateTitle();
-    g_dirty = true;
-    return r.ok;
-}
-
-// MOD export first lists what the format cannot keep and asks; other kinds save directly.
-void exportChecked(const std::wstring& path, SaveKind kind) {
-    if (g_engine->tfmx()) {  // playback only: saveTo explains
-        saveTo(path, kind);
-        return;
-    }
-    if (kind == SaveKind::Mod) {
-        g_engine->lock();
-        const ModExport m = exportMod(*g_engine->song());
-        g_engine->unlock();
-        if (!m.warnings.empty()) {
-            static char text[160];
-            wsprintfA(text, "MOD CANNOT KEEP %d FEATURE(S), E.G.: %s", (int)m.warnings.size(), m.warnings[0]);
-            g_screen.ask(text, {"EXPORT", "CANCEL"}, [path](int a) {
-                if (a == 0) saveTo(path, SaveKind::Mod);
-            });
-            g_dirty = true;
-            return;
-        }
-    }
-    saveTo(path, kind);
-}
-
-// DISK OP. saves: ask before replacing an existing file.
-void saveFromDiskOp(const std::wstring& path, SaveKind kind) {
-    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return exportChecked(path, kind);
-    g_screen.ask("FILE EXISTS. OVERWRITE?", {"OVERWRITE", "CANCEL"}, [path, kind](int a) {
-        if (a == 0) exportChecked(path, kind);
-    });
-    g_dirty = true;
-}
-
-bool saveCurrent(HWND hwnd) {
-    if (!g_path.empty() && kindFromPath(g_path) == SaveKind::Xm) return saveTo(g_path, SaveKind::Xm);
-    return saveAsDialog(hwnd);
-}
-
-bool saveAsDialog(HWND hwnd, DWORD filter) {
-    if (g_engine->tfmx()) return saveTo(L"", SaveKind::Xm);  // says why nothing is saved
-    wchar_t file[MAX_PATH] = {};
-    std::wstring def = g_path.empty() ? L"untitled.xm" : withExtension(g_path, L".xm");
-    lstrcpynW(file, def.c_str(), MAX_PATH);
-    OPENFILENAMEW ofn = {sizeof ofn};
-    ofn.hwndOwner = hwnd;
-    ofn.lpstrFilter = L"FastTracker 2 module (*.xm)\0*.xm\0ProTracker module (*.mod)\0*.mod\0WAV audio (*.wav)\0*.wav\0";
-    ofn.lpstrFile = file;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrDefExt = L"xm";
-    ofn.nFilterIndex = filter;
-    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (!GetSaveFileNameW(&ofn)) return false;
-    const SaveKind kind = ofn.nFilterIndex == 2 ? SaveKind::Mod : ofn.nFilterIndex == 3 ? SaveKind::Wav : SaveKind::Xm;
-    const wchar_t* ext = kind == SaveKind::Mod ? L".mod" : kind == SaveKind::Wav ? L".wav" : L".xm";
-    std::wstring path = file;
-    if (kindFromPath(path) != kind) path = withExtension(path, ext);
-    if (kind != SaveKind::Xm) {  // exports never make the song clean
-        exportChecked(path, kind);
-        return false;
-    }
-    return saveTo(path, kind);
-}
-
-void confirmDiscard(HWND hwnd, std::function<void()> then) {
-    if (!g_screen.dirty()) {
-        then();
-        return;
-    }
-    g_screen.ask("THE SONG HAS UNSAVED CHANGES", {"SAVE", "DISCARD", "CANCEL"},
-                 [hwnd, then](int a) {
-                     if (a == 2) return;
-                     if (a == 0 && (!saveCurrent(hwnd) || g_screen.dirty())) return;
-                     then();
-                 });
-    g_dirty = true;
-}
-
-void openFileDialog(HWND hwnd) {
-    confirmDiscard(hwnd, [hwnd]() {
+    void startFloppyTimer(double seconds) override { SetTimer(g_hwnd, kTimerFloppy, (UINT)(seconds * 1000), nullptr); }
+    void stopFloppyTimer() override { KillTimer(g_hwnd, kTimerFloppy); }
+    void openDialog(const std::wstring& startDir, std::function<void(const std::wstring&)> done) override {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
-        ofn.hwndOwner = hwnd;
+        ofn.hwndOwner = g_hwnd;
         ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.sndh;sndh.*;*.ahx;*.thx;*.hvl;ahx.*;thx.*;hvl.*;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.dw;*.dwold;dw.*;dwold.*;*.smus;smus.*;*.pt2;*.stc;*.st11;*.st13;*.asc;*.sqt;*.sc68;*.ymst;*.sa;*.sonic;sa.*;sonic.*;*.aon;*.aon4;*.aon8;aon.*;aon4.*;aon8.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;
         ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
         wchar_t dir[MAX_PATH];
-        GetFullPathNameW(g_screen.browseDir().c_str(), MAX_PATH, dir, nullptr);
-        if (!g_screen.browseDir().empty() && g_screen.browseDir() != L"::drives") ofn.lpstrInitialDir = dir;
-        if (GetOpenFileNameW(&ofn)) {
-            loadModuleFile(file);
-            g_screen.openPanel(Panel::Main);
-        }
-        g_dirty = true;
-    });
-}
+        GetFullPathNameW(startDir.c_str(), MAX_PATH, dir, nullptr);
+        if (!startDir.empty()) ofn.lpstrInitialDir = dir;
+        if (GetOpenFileNameW(&ofn)) done(file);
+    }
+    void saveDialog(const std::wstring& suggested, int filter,
+                    std::function<void(const std::wstring&, SaveKind)> done) override {
+        wchar_t file[MAX_PATH] = {};
+        lstrcpynW(file, suggested.c_str(), MAX_PATH);
+        OPENFILENAMEW ofn = {sizeof ofn};
+        ofn.hwndOwner = g_hwnd;
+        ofn.lpstrFilter = L"FastTracker 2 module (*.xm)\0*.xm\0ProTracker module (*.mod)\0*.mod\0WAV audio (*.wav)\0*.wav\0";
+        ofn.lpstrFile = file;
+        ofn.nMaxFile = MAX_PATH;
+        ofn.lpstrDefExt = L"xm";
+        ofn.nFilterIndex = (DWORD)filter;
+        ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if (!GetSaveFileNameW(&ofn)) return;
+        done(file, ofn.nFilterIndex == 2 ? SaveKind::Mod : ofn.nFilterIndex == 3 ? SaveKind::Wav : SaveKind::Xm);
+    }
+};
+WinShell g_shell;
 
-void loadAnyFile(const std::wstring& path) {
-    finishPendingLoad();
-    std::vector<uint8_t> data;
-    if (const char* err = readFileW(path.c_str(), data)) {
-        g_screen.setStatus(err);
-        return;
-    }
-    const bool sampleSig = data.size() >= 12 && ((!memcmp(data.data(), "RIFF", 4) && !memcmp(data.data() + 8, "WAVE", 4)) ||
-                                                  (!memcmp(data.data(), "FORM", 4) && (!memcmp(data.data() + 8, "8SVX", 4) ||
-                                                                                       !memcmp(data.data() + 8, "AIFF", 4) ||
-                                                                                       !memcmp(data.data() + 8, "AIFC", 4))));
-    auto smp = loadSampleFile(data.data(), data.size());
-    if (sampleSig && !smp.ok()) {
-        g_screen.setStatus(smp.error());
-        return;
-    }
-    if (smp.ok()) {
-        const size_t slash = path.find_last_of(L"\\/");
-        g_screen.sampleLoaded(*g_engine, static_cast<Sample&&>(smp.value()), path.substr(slash + 1));
-        return;
-    }
-    confirmDiscard(g_hwnd, [path]() { loadModuleFile(path.c_str()); });
-}
+bool g_dropChar = false;  // the key that skipped a load must not also type
 
-void handle(UiAction a, HWND hwnd) {
-    if (a == UiAction::OpenFile) openFileDialog(hwnd);
-    if (a == UiAction::SaveFile) saveCurrent(hwnd);
-    if (a == UiAction::ExportWav) saveAsDialog(hwnd, 3);
-    const std::wstring path = g_screen.actionPath();
-    if (a == UiAction::LoadPath) loadAnyFile(path);
-    if (a == UiAction::SaveXmPath) saveFromDiskOp(path, SaveKind::Xm);
-    if (a == UiAction::SaveModPath) saveFromDiskOp(path, SaveKind::Mod);
-    if (a == UiAction::SaveWavPath) saveFromDiskOp(path, SaveKind::Wav);
-    if (a == UiAction::SaveSamplePath) {
-        auto save = [path]() {
-            std::vector<uint8_t> bytes;
-            g_engine->lock();
-            const Song* s = g_engine->song();
-            const int idx = s ? g_screen.curSampleIndex(*s) : -1;
-            if (idx >= 0 && s->samples[idx].length) bytes = saveSampleWav(s->samples[idx]);
-            g_engine->unlock();
-            if (bytes.empty()) g_screen.setStatus("ERROR: THE SAMPLE IS EMPTY");
-            else if (!writeFileAtomic(path.c_str(), bytes)) g_screen.setStatus("ERROR: CANNOT WRITE FILE");
-            else {
-                g_screen.setStatus("SAMPLE SAVED (WAV)");
-                g_engine->floppyWrite((uint32_t)bytes.size());
-            }
-            g_dirty = true;
-        };
-        if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) save();
-        else g_screen.ask("FILE EXISTS. OVERWRITE?", {"OVERWRITE", "CANCEL"}, [save](int r) { if (r == 0) save(); });
-    }
-    if (g_screen.takeDirRead()) g_engine->floppyDir();
-    if (g_screen.takeRecordRequest()) toggleRecording();
-    if (a != UiAction::None) {
-        g_dirty = true;
-        updateTitle();
-    }
-}
 void mouse(HWND hwnd, LPARAM lp, bool right) {
     float lx, ly;
     deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
     if (!right) SetCapture(hwnd);
-    handle(g_screen.onMouse(lx, ly, right, *g_engine), hwnd);
+    app::handle(g_screen.onMouse(lx, ly, right, *g_engine));
 }
 
 LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -652,8 +160,8 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             [[fallthrough]];  // Alt+F4 copies the pattern like in ProTracker; close with the window button
         case WM_KEYDOWN: {
             g_dropChar = false;
-            if (loadPending()) {  // any key skips the simulated floppy read (and types nothing)
-                finishPendingLoad();
+            if (app::loadPending()) {  // any key skips the simulated floppy read (and types nothing)
+                app::finishPendingLoad();
                 g_dropChar = true;
                 return 0;
             }
@@ -661,21 +169,21 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             const bool alt = (lp & (1 << 29)) != 0, ext = (lp & (1 << 24)) != 0;
             const bool repeat = (lp & (1 << 30)) != 0;  // keyboard auto-repeat
             if (ctrl && !alt && wp == 'O') {
-                if (!repeat) openFileDialog(hwnd);
+                if (!repeat) app::openFileDialog();
                 return 0;
             }
-            handle(g_screen.onKey((unsigned)wp, shift, ctrl, alt, ext, repeat, *g_engine), hwnd);
+            app::handle(g_screen.onKey((unsigned)wp, shift, ctrl, alt, ext, repeat, *g_engine));
             return 0;
         }
         case WM_KEYUP:
         case WM_SYSKEYUP:
-            handle(g_screen.onKeyUp((unsigned)wp, *g_engine), hwnd);
+            app::handle(g_screen.onKeyUp((unsigned)wp, *g_engine));
             break;
         case WM_SYSCHAR:
             return 0;  // no menu beep on Alt combinations
         case WM_LBUTTONDOWN:
-            if (loadPending()) {
-                finishPendingLoad();
+            if (app::loadPending()) {
+                app::finishPendingLoad();
                 return 0;
             }
             mouse(hwnd, lp, false);
@@ -684,19 +192,19 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             ReleaseCapture();
             float lx, ly;
             deviceToLogical(g_gfx.viewport(), (float)GET_X_LPARAM(lp), (float)GET_Y_LPARAM(lp), lx, ly);
-            handle(g_screen.onMouseUp(lx, ly, *g_engine), hwnd);
+            app::handle(g_screen.onMouseUp(lx, ly, *g_engine));
             return 0;
         }
         case WM_MOUSEWHEEL: {
-            if (loadPending()) {
-                finishPendingLoad();
+            if (app::loadPending()) {
+                app::finishPendingLoad();
                 return 0;
             }
             POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
             ScreenToClient(hwnd, &pt);
             float lx, ly;
             deviceToLogical(g_gfx.viewport(), (float)pt.x, (float)pt.y, lx, ly);
-            handle(g_screen.onWheel(lx, ly, GET_WHEEL_DELTA_WPARAM(wp), *g_engine), hwnd);
+            app::handle(g_screen.onWheel(lx, ly, GET_WHEEL_DELTA_WPARAM(wp), *g_engine));
             return 0;
         }
         case WM_CHAR:
@@ -704,11 +212,11 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 g_dropChar = false;
                 return 0;
             }
-            handle(g_screen.onChar((wchar_t)wp, *g_engine), hwnd);
+            app::handle(g_screen.onChar((wchar_t)wp, *g_engine));
             return 0;
         case WM_RBUTTONDOWN:
-            if (loadPending()) {
-                finishPendingLoad();
+            if (app::loadPending()) {
+                app::finishPendingLoad();
                 return 0;
             }
             mouse(hwnd, lp, true);
@@ -724,33 +232,15 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             wchar_t file[MAX_PATH];
             if (DragQueryFileW(drop, 0, file, MAX_PATH)) {
                 std::wstring path = file;
-                loadAnyFile(path);
+                app::loadAnyFile(path);
             }
             DragFinish(drop);
             g_dirty = true;
             return 0;
         }
         case WM_TIMER:
-            if (wp == kTimerFloppy) finishPendingLoad();
-            if (g_screen.recording()) {  // recording: show time and level, stop at the limit
-                if (!g_capture.running()) {
-                    finishRecording();
-                } else {
-                    static char recMsg[64];
-                    const int lvl = (int)(g_capture.level() * 20);
-                    char bar[21] = {};
-                    for (int i = 0; i < 20; ++i) bar[i] = i < lvl ? '#' : '.';
-                    wsprintfA(recMsg, "RECORDING %d S  %s", (int)g_capture.seconds(), bar);
-                    g_screen.setStatus(recMsg);
-                }
-            }
-            if (wp == kTimerAudio) {
-                g_engine->pollAudio();
-                if (const char* st = g_engine->audioStatus())
-                    g_screen.setStatus(st);
-                else
-                    g_screen.clearStatusIf("ERROR: NO AUDIO");
-            }
+            if (wp == kTimerFloppy) app::floppyTimer();
+            app::timerTick(wp == kTimerAudio);  // recording status; the audio device every 2 s
             g_dirty = true;
             return 0;
         case WM_ERASEBKGND:
@@ -760,13 +250,8 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_dirty = true;
             return 0;
         case WM_CLOSE:
-            if (loadPending()) {  // closing during a simulated load: the half-read song is dropped
-                KillTimer(hwnd, kTimerFloppy);
-                g_pending.reset();
-                g_pendingTfmx = false;
-                g_busy = false;
-            }
-            confirmDiscard(hwnd, [hwnd]() { DestroyWindow(hwnd); });
+            app::cancelPendingLoad();  // closing during a simulated load: the half-read song is dropped
+            app::confirmDiscard([hwnd]() { DestroyWindow(hwnd); });
             return 0;
         case WM_DESTROY:
             g_capture.stop();
@@ -793,7 +278,7 @@ int screenshotMode() {
         CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         result = 1;
         const bool gfxOk = w && h && g_gfx.initOffscreen(w, h);  // one device for the whole run
-        if (argc >= 6 && loadModuleFile(argv[5])) {
+        if (argc >= 6 && app::loadModuleFile(argv[5])) {
             g_engine->play();
             const int seconds10 = argc >= 7 ? (int)(_wtof(argv[6]) * 10) : 15;
             std::vector<float> buf(4800 * 2);
@@ -914,6 +399,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     g_engine->setSong(std::make_unique<Song>(makeEmptySong(4)));
     g_text.init();
     g_font.setText(&g_text);
+    app::init(*g_engine, g_screen, g_capture, g_shell, exeDir() + L"Replay");
     if (int shot = screenshotMode(); shot >= 0) return shot;
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -946,7 +432,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
         return 1;
     }
     if (!g_engine->startAudio()) g_screen.setStatus(g_engine->audioStatus());
-    loadFloppySounds();
+    app::loadFloppySounds({exeDir() + L"sounds\\", L"sounds\\"});
     g_screen.loadSettings(iniPath().c_str(), *g_engine);
     g_engine->setSong(std::make_unique<Song>(makeEmptySong(g_screen.defaultChannels())));
     g_screen.songChanged();
@@ -956,7 +442,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
         int argc = 0;
         LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
         // a module named on the command line starts at once, unless Pure mode is still "reading" it
-        if (argv && argc >= 2 && loadModuleFile(argv[1]) && !loadPending()) g_engine->play();
+        if (argv && argc >= 2 && app::loadModuleFile(argv[1]) && !app::loadPending()) g_engine->play();
         if (argv) LocalFree(argv);
     }
     ShowWindow(hwnd, show);

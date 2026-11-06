@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <memory>
 
 #include "audio/engine.h"
 #include "core/amiga_synth.h"
@@ -19,7 +20,9 @@
 #include "core/sid_player.h"
 #include "core/sndh_player.h"
 #include "core/tfmx_player.h"
+#include "core/song.h"
 #include "core/zx_trackers.h"
+#include "formats/formats.h"
 
 namespace {
 #ifdef _WIN32
@@ -218,4 +221,29 @@ bool loadRoutedChip(Engine& engine, const ChipRoute& route, const std::vector<ui
         case Chip::Tfmx: return engine.loadTfmx(d, n, route.smpl.data(), route.smpl.size(), name, play);
     }
     return false;
+}
+
+bool loadSongFile(Engine& engine, const std::wstring& path, const std::wstring& exeReplayDir, std::string* error) {
+    std::vector<uint8_t> data;
+    if (const char* err = readWholeFile(path, data)) {
+        if (error) *error = err;
+        return false;
+    }
+    const ChipRoute route = routeChipFile(path, data, exeReplayDir);
+    if (route.kind == ChipRoute::Error) {
+        if (error) *error = route.error;
+        return false;
+    }
+    if (route.kind == ChipRoute::Ok) {
+        if (loadRoutedChip(engine, route, data, exeReplayDir, false)) return true;
+        if (error) *error = "CANNOT PLAY THIS FILE";
+        return false;
+    }
+    auto r = loadModule(data.data(), data.size());
+    if (!r.ok()) {
+        if (error) *error = std::string("ERROR: ") + r.error();
+        return false;
+    }
+    engine.setSong(std::make_unique<Song>(static_cast<Song&&>(r.value())));
+    return true;
 }

@@ -1,7 +1,10 @@
 // SETUP: themes, palette editor, mixing options; settings persistence (FatTracker.ini).
 #include <algorithm>
 #include <cstdio>
+#include <cwchar>
+#include <string>
 
+#include "platform/os.h"
 #include "ui/play_screen.h"
 #include "ui/widgets.h"
 
@@ -211,14 +214,8 @@ UiAction PlayScreen::setupMouse(float x, float y, bool right, Engine& e) {
 // ---------------------------------------------------------------- settings file
 
 namespace {
-int readInt(const wchar_t* ini, const wchar_t* key, int def) {
-    return (int)GetPrivateProfileIntW(L"FatTracker", key, def, ini);
-}
-void writeInt(const wchar_t* ini, const wchar_t* key, int v) {
-    wchar_t b[32];
-    wsprintfW(b, L"%d", v);
-    WritePrivateProfileStringW(L"FatTracker", key, b, ini);
-}
+int readInt(const wchar_t* ini, const wchar_t* key, int def) { return osIniInt(ini, L"FatTracker", key, def); }
+void writeInt(const wchar_t* ini, const wchar_t* key, int v) { osIniWrite(ini, L"FatTracker", key, std::to_wstring(v)); }
 uint32_t pack(Color c) {
     auto q = [](float v) { return (uint32_t)(std::clamp(v, 0.f, 1.f) * 255.f + 0.5f); };
     return (q(c.r) << 16) | (q(c.g) << 8) | q(c.b);
@@ -227,10 +224,9 @@ uint32_t pack(Color c) {
 
 void PlayScreen::loadSettings(const wchar_t* ini, Engine& e) {
     for (int i = 0; i < kThemeColors; ++i) {
-        wchar_t key[16], val[16];
-        wsprintfW(key, L"Color%d", i);
-        GetPrivateProfileStringW(L"CustomTheme", key, L"", val, 16, ini);
-        if (val[0]) themeColor(customTheme(), i) = rgb((uint32_t)wcstoul(val, nullptr, 16));
+        const std::wstring key = L"Color" + std::to_wstring(i);
+        const std::wstring val = osIniString(ini, L"CustomTheme", key.c_str()).substr(0, 15);
+        if (!val.empty()) themeColor(customTheme(), i) = rgb((uint32_t)wcstoul(val.c_str(), nullptr, 16));
     }
     setCurrentTheme(readInt(ini, L"Theme", 0));
     interp_ = std::clamp(readInt(ini, L"Interpolation", 2), 0, 2);
@@ -245,9 +241,8 @@ void PlayScreen::loadSettings(const wchar_t* ini, Engine& e) {
     quantize_ = std::clamp(readInt(ini, L"RecordQuantize", 1), 1, 16);
     metronome_ = readInt(ini, L"Metronome", 0) != 0;
     metroEvery_ = std::clamp(readInt(ini, L"MetronomeRows", 4), 1, 16);
-    wchar_t dir[MAX_PATH];
-    GetPrivateProfileStringW(L"FatTracker", L"Directory", L"", dir, MAX_PATH, ini);
-    if (dir[0]) dir_ = dir;
+    const std::wstring dir = osIniString(ini, L"FatTracker", L"Directory");
+    if (!dir.empty()) dir_ = dir;
     applyMixing(e);
     applyMetronome(e);
     const int pure = std::clamp(readInt(ini, L"PureMode", 0), 0, 2);
@@ -274,12 +269,12 @@ void PlayScreen::saveSettings(const wchar_t* ini) const {
     writeInt(ini, L"RecordQuantize", quantize_);
     writeInt(ini, L"Metronome", metronome_ ? 1 : 0);
     writeInt(ini, L"MetronomeRows", metroEvery_);
-    if (!dir_.empty() && dir_ != L"::drives") WritePrivateProfileStringW(L"FatTracker", L"Directory", dir_.c_str(), ini);
+    if (!dir_.empty() && dir_ != L"::drives") osIniWrite(ini, L"FatTracker", L"Directory", dir_);
     Theme& c = customTheme();
     for (int i = 0; i < kThemeColors; ++i) {
-        wchar_t key[16], val[16];
-        wsprintfW(key, L"Color%d", i);
-        wsprintfW(val, L"%06X", pack(themeColor(c, i)));
-        WritePrivateProfileStringW(L"CustomTheme", key, val, ini);
+        const std::wstring key = L"Color" + std::to_wstring(i);
+        wchar_t val[16];
+        std::swprintf(val, 16, L"%06X", (unsigned)pack(themeColor(c, i)));
+        osIniWrite(ini, L"CustomTheme", key.c_str(), val);
     }
 }

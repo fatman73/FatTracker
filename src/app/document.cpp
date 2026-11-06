@@ -1,46 +1,17 @@
 #include "app/document.h"
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include <cwctype>
+
+#include "platform/os.h"
 
 #include "core/render.h"
 #include "formats/wav.h"
 #include "formats/writers.h"
 
-const char* readFileW(const wchar_t* path, std::vector<uint8_t>& out) {
-    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return "ERROR: CANNOT OPEN FILE";
-    LARGE_INTEGER sz;
-    const char* err = nullptr;
-    if (!GetFileSizeEx(h, &sz))
-        err = "ERROR: CANNOT READ FILE";
-    else if (sz.QuadPart > 256ll * 1024 * 1024)
-        err = "ERROR: FILE TOO BIG";
-    if (!err) {
-        out.resize((size_t)sz.QuadPart);
-        DWORD got = 0;
-        if (!out.empty() && (!ReadFile(h, out.data(), (DWORD)out.size(), &got, nullptr) || got != out.size()))
-            err = "ERROR: CANNOT READ FILE";
-    }
-    CloseHandle(h);
-    return err;
-}
+// The file I/O is the system's (platform/os.h): the Win32 calls on Windows, POSIX on macOS.
+const char* readFileW(const wchar_t* path, std::vector<uint8_t>& out) { return osReadFile(path, out); }
 
-bool writeFileAtomic(const wchar_t* path, const std::vector<uint8_t>& data) {
-    std::wstring tmp = std::wstring(path) + L".fattmp";
-    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) return false;
-    DWORD written = 0;
-    const bool ok = data.empty() || (WriteFile(h, data.data(), (DWORD)data.size(), &written, nullptr) &&
-                                     written == data.size());
-    FlushFileBuffers(h);
-    CloseHandle(h);
-    if (!ok || !MoveFileExW(tmp.c_str(), path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        DeleteFileW(tmp.c_str());
-        return false;
-    }
-    return true;
-}
+bool writeFileAtomic(const wchar_t* path, const std::vector<uint8_t>& data) { return osWriteFileAtomic(path, data); }
 
 SaveKind kindFromPath(const std::wstring& path) {
     const size_t dot = path.find_last_of(L'.');

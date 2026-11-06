@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "platform/os.h"
+#include "platform/wcompat.h"
 #include "ui/play_screen.h"
 #include "ui/widgets.h"
 
@@ -101,24 +103,18 @@ void PlayScreen::setCurrentPath(const std::wstring& p) {
 void PlayScreen::diskRefresh() {
     dirRead_ = true;
     entries_.clear();
-    if (dir_.empty()) {
-        wchar_t buf[MAX_PATH];
-        GetCurrentDirectoryW(MAX_PATH, buf);
-        dir_ = buf;
-    }
+    if (dir_.empty()) dir_ = osCurrentDir();
     if (dir_ == L"::drives") {
-        const DWORD mask = GetLogicalDrives();
-        for (int d = 0; d < 26; ++d)
-            if (mask & (1u << d)) entries_.push_back({std::wstring(1, (wchar_t)(L'A' + d)) + L":\\", true, 0});
+        std::vector<OsDirItem> drives;
+        osDrives(drives);
+        for (const OsDirItem& d : drives) entries_.push_back({d.name, d.dir, d.size});
     } else {
-        WIN32_FIND_DATAW fd;
-        HANDLE h = FindFirstFileW((dir_ + L"\\*").c_str(), &fd);
-        if (h != INVALID_HANDLE_VALUE) {
-            do {
-                std::wstring n = fd.cFileName;
-                if (n == L"." || n == L"..") continue;
-                if (fd.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) continue;
-                const bool isDir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        std::vector<OsDirItem> items;
+        osListDir(dir_, items);
+        {
+            for (const OsDirItem& item : items) {
+                const std::wstring& n = item.name;
+                const bool isDir = item.dir;
                 if (!isDir) {
                     const bool mod = hasExt(n, {L".mod", L".xm", L".stk", L".s3m", L".it", L".mtm", L".669", L".fc", L".fc13", L".fc14", L".smod", L".hip", L".hipc", L".hip7", L".sog", L".mcmd", L".coso", L".sid", L".psid", L".rsid", L".sndh", L".sc68", L".ymst", L".ahx", L".thx", L".hvl", L".ym", L".vtx", L".psg", L".pt3", L".jam", L".spc", L".vgm", L".vgz", L".gym", L".sap", L".ay", L".nsf", L".nsfe", L".gbs", L".hes", L".kss", L".mdat", L".mmd0",
                                                 L".mmd1", L".mmd2", L".mmd3", L".med", L".symmod", L".dbm",
@@ -150,9 +146,8 @@ void PlayScreen::diskRefresh() {
                     if (diskFilter_ == 0 && !mod) continue;
                     if (diskFilter_ == 1 && !smp) continue;
                 }
-                entries_.push_back({n, isDir, ((uint64_t)fd.nFileSizeHigh << 32) | fd.nFileSizeLow});
-            } while (FindNextFileW(h, &fd));
-            FindClose(h);
+                entries_.push_back({n, isDir, item.size});
+            }
         }
         std::sort(entries_.begin(), entries_.end(), [](const DirEntry& a, const DirEntry& b) {
             if (a.dir != b.dir) return a.dir;
@@ -215,19 +210,18 @@ UiAction PlayScreen::diskActivate(int index, Engine&) {
     if (index < 0 || index >= (int)entries_.size()) return UiAction::None;
     const DirEntry d = entries_[index];
     if (d.dir) {
-        dir_ = dir_ == L"::drives" ? d.name.substr(0, 2) : dir_ + L"\\" + d.name;
-        if (dir_.size() == 2) dir_ += L"";  // "C:"
+        dir_ = dir_ == L"::drives" ? osDriveDir(d.name) : osJoin(dir_, d.name);
         diskRefresh();
         return UiAction::Redraw;
     }
-    actionPath_ = dir_ + L"\\" + d.name;
+    actionPath_ = osJoin(dir_, d.name);
     return UiAction::LoadPath;
 }
 
 UiAction PlayScreen::diskMouse(float x, float y, bool, Engine& e) {
     for (int i = 0; i < D_COUNT; ++i) {
         if (!diskButton(i).contains(x, y)) continue;
-        auto target = [&](const wchar_t* ext) { return dir_ + L"\\" + fileName_ + ext; };
+        auto target = [&](const wchar_t* ext) { return osJoin(dir_, fileName_ + ext); };
         switch (i) {
             case D_MODULES:
             case D_SAMPLES:
@@ -236,21 +230,14 @@ UiAction PlayScreen::diskMouse(float x, float y, bool, Engine& e) {
                 diskRefresh();
                 return UiAction::Redraw;
             case D_PARENT: {
-                const size_t slash = dir_.find_last_of(L"\\/");
                 if (dir_ == L"::drives") return UiAction::None;
-                if (slash == std::wstring::npos || dir_.size() <= 3)
-                    dir_ = L"::drives";
-                else
-                    dir_ = dir_.substr(0, slash);
-                if (dir_.size() == 2) dir_ += L"\\";
+                const std::wstring up = osParentDir(dir_);
+                dir_ = up.empty() ? L"::drives" : up;  // above a root: the drive list
                 diskRefresh();
                 return UiAction::Redraw;
             }
             case D_HOME: {
-                wchar_t buf[MAX_PATH];
-                GetModuleFileNameW(nullptr, buf, MAX_PATH);
-                dir_ = buf;
-                dir_ = dir_.substr(0, dir_.find_last_of(L'\\'));
+                dir_ = osHomeDir();
                 diskRefresh();
                 return UiAction::Redraw;
             }
@@ -278,15 +265,15 @@ UiAction PlayScreen::diskMouse(float x, float y, bool, Engine& e) {
                 const std::wstring from = entries_[diskSel_].name;
                 const std::wstring to = renameTarget(from, fileName_);
                 if (to.empty()) return setStatus("TYPE THE NEW NAME IN THE NAME FIELD"), UiAction::Redraw;
-                const std::wstring src = dir_ + L"\\" + from, dst = dir_ + L"\\" + to;
+                const std::wstring src = osJoin(dir_, from), dst = osJoin(dir_, to);
                 if (to == from) return setStatus("THE FILE ALREADY HAS THIS NAME"), UiAction::Redraw;
                 auto doRename = [this, src, dst](bool replace) {
-                    const bool ok = MoveFileExW(src.c_str(), dst.c_str(), replace ? MOVEFILE_REPLACE_EXISTING : 0) != 0;
+                    const bool ok = osRenameFile(src, dst, replace);
                     setStatus(ok ? "FILE RENAMED" : "ERROR: CANNOT RENAME FILE");
                     diskRefresh();
                 };
                 // another file of that name: ask, naming it, with CANCEL first (Enter keeps the file)
-                if (_wcsicmp(to.c_str(), from.c_str()) != 0 && GetFileAttributesW(dst.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                if (_wcsicmp(to.c_str(), from.c_str()) != 0 && osFileExists(dst)) {
                     char text[96];
                     std::snprintf(text, sizeof text, "REPLACE THE EXISTING %s ?", narrow(to, 40).c_str());
                     ask(text, {"CANCEL", "REPLACE"}, [doRename](int a) {
@@ -299,12 +286,12 @@ UiAction PlayScreen::diskMouse(float x, float y, bool, Engine& e) {
             }
             case D_DELETE: {
                 if (diskSel_ < 0 || diskSel_ >= (int)entries_.size() || entries_[diskSel_].dir) return UiAction::None;
-                const std::wstring path = dir_ + L"\\" + entries_[diskSel_].name;
+                const std::wstring path = osJoin(dir_, entries_[diskSel_].name);
                 char text[96];
                 std::snprintf(text, sizeof text, "DELETE %s ?", narrow(entries_[diskSel_].name, 40).c_str());
                 ask(text, {"DELETE", "CANCEL"}, [this, path](int a) {
                     if (a != 0) return;
-                    setStatus(DeleteFileW(path.c_str()) ? "FILE DELETED" : "ERROR: CANNOT DELETE FILE");
+                    setStatus(osDeleteFile(path) ? osDeleteDoneText() : "ERROR: CANNOT DELETE FILE");
                     diskRefresh();
                 });
                 return UiAction::Redraw;
