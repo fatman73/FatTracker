@@ -31,6 +31,7 @@ void cRSID_initSIDchip(cRSID_SIDinstance *SID) {
     SID->SyncSourceMSBrise = 0;
     SID->RingSourceMSB = 0;
     SID->PrevLowPass = SID->PrevBandPass = SID->PrevVolume = 0;
+    SID->VoiceOutput[0] = SID->VoiceOutput[1] = SID->VoiceOutput[2] = 0;  // FatTracker
 }
 
 void cRSID_emulateADSRs(cRSID_SIDinstance *SID, char cycles) {
@@ -220,11 +221,15 @@ int cRSID_emulateWaves(cRSID_SIDinstance *SID) {
 
         // routing the channel signal to either the filter or the unfiltered master output depending on filter-switch SID-registers
         unsigned char Envelope = SID->ChipModel == 8580 ? SID->EnvelopeCounter[Channel] : ADSR_DAC_6581[SID->EnvelopeCounter[Channel]];
+        int VoiceOut = (((int)WavGenOut - 0x8000) * Envelope) >> 8;  // FatTracker: kept per voice (same sum)
         if (FilterSwitchReso & FilterSwitchVal[Channel]) {
-            FilterInput += (((int)WavGenOut - 0x8000) * Envelope) >> 8;
+            FilterInput += VoiceOut;
         } else if (Channel != 14 || !(VolumeBand & OFF3_BITVAL)) {
-            NonFilted += (((int)WavGenOut - 0x8000) * Envelope) >> 8;
+            NonFilted += VoiceOut;
+        } else {
+            VoiceOut = 0;  // voice 3 switched off
         }
+        SID->VoiceOutput[Channel / 7] = VoiceOut;
     }
     // update readable SID1-registers (some SID tunes might use 3rd channel ENV3/OSC3 value as control)
     SID->C64->IObankRD[SID->BaseAddress + 0x1B] = WavGenOut >> 8;            // OSC3, ENV3 (some players rely on it, unfortunately even for timing)

@@ -67,6 +67,17 @@ protected:
 	bool psg_t6w28;
 	Blip_Synth<blip_med_quality,1> dac_synth;
 
+public:
+	// FatTracker: with FM the PCM DAC and the PSG write into buffers of their own during a frame; at its end
+	// their deltas are moved into blip_buf (integer sums, so the mix is bit-identical) and read per voice.
+	// Rows at the output rate: [0] the PCM DAC, [1] the PSG (1.0 = a full scale 16-bit sample). Null: off.
+	struct ft_voice_taps_t { enum { size = 8192 }; float out [size] [2]; unsigned pos; };
+protected:
+	ft_voice_taps_t* ft_taps = nullptr;
+	Blip_Buffer ft_bufs [2];  // what the DAC / the PSG write in the current frame
+	Blip_Buffer ft_monos [2]; // what they played
+	void ft_end_frame( blip_time_t );
+
 	friend class Vgm_Emu;
 };
 

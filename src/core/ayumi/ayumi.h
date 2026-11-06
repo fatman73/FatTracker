@@ -55,6 +55,11 @@ struct ayumi {
   int dc_index;
   double left;
   double right;
+  /* FatTracker: what each channel puts out (its DAC level 0..1, before panning), averaged over the chip
+     steps of the last ayumi_process() call: per-voice meters and scopes. Does not change left / right. */
+  double channel_out[TONE_CHANNELS];
+  double channel_acc[TONE_CHANNELS];
+  int channel_steps;
 };
 
 int ayumi_configure(struct ayumi* ay, int is_ym, double clock_rate, int sr);

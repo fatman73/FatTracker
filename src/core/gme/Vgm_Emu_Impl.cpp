@@ -113,7 +113,7 @@ void Vgm_Emu_Impl::write_pcm( vgm_time_t vgm_time, int amp )
 	int delta = amp - old;
 	dac_amp = amp;
 	if ( old >= 0 )
-		dac_synth.offset_inline( blip_time, delta, &blip_buf );
+		dac_synth.offset_inline( blip_time, delta, &ft_bufs [0] ); // FatTracker: moved into blip_buf at the frame end
 	else
 		dac_amp |= dac_disabled;
 }
@@ -323,7 +323,59 @@ int Vgm_Emu_Impl::play_frame( blip_time_t blip_time, int sample_count, sample_t*
 	if ( psg_dual )
 		psg[1].end_frame( blip_time );
 
+	ft_end_frame( blip_time ); // FatTracker
+
 	return pairs * stereo;
+}
+
+// FatTracker: the frame's DAC and PSG deltas into blip_buf (which Dual_Resampler ends and reads right after
+// this, as many samples as are read here) and into the per-voice buffers, read into ft_taps
+void Vgm_Emu_Impl::ft_end_frame( blip_time_t blip_time )
+{
+	for ( int k = 0; k < 2; k++ )
+	{
+		Blip_Buffer& b = ft_bufs [k];
+		Blip_Buffer::buf_t_* const src  = b.buffer_;
+		Blip_Buffer::buf_t_* const dst  = blip_buf.buffer_;
+		Blip_Buffer::buf_t_* const mono = ft_monos [k].buffer_;
+		long const n = b.buffer_size_ + blip_buffer_extra_;
+		for ( long j = 0; j < n; j++ )
+		{
+			Blip_Buffer::buf_t_ const d = src [j];
+			if ( d )
+			{
+				dst [j] += d;
+				mono [j] += d;
+				src [j] = 0;
+			}
+		}
+		if ( b.clear_modified() )
+			blip_buf.set_modified();
+		b.end_frame( blip_time );
+		ft_monos [k].end_frame( blip_time );
+	}
+	long const count = ft_monos [0].samples_avail();
+	for ( int k = 0; k < 2; k++ )
+	{
+		Blip_Buffer& m = ft_monos [k];
+		if ( ft_taps )
+		{
+			unsigned pos = ft_taps->pos;
+			int const bass = BLIP_READER_BASS( m );
+			BLIP_READER_BEGIN( r, m );
+			for ( long f = 0; f < count; f++ )
+			{
+				ft_taps->out [pos++ & (ft_voice_taps_t::size - 1)] [k] =
+						BLIP_READER_READ_RAW( r ) * (1.0f / (1 << (blip_sample_bits - 1)));
+				BLIP_READER_NEXT( r, bass );
+			}
+			BLIP_READER_END( r, m );
+		}
+		m.remove_samples( count );
+		ft_bufs [k].remove_silence( count );
+	}
+	if ( ft_taps )
+		ft_taps->pos += (unsigned) count;
 }
 
 // Update pre-1.10 header FM rates by scanning commands

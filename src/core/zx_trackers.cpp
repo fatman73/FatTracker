@@ -13,6 +13,8 @@
 #include "core/song.h"
 #include "core/zx_tracker_replayers.h"
 
+#include "core/ay_meters.h"
+
 extern "C" {
 #include "core/ayumi/ayumi.h"
 }
@@ -34,9 +36,7 @@ struct ZxTrackerPlayer::Impl {
     struct ayumi ay;
     uint32_t rate = 48000;
     double frameLeft = 0;
-    float vu[3] = {}, level[3] = {};
-    float scope[3][kScopeLen] = {};
-    uint32_t scopePos = 0;
+    AyMeters meters;  // each channel's own output
 
     void configure() {
         std::memset(&ay, 0, sizeof ay);
@@ -52,8 +52,6 @@ struct ZxTrackerPlayer::Impl {
             ayumi_set_tone(&ay, c, r[c * 2] | (r[c * 2 + 1] & 15) << 8);
             ayumi_set_mixer(&ay, c, (r[7] >> c) & 1, (r[7] >> (c + 3)) & 1, (r[8 + c] >> 4) & 1);
             ayumi_set_volume(&ay, c, r[8 + c] & 15);
-            level[c] = (r[8 + c] & 16) ? 0.8f : (r[8 + c] & 15) / 15.f;
-            if (((r[7] >> c) & 1) && ((r[7] >> (c + 3)) & 1)) level[c] = 0;  // tone and noise off: silent
         }
         ayumi_set_noise(&ay, r[6] & 31);
         ayumi_set_envelope(&ay, r[11] | r[12] << 8);
@@ -130,15 +128,13 @@ void ZxTrackerPlayer::setRate(uint32_t hz) {
     if (impl_->loaded) impl_->configure();
 }
 
-void ZxTrackerPlayer::clearMeters() {
-    std::memset(impl_->vu, 0, sizeof impl_->vu);
-    std::memset(impl_->scope, 0, sizeof impl_->scope);
-}
+void ZxTrackerPlayer::clearMeters() { impl_->meters.clear(); }
 
 void ZxTrackerPlayer::render(float* out, uint32_t frames, float gain) {
     std::memset(out, 0, sizeof(float) * 2 * frames);
     Impl& m = *impl_;
     if (!m.loaded) return;
+    m.meters.begin();
     for (uint32_t f = 0; f < frames; ++f) {
         if (m.frameLeft <= 0) {
             m.rep->frame(m.regs);
@@ -150,29 +146,14 @@ void ZxTrackerPlayer::render(float* out, uint32_t frames, float gain) {
         ayumi_remove_dc(&m.ay);
         out[2 * f] = (float)m.ay.left * gain * 1.4f;
         out[2 * f + 1] = (float)m.ay.right * gain * 1.4f;
-        const float s = (float)(m.ay.left + m.ay.right);
-        for (int c = 0; c < 3; ++c) m.scope[c][(m.scopePos + f) & (kScopeLen - 1)] = m.level[c] > 0 ? s : 0.f;
+        m.meters.sample(m.ay);
     }
-    m.scopePos = (m.scopePos + frames) & (kScopeLen - 1);
-    const float decay = (float)std::pow(0.5, (double)frames / (m.rate * 0.08));
-    for (int c = 0; c < 3; ++c) {
-        const float d = m.vu[c] * decay;
-        m.vu[c] = m.level[c] > d ? m.level[c] : d;
-    }
+    m.meters.end(m.rate);
 }
 
-float ZxTrackerPlayer::vu(int v) const { return v >= 0 && v < 3 ? impl_->vu[v] * 0.6f : 0.f; }
+float ZxTrackerPlayer::vu(int v) const { return impl_->meters.vuOf(v); }
 
-void ZxTrackerPlayer::scope(int v, float* dst, int n) const {
-    if (n <= 0) return;
-    if (n > kScopeLen) n = kScopeLen;
-    if (v < 0 || v >= 3) {
-        for (int k = 0; k < n; ++k) dst[k] = 0;
-        return;
-    }
-    const uint32_t from = (impl_->scopePos - (uint32_t)n) & (kScopeLen - 1);
-    for (int k = 0; k < n; ++k) dst[k] = impl_->scope[v][(from + k) & (kScopeLen - 1)];
-}
+void ZxTrackerPlayer::scope(int v, float* dst, int n) const { impl_->meters.scopeOf(v, dst, n); }
 
 double ZxTrackerPlayer::seconds() const { return impl_->loaded ? (double)impl_->length / kHz : 0.0; }
 const char* ZxTrackerPlayer::format() const { return impl_->loaded ? impl_->format.c_str() : ""; }

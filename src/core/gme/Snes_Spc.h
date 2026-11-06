@@ -145,6 +145,7 @@ public:
 
 	enum { signature_size = 35 };
 
+	Spc_Dsp* ft_dsp() { return &dsp; } // FatTracker: for the per-voice meters
 private:
 	Spc_Dsp dsp;
 

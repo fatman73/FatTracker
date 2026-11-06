@@ -138,7 +138,9 @@ static void update_mixer(struct ayumi* ay) {
     out *= ay->channels[i].e_on ? envelope : ay->channels[i].volume * 2 + 1;
     ay->left += ay->dac_table[out] * ay->channels[i].pan_left;
     ay->right += ay->dac_table[out] * ay->channels[i].pan_right;
+    ay->channel_acc[i] += ay->dac_table[out]; /* FatTracker: per-channel output */
   }
+  ay->channel_steps += 1; /* FatTracker */
 }
 
 int ayumi_configure(struct ayumi* ay, int is_ym, double clock_rate, int sr) {
@@ -296,6 +298,10 @@ void ayumi_process(struct ayumi* ay) {
   double* fir_left = &ay->fir_left[FIR_SIZE - ay->fir_index * DECIMATE_FACTOR];
   double* fir_right = &ay->fir_right[FIR_SIZE - ay->fir_index * DECIMATE_FACTOR];
   ay->fir_index = (ay->fir_index + 1) % (FIR_SIZE / DECIMATE_FACTOR - 1);
+  for (i = 0; i < TONE_CHANNELS; i += 1) { /* FatTracker: per-channel output of this call */
+    ay->channel_acc[i] = 0;
+  }
+  ay->channel_steps = 0;
   for (i = DECIMATE_FACTOR - 1; i >= 0; i -= 1) {
     ay->x += ay->step;
     if (ay->x >= 1) {
@@ -323,6 +329,11 @@ void ayumi_process(struct ayumi* ay) {
   }
   ay->left = decimate(fir_left);
   ay->right = decimate(fir_right);
+  if (ay->channel_steps) { /* FatTracker: no chip step in this call keeps the previous level */
+    for (i = 0; i < TONE_CHANNELS; i += 1) {
+      ay->channel_out[i] = ay->channel_acc[i] / ay->channel_steps;
+    }
+  }
 }
 
 static double dc_filter(struct dc_filter* dc, int index, double x) {

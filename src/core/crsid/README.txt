@@ -40,5 +40,7 @@ License is still WTF: Do what the fuck you want with this code, but
 
 ----
 FatTracker: cRSID 2022 sources as found in the DOjS project (SuperIlu/DOjS, plugins/crsid.dxelib/cRSID).
-Changes: host/file.c stops copying at the end of the 64 KB C64 memory; line endings LF.
+Changes: host/file.c stops copying at the end of the 64 KB C64 memory; C64/SID.c keeps each voice's output
+(cRSID_SIDinstance::VoiceOutput, marked FatTracker:) for the per-voice scopes, the sum is unchanged;
+line endings LF.
 Only libcRSID.c is compiled (it includes the C64 and host parts). Wrapped by core/sid_player.cpp.

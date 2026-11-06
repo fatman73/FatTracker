@@ -68,6 +68,8 @@ protected:
 	void disable_echo_( bool disable );
 	void set_tempo_( double );
 	void enable_accuracy_( bool );
+public:
+	Snes_Spc* ft_apu() { return &apu; } // FatTracker: for the per-voice meters
 private:
 	byte const* file_data;
 	long        file_size;

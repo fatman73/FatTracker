@@ -224,6 +224,7 @@ typedef struct
     Bit32u writebuf_last;
     Bit64u writebuf_lasttime;
     opn2_writebuf writebuf[OPN_WRITEBUF_SIZE];
+    void *ft_taps; /* FatTracker: Ym2612_Nuked_Emu::ft_voice_taps_t (set again after every reset) */
 } ym3438_t;
 
 /* EXTRA, original was "void OPN2_Reset(ym3438_t *chip)" */
@@ -1686,12 +1687,17 @@ void OPN2_Generate(ym3438_t *chip, Bit16s *buf)
     Bit32u i;
     Bit16s buffer[2];
     Bit32u mute;
+    /* FatTracker: what each channel adds (slot groups of 4 cycles: ch 2, 6, 4, 1, 5, 3) */
+    static const Bit8u ft_channel[8] = { 1, 5, 3, 0, 4, 2, 0, 0 };
+    Bit32s ft_acc[6] = { 0, 0, 0, 0, 0, 0 };
+    Bit32u ft_ch;
 
     buf[0] = 0;
     buf[1] = 0;
 
     for (i = 0; i < 24; i++)
     {
+        ft_ch = ft_channel[(chip->cycles >> 2) & 7];
         switch (chip->cycles >> 2)
         {
         case 0: /* Ch 2 */
@@ -1721,6 +1727,7 @@ void OPN2_Generate(ym3438_t *chip, Bit16s *buf)
         {
             buf[0] += buffer[0];
             buf[1] += buffer[1];
+            ft_acc[ft_ch] += buffer[0] + buffer[1];
         }
 
         while (chip->writebuf[chip->writebuf_cur].time <= chip->writebuf_samplecnt)
@@ -1735,6 +1742,14 @@ void OPN2_Generate(ym3438_t *chip, Bit16s *buf)
             chip->writebuf_cur = (chip->writebuf_cur + 1) % OPN_WRITEBUF_SIZE;
         }
         chip->writebuf_samplecnt++;
+    }
+    if (chip->ft_taps) /* FatTracker */
+    {
+        Ym2612_Nuked_Emu::ft_voice_taps_t *taps = (Ym2612_Nuked_Emu::ft_voice_taps_t *)chip->ft_taps;
+        short *row = taps->out[taps->pos & (Ym2612_Nuked_Emu::ft_voice_taps_t::size - 1)];
+        for (i = 0; i < 6; i++)
+            row[i] = (short)(ft_acc[i] < -32768 ? -32768 : (ft_acc[i] > 32767 ? 32767 : ft_acc[i]));
+        taps->pos++;
     }
 }
 
@@ -1835,6 +1850,7 @@ const char *Ym2612_Nuked_Emu::set_rate(double sample_rate, double clock_rate)
 	prev_sample_rate = sample_rate;
 	prev_clock_rate = clock_rate;
 	Ym2612_NukedImpl::OPN2_Reset( chip_r, static_cast<Bit32u>(sample_rate), static_cast<Bit32u>(clock_rate) );
+	chip_r->ft_taps = ft_taps; // FatTracker
 	return 0;
 }
 
@@ -1842,6 +1858,14 @@ void Ym2612_Nuked_Emu::reset()
 {
 	Ym2612_NukedImpl::ym3438_t *chip_r = reinterpret_cast<Ym2612_NukedImpl::ym3438_t*>(impl);
 	if ( chip_r ) Ym2612_NukedImpl::OPN2_Reset( chip_r, static_cast<Bit32u>(prev_sample_rate), static_cast<Bit32u>(prev_clock_rate) );
+	if ( chip_r ) chip_r->ft_taps = ft_taps; // FatTracker
+}
+
+void Ym2612_Nuked_Emu::ft_set_voice_taps( ft_voice_taps_t* taps ) // FatTracker
+{
+	ft_taps = taps;
+	Ym2612_NukedImpl::ym3438_t *chip_r = reinterpret_cast<Ym2612_NukedImpl::ym3438_t*>(impl);
+	if ( chip_r ) chip_r->ft_taps = taps;
 }
 
 void Ym2612_Nuked_Emu::mute_voices(int mask)
