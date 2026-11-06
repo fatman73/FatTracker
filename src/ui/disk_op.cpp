@@ -60,7 +60,7 @@ std::wstring renameTarget(const std::wstring& from, std::wstring typed) {
     }
     static const wchar_t* const kExts[] = {L".mod", L".xm", L".s3m", L".it", L".mtm", L".669", L".med", L".mmd0",
                                            L".mmd1", L".mmd2", L".mmd3", L".dbm", L".digi", L".symmod", L".wav",
-                                           L".iff", L".8svx", L".aiff", L".mdat", L".smpl", L".tfx", L".sam"};
+                                           L".iff", L".8svx", L".aiff", L".aif", L".aifc", L".mdat", L".smpl", L".tfx", L".sam"};
     for (const wchar_t* x : kExts) {
         const size_t n = wcslen(x);
         if (typed.size() > n && !_wcsicmp(typed.c_str() + typed.size() - n, x)) return typed;
@@ -146,7 +146,7 @@ void PlayScreen::diskRefresh() {
                                      !_wcsnicmp(n.c_str(), L"sa.", 3) || !_wcsnicmp(n.c_str(), L"sonic.", 6) ||
                                      !_wcsnicmp(n.c_str(), L"aon.", 4) || !_wcsnicmp(n.c_str(), L"aon4.", 5) ||
                                      !_wcsnicmp(n.c_str(), L"aon8.", 5);
-                    const bool smp = hasExt(n, {L".wav", L".iff", L".8svx", L".aiff"});
+                    const bool smp = hasExt(n, {L".wav", L".iff", L".8svx", L".aiff", L".aif", L".aifc"});
                     if (diskFilter_ == 0 && !mod) continue;
                     if (diskFilter_ == 1 && !smp) continue;
                 }
