@@ -256,6 +256,35 @@ void PlayScreen::helpDraw(Gfx& g, Text& tx, const Theme& t) {
         }
         return;
     }
+#ifdef __APPLE__
+    // the Mac keys (src/mac/main_mac.mm): Command works as Ctrl, Option as Alt, plus laptop stand-ins for the
+    // keys a MacBook lacks (right Ctrl, Insert, numeric keypad)
+    static const char* const lines[] = {
+        "PLAYBACK",                          "  F5 / RIGHT OPTION   PLAY SONG",
+        "  RIGHT CMD / CTRL    PLAY PATTERN", "  SPACE               STOP / EDIT MODE ON-OFF",
+        "  RECORD button       RECORD (RIGHT CLICK: STEP / LIVE)", "",
+        "NAVIGATION",                        "  ARROWS              MOVE CURSOR",
+        "  TAB / SHIFT+TAB     NEXT / PREVIOUS TRACK", "  FN+ARROWS           PGUP / PGDN / HOME / END",
+        "  CMD+LEFT/RIGHT      SONG POSITION",  "  F11                 VIEW 4 / 8 / 16 / 32",
+        "  F1 / F2             OCTAVE DOWN / UP (FN+F-KEYS ON A MACBOOK)", "",
+        "NOTE ENTRY (EDIT MODE)",            "  Z S X D C V G B H N J M   LOWER OCTAVE",
+        "  Q 2 W 3 E R 5 T 6 Y 7 U   UPPER OCTAVE", "  1                   KEY OFF",
+        "  0-9 A-F             DIGITS (EFFECTS 0-9 A-Z)", "  FN+DEL / SHIFT      CLEAR FIELD / CELL",
+        "  OPT+DEL / DEL       INSERT / DELETE ROW (SHIFT: ALL TRACKS)", "",
+        "BLOCKS",                            "  SHIFT+ARROWS        SELECT",
+        "  CMD+C / X / V       COPY / CUT / PASTE", "  CMD+A               SELECT TRACK",
+        "  SHIFT+F3 F4 F5      CUT / COPY / PASTE TRACK", "  OPT+F3 F4 F5        CUT / COPY / PASTE PATTERN",
+        "  CMD+Z / CMD+Y       UNDO / REDO", "",
+        "FILES",                             "  CMD+O               OPEN MODULE",
+        "  CMD+S               SAVE (XM)",   "  DISK OP.            BROWSE, SAVE, EXPORT MOD / WAV",
+        "  DRAG & DROP         LOAD MODULE OR SAMPLE", "",
+        "INSTRUMENT (XM)",                   "  CMD+I               INSTRUMENT EDITOR (OR SAMPLER: INSTRUMENT)",
+        "  CLICK ENVELOPE      ADD / DRAG POINT (RIGHT CLICK: DELETE)",
+        "  CLICK / DRAG KEYS   MAP SAMPLE TO KEYS (RIGHT CLICK: NONE)", "",
+        "OTHER",                             "  CLICK TRACK HEADER  MUTE (RIGHT / CTRL+CLICK: SOLO)",
+        "  CMD+1 ... 9         MUTE TRACK 1-9 OF THE VIEW",
+        "  OPT+RETURN          FULL SCREEN", "  ESC                 CLOSE PANEL"};
+#else
     static const char* const lines[] = {
         "PLAYBACK",                          "  F5 / RIGHT ALT      PLAY SONG",
         "  RIGHT CTRL          PLAY PATTERN", "  SPACE               STOP / EDIT MODE ON-OFF",
@@ -280,6 +309,7 @@ void PlayScreen::helpDraw(Gfx& g, Text& tx, const Theme& t) {
         "  CLICK / DRAG KEYS   MAP SAMPLE TO KEYS (RIGHT CLICK: NONE)", "",
         "OTHER",                             "  CLICK TRACK HEADER  MUTE (RIGHT CLICK: SOLO)",
         "  ALT+ENTER           FULL SCREEN", "  ESC                 CLOSE PANEL"};
+#endif
     const int n = (int)(sizeof lines / sizeof lines[0]);
     const int perCol = (int)((w.h - 16) / lh);
     for (int i = 0; i < n; ++i) {

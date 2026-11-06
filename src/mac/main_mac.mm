@@ -212,8 +212,18 @@ NSString* replayDir() {
         if (!e.isARepeat) [self.window toggleFullScreen:nil];
         return;
     }
-    if (vk) appKey(vk, shift, ctrl, alt, false, e.isARepeat);
+    unsigned key = vk;
+    // Mac stand-ins for keys a MacBook lacks: Option+Delete = Insert (Shift: all tracks), Ctrl/Cmd + 1..9 of
+    // the digit row = Ctrl + keypad 1..9 (mute a track of the view; the digit row does nothing with Ctrl)
+    if (vk == VK_BACK && alt && !ctrl) {
+        key = VK_INSERT;
+        alt = false;
+    } else if (ctrl && !alt && vk >= '1' && vk <= '9') {
+        key = VK_NUMPAD1 + (vk - '1');
+    }
+    if (key) appKey(key, shift, ctrl, alt, false, e.isARepeat);
     if (f & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) return;  // Ctrl+key types nothing
+    if (key == VK_INSERT) return;
     NSString* chars = e.characters;
     for (NSUInteger i = 0; i < chars.length; ++i) {
         const unichar c = [chars characterAtIndex:i];
@@ -224,11 +234,14 @@ NSString* replayDir() {
 }
 
 - (void)keyUp:(NSEvent*)e {
-    if (const unsigned vk = vkFromMac(e.keyCode)) appKeyUp(vk);
+    unsigned vk = vkFromMac(e.keyCode);
+    if (vk == VK_BACK && (e.modifierFlags & NSEventModifierFlagOption)) vk = VK_INSERT;
+    if (vk) appKeyUp(vk);
 }
 
 // A modifier alone sends no keyDown: compare the device bits to see which one went down or up. Right
-// Option = PLAY song, right Control = PLAY pattern (extended, like the right keys on Windows).
+// Option = PLAY song, right Control = PLAY pattern (extended, like the right keys on Windows); right Command
+// also plays the pattern (a MacBook has no right Control).
 - (void)flagsChanged:(NSEvent*)e {
     const NSUInteger now = e.modifierFlags, was = _prevFlags;
     _prevFlags = now;
@@ -243,7 +256,7 @@ NSString* replayDir() {
         case 0x3A: mask = kLeftAlt; vk = VK_MENU; break;
         case 0x3D: mask = kRightAlt; vk = VK_MENU; ext = true; break;
         case 0x37: mask = kLeftCmd; vk = VK_CONTROL; break;  // Command works as Ctrl
-        case 0x36: mask = kRightCmd; vk = VK_CONTROL; break;
+        case 0x36: mask = kRightCmd; vk = VK_CONTROL; ext = true; break;
         default: return;
     }
     bool shift, ctrl, alt;
@@ -458,6 +471,16 @@ NSString* replayDir() {
             [self key:0x78 chars:@"\uF705" flags:NSEventModifierFlagFunction];
         },
         ^{ [self shot:@"5_f11_f2.png"]; },
+        ^{  // Mac stand-ins: Cmd+2 mutes track 2 of the view, Option+Delete inserts a row at the cursor (row 0
+            // after the stop), right Command alone = PLAY pattern
+            [self key:0x13 chars:@"2" flags:cmd];
+            [self key:0x33 chars:@"\x7f" flags:NSEventModifierFlagOption];
+            [self modifier:0x36 flags:cmd | 0x10];
+            [self modifier:0x36 flags:0];
+        },
+        ^{ [self shot:@"6_mac_keys.png"]; },
+        ^{ [self clickLogical:NSMakePoint(1092, 208) right:NO flags:0]; },  // HELP
+        ^{ [self shot:@"7_help.png"]; },
         ^{ [NSApp terminate:nil]; },
     ];
     for (NSUInteger i = 0; i < steps.count; ++i)
