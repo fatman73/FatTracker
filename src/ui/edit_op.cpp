@@ -245,6 +245,9 @@ void PlayScreen::helpDraw(Gfx& g, Text& tx, const Theme& t) {
         "FILES",                             "  CTRL+O              OPEN MODULE",
         "  CTRL+S              SAVE (XM)",   "  DISK OP.            BROWSE, SAVE, EXPORT MOD / WAV",
         "  DRAG & DROP         LOAD MODULE OR SAMPLE", "",
+        "INSTRUMENT (XM)",                   "  CTRL+I              INSTRUMENT EDITOR (OR SAMPLER: INSTRUMENT)",
+        "  CLICK ENVELOPE      ADD / DRAG POINT (RIGHT CLICK: DELETE)",
+        "  CLICK / DRAG KEYS   MAP SAMPLE TO KEYS (RIGHT CLICK: NONE)", "",
         "OTHER",                             "  CLICK TRACK HEADER  MUTE (RIGHT CLICK: SOLO)",
         "  ALT+ENTER           FULL SCREEN", "  ESC                 CLOSE PANEL"};
     const int n = (int)(sizeof lines / sizeof lines[0]);

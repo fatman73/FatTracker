@@ -1,4 +1,5 @@
 #include "ui/play_screen.h"
+#include "core/instrument_edit.h"
 #include "core/sample_edit.h"
 #include "ui/pure_layout.h"
 
@@ -99,11 +100,17 @@ int PlayScreen::hitId(float x, float y) const {
         for (int id = 0; id < 100; ++id)
             if (setupRect(id).w > 0 && setupRect(id).contains(x, y)) return 900 + id;
     }
-    if (panel_ == Panel::Sampler)
+    if (panel_ == Panel::Sampler) {
         for (int i = 0; i < 20; ++i)
             if (samplerButton(i).contains(x, y)) return 700 + i;
+        if (samplerInstrButton().contains(x, y)) return 740;
+    }
+    if (panel_ == Panel::Instrument) {
+        const int ih = instrHit(x, y);
+        if (ih >= 0) return 1000 + ih;
+    }
     const bool topMain = panel_ != Panel::DiskOp && panel_ != Panel::EditOp && panel_ != Panel::Setup;
-    const bool bottomPattern = panel_ != Panel::Sampler && panel_ != Panel::Help;
+    const bool bottomPattern = panel_ != Panel::Sampler && panel_ != Panel::Help && panel_ != Panel::Instrument;
     if (topMain)
     for (int i = 0; i < 12; ++i)
         if (buttonRect(i).contains(x, y)) return H_BUTTON + i;
@@ -133,6 +140,8 @@ void PlayScreen::clearStatusIf(const char* prefix) {
 void PlayScreen::songChanged() {
     nameEdit_ = 0;
     viewRow_ = viewPattern_ = viewOrder_ = sample_ = firstChannel_ = 0;
+    mapInstr_ = -1;
+    instDrag_ = 0;
     curCh_ = curCol_ = 0;
     blockOn_ = false;
     recordMode_ = false;
@@ -223,7 +232,7 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     char buf[128];
     if (s && pc.pattern < (int)s->patterns.size()) patternRowsCache_ = s->patterns[pc.pattern].rows;
     const bool topMain = panel_ != Panel::DiskOp && panel_ != Panel::EditOp && panel_ != Panel::Setup;
-    const bool bottomPattern = panel_ != Panel::Sampler && panel_ != Panel::Help;
+    const bool bottomPattern = panel_ != Panel::Sampler && panel_ != Panel::Help && panel_ != Panel::Instrument;
 
     // ---------- counters ----------
     const int sIdx = s ? curSampleIndex(*s) : -1;
@@ -357,6 +366,7 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     // ---------- pattern + side panel (or SAMPLER / HELP) ----------
     if (panel_ == Panel::Sampler) samplerDraw(g, tx, t, e);
     if (panel_ == Panel::Help) helpDraw(g, tx, t);
+    if (panel_ == Panel::Instrument) instrDraw(g, tx, t, e);
     if (bottomPattern) {
     pattern_.drawBack(g, tx, f, t, L_.pattern, pc);
     pattern_.drawCursor(g, f, t, L_.pattern, pc);
@@ -547,10 +557,20 @@ UiAction PlayScreen::onKey(unsigned vk, bool shift, bool ctrl, bool alt, bool ex
         e.playPattern((uint16_t)viewPattern_);
         return UiAction::Redraw;
     }
+    if (ctrl && !alt && vk == 'I' && !pure_) {  // Ctrl+I: XM instrument editor (FastTracker 2's key)
+        if (repeat) return UiAction::None;
+        openPanel(Panel::Instrument);
+        return UiAction::Redraw;
+    }
     // ---- panels get the keyboard first
     if (panel_ == Panel::DiskOp) return vk == VK_SPACE ? UiAction::None : diskKey(vk, ctrl, e);
     if (panel_ == Panel::Sampler) {
         const UiAction r = samplerKey(vk, shift, ctrl, e);
+        if (r != UiAction::None) return r;
+        if (vk != VK_SPACE) return UiAction::None;
+    }
+    if (panel_ == Panel::Instrument) {
+        const UiAction r = instrKey(vk, ctrl, e);
         if (r != UiAction::None) return r;
         if (vk != VK_SPACE) return UiAction::None;
     }
@@ -595,6 +615,10 @@ void PlayScreen::openPanel(Panel p) {
     panel_ = panel_ == p ? Panel::Main : p;
     if (panel_ == Panel::DiskOp) diskRefresh();
     if (panel_ == Panel::Sampler) viewStart_ = viewEnd_ = selA_ = selB_ = 0;
+    if (panel_ == Panel::Instrument) {
+        instDrag_ = 0;
+        mapInstr_ = -1;
+    }
 }
 
 bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
@@ -607,6 +631,7 @@ bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
         if (!(drag_ && leftDown && panel_ == Panel::Sampler)) return changed;
     }
     bool redraw = false;
+    if (instDrag_ && leftDown && panel_ == Panel::Instrument) redraw = instrDragMove(x, y, e);
     if (drag_ && leftDown && panel_ == Panel::Sampler) {
         const uint32_t pos = xToSample(x);
         if (drag_ == 1) {
@@ -646,6 +671,12 @@ bool PlayScreen::onMouseMove(float x, float y, bool leftDown, Engine& e) {
 }
 
 UiAction PlayScreen::onMouseUp(float, float, Engine&) {
+    if (instDrag_) {
+        instDrag_ = 0;
+        instDragRecorded_ = false;
+        instLastKey_ = -1;
+        return UiAction::Redraw;
+    }
     if (!drag_) return UiAction::None;
     drag_ = 0;
     return UiAction::Redraw;
@@ -675,7 +706,8 @@ UiAction PlayScreen::onWheel(float x, float y, int delta, Engine& e) {
         diskSel_ = std::max(diskScroll_, std::min(diskSel_, diskScroll_ + diskRows() - 1));
         return UiAction::Redraw;
     }
-    if (panel_ != Panel::Sampler && panel_ != Panel::Help && L_.pattern.contains(x, y) && !last_.playing) {
+    if (panel_ != Panel::Sampler && panel_ != Panel::Help && panel_ != Panel::Instrument && L_.pattern.contains(x, y) &&
+        !last_.playing) {
         moveCursor(-notches, 0, e);
         return UiAction::Redraw;
     }
@@ -810,6 +842,7 @@ UiAction PlayScreen::onMouse(float x, float y, bool right, Engine& e) {
     if (panel_ == Panel::EditOp && panelArea().contains(x, y)) return editOpMouse(x, y, right, e);
     if (panel_ == Panel::Setup && panelArea().contains(x, y)) return setupMouse(x, y, right, e);
     if (panel_ == Panel::Sampler && bottomArea().contains(x, y)) return samplerMouse(x, y, right, e);
+    if (panel_ == Panel::Instrument && bottomArea().contains(x, y)) return instrMouse(x, y, right, e);
     if (panel_ == Panel::Help && bottomArea().contains(x, y)) {
         panel_ = Panel::Main;
         return UiAction::Redraw;
@@ -892,7 +925,13 @@ void PlayScreen::startNameEdit(int which, Engine& e) {
         setStatus("PLAYBACK ONLY");
         return;
     }
-    if (which == 2) {
+    if (which == 3) {
+        if (sample_ >= (int)s->instruments.size()) {
+            setStatus("NO INSTRUMENT TO NAME");
+            return;
+        }
+        line_.begin(s->instruments[sample_].name, 22);
+    } else if (which == 2) {
         const int idx = curSampleIndex(*s);
         if (idx < 0) {
             setStatus("NO SAMPLE IN THIS SLOT");
@@ -914,6 +953,21 @@ void PlayScreen::finishNameEdit(Engine& e, bool keep) {
         return;
     }
     const std::string text = line_.text;
+    if (which == 3) {
+        const Song* cur = e.song();
+        const bool same = sample_ < (int)cur->instruments.size() &&
+                          text == std::string(cur->instruments[sample_].name, strnlen(cur->instruments[sample_].name, 22));
+        if (!same) {
+            const int ins = sample_;
+            e.edit([&](Song& song) {
+                if (ins >= (int)song.instruments.size()) return;
+                editor_.recordInstruments(song);
+                instSetName(song.instruments[ins], text.c_str());
+            });
+        }
+        setStatus("INSTRUMENT NAME SET");
+        return;
+    }
     if (which == 1) {
         e.edit([&](Song& song) {
             std::memset(song.name, 0, sizeof song.name);

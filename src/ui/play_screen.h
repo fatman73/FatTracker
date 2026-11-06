@@ -30,7 +30,7 @@ enum class UiAction {
     Quit
 };
 
-enum class Panel { Main, DiskOp, EditOp, Setup, Sampler, Help, PosEd };  // PosEd: Pure mode only
+enum class Panel { Main, DiskOp, EditOp, Setup, Sampler, Help, PosEd, Instrument };  // PosEd: Pure mode only
 
 struct DirEntry {
     std::wstring name;
@@ -213,7 +213,30 @@ private:
     int drawLastV_ = 0;
     bool recordRequested_ = false;           // SAMPLE pressed: the app starts / stops recording
     bool sampling_ = false;                  // recording from the audio input
-    // name editing: 0 none, 1 song name, 2 sample name
+    RectF samplerInstrButton() const;        // INSTRUMENT: opens the instrument editor
+    // INSTRUMENT (instrument_ed.cpp): XM instrument editor in the pattern area
+    int instPoint_[2] = {0, 0};  // selected point of the volume / panning envelope
+    int instEnv_ = 0;            // envelope clicked last (DEL deletes its selected point)
+    int instDrag_ = 0;           // 0 none, 1 volume point, 2 panning point, 3 key map paint, 4 key map erase
+    bool instDragRecorded_ = false;  // the drag's undo step is taken (on the first move)
+    int instLastKey_ = -1;           // key map: last key painted by the drag
+    int mapSample_ = -1;             // global sample the key map paints
+    int mapInstr_ = -1;              // instrument mapSample_ was chosen for
+    void instrDraw(Gfx& g, Text& tx, const Theme& t, Engine& e);
+    UiAction instrMouse(float x, float y, bool right, Engine& e);
+    bool instrDragMove(float x, float y, Engine& e);
+    UiAction instrKey(unsigned vk, bool ctrl, Engine& e);
+    RectF instrRect(int id) const;
+    int instrHit(float x, float y) const;
+    int instrKeyAt(float x, float y) const;  // key map: 0..95 or -1
+    void instrStep(int row, int dir, bool big, Engine& e);  // FADEOUT, VIBRATO ..., MAP SAMPLE arrows
+    void instrNew(Engine& e);
+    void instrConvert(Engine& e);
+    void syncMapSample(const Song& s);
+    bool instrEditable(Engine& e);  // an instrument to edit (else a status says why)
+    template <class F>
+    bool instrApply(Engine& e, F&& f, bool record = true);  // f(Instrument&) under the lock, with undo
+    // name editing: 0 none, 1 song name, 2 sample name, 3 instrument name
     int nameEdit_ = 0;
     LineEdit line_;
     RectF nameField(int which) const;  // SONGNAME / SAMPLENAME fields of the main screen
@@ -253,7 +276,9 @@ public:
     void setPure(int mode, Engine& e);  // switches the classic theme too
     void setDemoEffect(int fx) { demo_.setEffect(fx); }  // logo box effect (dev screenshots)
     void setDemoTime(double s) { demoTime_ = s; }
-    void startNameEdit(int which, Engine& e);  // 1 song name, 2 sample name
+    void startNameEdit(int which, Engine& e);  // 1 song name, 2 sample name, 3 instrument name
+    // dev screenshots: mouse input in logical units
+    UiAction click(float x, float y, bool right, Engine& e) { return onMouse(x, y, right, e); }
     bool takeRecordRequest() { const bool r = recordRequested_; recordRequested_ = false; return r; }
     void setRecording(bool on) { sampling_ = on; }
     void pressRecord(bool right, Engine& e) { recordButton(right, e); }  // dev screenshots

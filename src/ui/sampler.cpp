@@ -41,6 +41,11 @@ RectF PlayScreen::samplerButton(int i) const {
     return {a.x + 8 + (i % 10) * (w + 6), a.y + a.h - 3 * 46 - 4 + (i / 10) * 46, w, 40};
 }
 
+RectF PlayScreen::samplerInstrButton() const {
+    const RectF a = bottomArea();
+    return {a.x + a.w - 8 - 170, a.y + 6, 170, 32};
+}
+
 int PlayScreen::yToValue(float y, bool is16) const {
     const RectF w = samplerWave();
     const float mid = w.y + w.h / 2, half = w.h / 2 - 4;
@@ -92,7 +97,7 @@ void PlayScreen::samplerDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
                   len, sm && sm->is16 ? "16 BIT" : "8 BIT",
                   !sm || sm->loop == LoopType::None ? "OFF" : (sm->loop == LoopType::Forward ? "FWD" : "PINGPONG"),
                   sm ? sm->loopStart : 0u, sm ? sm->loopStart + sm->loopLength : 0u, s0, s1);
-    RectF info = {a.x + 8, a.y + 6, a.w - 16, 32};
+    RectF info = {a.x + 8, a.y + 6, a.w - 16 - 176, 32};
     g.well(info, t, mixColor(t.panelLight, t.panel, 0.25f));
     tx.draw(g, info, buf, 15.f, t.digits, Align::Left, FontRole::Mono);
 
@@ -148,6 +153,8 @@ void PlayScreen::samplerDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
         if ((i == S_DRAW && drawMode_) || (i == S_RECORD && sampling_)) st = Gfx::PanelState::Active;
         drawButton(u, samplerButton(i), kSamplerButtons[i], st, 14.f);
     }
+    drawButton(u, samplerInstrButton(), "INSTRUMENT", hover_ == kHitSampler + 40 ? Gfx::PanelState::Hover : Gfx::PanelState::Normal,
+               14.f);
 }
 
 void PlayScreen::samplerOp(int op, Engine& e) {
@@ -329,6 +336,10 @@ void PlayScreen::samplerOp(int op, Engine& e) {
 }
 
 UiAction PlayScreen::samplerMouse(float x, float y, bool right, Engine& e) {
+    if (samplerInstrButton().contains(x, y)) {  // the XM instrument editor (also Ctrl+I)
+        openPanel(Panel::Instrument);
+        return UiAction::Redraw;
+    }
     for (int i = 0; i < S_COUNT; ++i)
         if (samplerButton(i).contains(x, y)) {
             samplerOp(i, e);
