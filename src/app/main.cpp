@@ -17,6 +17,7 @@
 #include "core/ay_player.h"
 #include "core/gme_player.h"
 #include "core/hippel_player.h"
+#include "core/hvl_player.h"
 #include "core/pt3_player.h"
 #include "core/sid_player.h"
 #include "core/sndh_player.h"
@@ -104,7 +105,7 @@ std::vector<uint8_t> g_pendingMdat, g_pendingSmpl;
 char g_pendingName[21] = {};
 bool loadPending() { return g_pending || g_pendingTfmx; }
 // The playback-only player a file goes to; chosen once in loadTfmxPair (with trial loads), used by applyTfmx.
-enum class Chip { Tfmx, Sid, Pt3, Gme, Synth, SynthFiles, Ay, Hippel, Sndh };  // SynthFiles: with companion files
+enum class Chip { Tfmx, Sid, Pt3, Gme, Synth, SynthFiles, Ay, Hippel, Sndh, Hvl };  // SynthFiles: with companion files
 Chip g_pendingChip = Chip::Tfmx;
 bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
                const std::wstring& mdatPath, Chip chip);
@@ -193,6 +194,10 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
             SidPlayer trial;
             pick(Chip::Sid, trial.load(d, n));
         }
+        if (!hippel && HvlPlayer::detect(d, n)) {  // Amiga AHX ("THX") / HivelyTracker ("HVL")
+            HvlPlayer trial;
+            pick(Chip::Hvl, trial.load(d, n));
+        }
         if (!hippel && SndhPlayer::detect(d, n)) {  // Atari ST SNDH (its 68000 player; ICE! packed too)
             SndhPlayer trial;
             pick(Chip::Sndh, trial.load(d, n));
@@ -273,6 +278,7 @@ bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smp
         case Chip::SynthFiles: ok = g_engine->loadAmigaSynth(d, n, songFolderFiles(mdatPath), name, false); break;
         case Chip::Ay: ok = g_engine->loadAy(d, n, name, false); break;
         case Chip::Sndh: ok = g_engine->loadSndh(d, n, name, false); break;
+        case Chip::Hvl: ok = g_engine->loadHvl(d, n, name, false); break;
         case Chip::Hippel: ok = g_engine->loadHippel(d, n, name, false); break;
         case Chip::Tfmx: ok = g_engine->loadTfmx(d, n, smpl.data(), smpl.size(), name, false); break;
     }
@@ -498,7 +504,7 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.sndh;sndh.*;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.dw;*.dwold;dw.*;dwold.*;*.smus;smus.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.sndh;sndh.*;*.ahx;*.thx;*.hvl;ahx.*;thx.*;hvl.*;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.dw;*.dwold;dw.*;dwold.*;*.smus;smus.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;

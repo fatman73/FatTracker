@@ -1,5 +1,6 @@
 // BP SoundMon V.2 / V.3 (ported from NostalgicPlayer): hand-built songs, broken files, the real modules,
 // and a scan that no other module in the collection passes as SoundMon or Digital Mugician.
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -264,6 +265,11 @@ TEST(soundmon_mugician_no_false_positives) {
         if (!e.is_regular_file() || e.file_size() > (16u << 20)) continue;
         const std::string folder = e.path().parent_path().filename().string();
         if (folder == "SoundMon" || folder == "Digital Mugician") continue;
+        std::string ext = e.path().extension().string();  // real ones elsewhere (modules/Ocean has two)
+        for (char& c : ext) c = (char)tolower((unsigned char)c);
+        if (ext == ".bp" || ext == ".bp2" || ext == ".bp3" || ext == ".sndmon" || ext == ".dmu" || ext == ".dmu2" ||
+            ext == ".mug" || ext == ".mug2")
+            continue;
         const auto d = readAll(e.path());
         const bool bp = isSoundMon(d.data(), d.size()), dmu = isMugician(d.data(), d.size());
         if (bp || dmu) std::printf("  FALSE POSITIVE %s\n", e.path().string().c_str());

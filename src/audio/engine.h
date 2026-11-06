@@ -76,6 +76,8 @@ public:
     bool loadAy(const uint8_t* data, size_t size, const char* name, bool play);
     // Atari ST SNDH tune (its 68000 player on an emulated ST, ICE! packed too): playback only
     bool loadSndh(const uint8_t* data, size_t size, const char* name, bool play);
+    // Amiga AHX ("THX") and HivelyTracker (.hvl) modules through the HivelyTracker replayer: playback only
+    bool loadHvl(const uint8_t* data, size_t size, const char* name, bool play);
     // ZX Spectrum Pro Tracker 3 / Vortex Tracker II modules (.pt3) on the AY: playback only
     bool loadPt3(const uint8_t* data, size_t size, const char* name, bool play);
     // Amiga synth formats ported from NostalgicPlayer (JamCracker, ...): playback only
