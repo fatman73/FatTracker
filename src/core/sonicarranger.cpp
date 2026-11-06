@@ -154,7 +154,7 @@ struct Reader {
     bool bad = false;
     bool has(uint64_t k) const { return pos <= n && k <= n - pos; }
     const uint8_t* take(uint64_t k) {
-        if (!has(k)) {
+        if (bad || !has(k)) {
             bad = true;
             pos = n;
             return nullptr;

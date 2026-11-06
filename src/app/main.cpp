@@ -205,7 +205,7 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
             GmePlayer trial;
             pick(Chip::Gme, trial.load(d, n));
         }
-        if (!hippel && AmigaSynthPlayer::detect(d, n))  // JamCracker, Delta Music, SidMon, SoundMon, Mugician, Whittaker
+        if (!hippel && AmigaSynthPlayer::detect(d, n))  // JamCracker, Delta Music, SidMon, SoundMon, Mugician, Whittaker, Sonic Arranger, Art Of Noise
             pick(Chip::Synth, AmigaSynthPlayer::open(d, n) != nullptr);
         if (!hippel && AmigaSynthPlayer::needsFiles(d, n)) {  // IFF SMUS: its instruments are files next to it
             std::string err;
@@ -498,7 +498,7 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.sndh;sndh.*;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.dw;*.dwold;dw.*;dwold.*;*.smus;smus.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.sndh;sndh.*;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.dw;*.dwold;dw.*;dwold.*;*.smus;smus.*;*.sa;*.sonic;sa.*;sonic.*;*.aon;*.aon4;*.aon8;aon.*;aon4.*;aon8.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;

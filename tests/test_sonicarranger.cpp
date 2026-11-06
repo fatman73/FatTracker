@@ -295,6 +295,7 @@ TEST(sonicarranger_subsongs) {
         CHECK(p->selectSubsong(1));
         CHECK_EQ(p->subsong(), 1);
         CHECK(p->seconds() > 1.5 && p->seconds() < 2.5);
+        p->clearMeters();  // the meters of the first sub-song
         peakOf(*p, 0.5, vu);
         CHECK(vu[1] > 0.1f && vu[0] < 0.01f);  // the second sub-song plays the rows on voice 2
         CHECK(!p->selectSubsong(2));
