@@ -1,5 +1,5 @@
 // The ported Amiga synth replayers (one source file each: JamCracker, Delta Music, SidMon, SoundMon,
-// Digital Mugician); AmigaSynthPlayer::open tries them in turn.
+// Digital Mugician, David Whittaker); AmigaSynthPlayer::open tries them in turn.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -30,3 +30,7 @@ std::unique_ptr<AmigaSynthPlayer> openSoundMon(const uint8_t* data, size_t size)
 // file, with a playable sub-song), mugician.cpp
 bool isMugician(const uint8_t* data, size_t size);
 std::unique_ptr<AmigaSynthPlayer> openMugician(const uint8_t* data, size_t size);
+// David Whittaker (player-and-data files, found by the replay routine's 68000 instructions, never PSID / RSID /
+// SC68; files with sub-songs play the first one), whittaker.cpp
+bool detectWhittaker(const uint8_t* data, size_t size);
+std::unique_ptr<AmigaSynthPlayer> openWhittaker(const uint8_t* data, size_t size);
