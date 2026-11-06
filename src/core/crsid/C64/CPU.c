@@ -22,7 +22,7 @@ unsigned char cRSID_emulateCPU(cRSID_C64instance* C64) {  // the CPU emulation f
 
     char Cycles, SamePage;
     unsigned char IR, ST, X, Y;
-    short int A, SP, T;
+    short int A, SP, T = 0;  // FatTracker: T was read uninitialised by ARR
     unsigned int PC, PrevPC;
 
     static unsigned int Addr;

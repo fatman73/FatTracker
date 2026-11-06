@@ -1,4 +1,5 @@
 // Amiga synth formats ported from NostalgicPlayer (JamCracker, ...): playback only.
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -77,6 +78,18 @@ TEST(jamcracker_broken_files) {
     auto p = AmigaSynthPlayer::open(h.data(), h.size());
     CHECK(p != nullptr);
     if (p) peakOf(*p, 0.3);
+}
+
+TEST(jamcracker_huge_sample_size_is_not_allocated) {
+    // the last sample may be cut short, but its header size must not become a 4 GB allocation
+    auto f = tinyJam();
+    const size_t sizeAt = 4 + 2 + 31 + 1;
+    f[sizeAt] = f[sizeAt + 1] = f[sizeAt + 2] = f[sizeAt + 3] = 0xFF;
+    const auto t0 = std::chrono::steady_clock::now();
+    auto p = AmigaSynthPlayer::open(f.data(), f.size());
+    const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    CHECK(s < 1.0);
+    if (p) peakOf(*p, 0.2);
 }
 
 TEST(amiga_synth_real_modules_play) {

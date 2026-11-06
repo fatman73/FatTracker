@@ -66,6 +66,29 @@ TEST(ay_rejects_other_data) {
     CHECK(!p.load(lha.data(), lha.size()));
 }
 
+TEST(ay_vtx_header_of_an_amstrad_tune_is_detected) {
+    // VTX: "ay", stereo, loop, chip clock 1 MHz (Amstrad CPC), 50 Hz, year, unpacked size, five strings
+    std::vector<uint8_t> v = {'a', 'y', 1, 0, 0, 0x40, 0x42, 0x0F, 0x00, 50, 0xCE, 0x07, 0x78, 0x05, 0, 0};
+    for (const char* s : {"title", "author", "", "", ""}) {
+        v.insert(v.end(), s, s + std::strlen(s));
+        v.push_back(0);
+    }
+    v.resize(v.size() + 64, 0x55);
+    CHECK(AyPlayer::detect(v.data(), v.size()));
+}
+
+TEST(ay_truncated_lha_is_refused) {
+    const auto dir = std::filesystem::path(FT_SOURCE_DIR) / "modules" / "AtariST";
+    if (!std::filesystem::exists(dir)) return;
+    for (const auto& e : std::filesystem::directory_iterator(dir)) {
+        std::ifstream in(e.path(), std::ios::binary);
+        const std::vector<uint8_t> d((std::istreambuf_iterator<char>(in)), {});
+        std::vector<uint8_t> out;
+        if (!lhaUnpack(d.data(), d.size(), out)) continue;
+        CHECK(!lhaUnpack(d.data(), d.size() * 2 / 3, out));  // two thirds of the stream: refused, not padded with zeros
+    }
+}
+
 TEST(ay_real_ym_files_play) {
     const std::filesystem::path dir = std::filesystem::path(FT_SOURCE_DIR) / "modules" / "AtariST";
     if (!std::filesystem::exists(dir)) {

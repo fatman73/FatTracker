@@ -44,6 +44,7 @@ private:
     int bitcount_ = 0;
     unsigned blocksize_ = 0;
     bool bad_ = false;
+    int virt_ = 0;  // bytes read past the end of the data
     uint8_t cLen_[NC] = {}, ptLen_[NT > NP ? NT : NP] = {};
     uint16_t cTable_[4096] = {}, ptTable_[256] = {};
     uint16_t left_[2 * NC - 1] = {}, right_[2 * NC - 1] = {};
@@ -52,7 +53,9 @@ private:
         while (n > bitcount_) {
             n -= bitcount_;
             bitbuf_ = (bitbuf_ << bitcount_) + (subbuf_ >> (8 - bitcount_));
-            subbuf_ = pos_ < n_ ? src_[pos_++] : 0;
+            if (pos_ < n_) subbuf_ = src_[pos_++];
+            else if (++virt_ > 2) bad_ = true, subbuf_ = 0;  // a cut stream: fail instead of decoding zeros
+            else subbuf_ = 0;
             bitcount_ = 8;
         }
         bitcount_ -= n;
@@ -193,7 +196,6 @@ private:
             if (j >= NC) return -1;
         }
         fill(cLen_[j]);
-        if (pos_ > n_ + 4) bad_ = true;  // ran far past the end of the data
         return j;
     }
 
@@ -306,7 +308,8 @@ bool AyPlayer::detect(const uint8_t* d, size_t n) {
         std::memcmp(d, "YM5!", 4) == 0 || std::memcmp(d, "YM6!", 4) == 0 || std::memcmp(d, "PSG\x1A", 4) == 0)
         return true;
     if ((d[0] == 'a' && d[1] == 'y') || (d[0] == 'y' && d[1] == 'm'))  // VTX: sane header fields
-        return n > 20 && d[2] <= 6 && le32(d + 12) > 0 && le32(d + 12) < kMaxUnpacked && d[7] >= 25 && d[7] <= 200;
+        return n > 20 && d[2] <= 6 && le32(d + 12) > 0 && le32(d + 12) < kMaxUnpacked && d[9] >= 1 && d[9] <= 200 &&
+               le32(d + 5) >= 500000 && le32(d + 5) <= 4000000;
     // LHA packed YM: method -lh5- / -lh0-, a member called *.ym or anything (YM rips are single member archives)
     return n >= 24 && d[2] == '-' && d[3] == 'l' && d[4] == 'h' && (d[5] == '5' || d[5] == '0') && d[6] == '-';
 }

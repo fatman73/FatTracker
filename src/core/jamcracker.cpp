@@ -103,8 +103,11 @@ public:
             if (!in.size) continue;
             const size_t take = (size_t)(end - p) < in.size ? (size_t)(end - p) : in.size;
             if (take < in.size && i + 1 != inst_.size()) return false;
+            // a cut last sample keeps what is there; zero padding only up to the AM wave area (0x180)
+            const size_t keep = take >= in.size ? take : (take > 0x180 ? take : (in.size < 0x180 ? in.size : 0x180));
             in.data.assign(p, p + take);
-            in.data.resize(in.size, 0);
+            in.data.resize(keep, 0);
+            in.size = (uint32_t)keep;
             p += take;
         }
         format_ = "JAMCRACKER (AMIGA)";
