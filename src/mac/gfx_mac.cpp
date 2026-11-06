@@ -50,8 +50,8 @@ CGPathRef roundedPath(CGRect r, float radius) {
 
 // The two contexts the frame needs: 32-bit, little-endian (BGRA in memory like DXGI_FORMAT_B8G8R8A8).
 CGContextRef makeContext(uint32_t w, uint32_t h, bool alpha) {
-    const uint32_t info = kCGBitmapByteOrder32Little |
-                          (alpha ? kCGImageAlphaPremultipliedFirst : kCGImageAlphaNoneSkipFirst);
+    const uint32_t info = (uint32_t)kCGBitmapByteOrder32Little |
+                          (uint32_t)(alpha ? kCGImageAlphaPremultipliedFirst : kCGImageAlphaNoneSkipFirst);
     CGContextRef c = CGBitmapContextCreate(nullptr, w, h, 8, 0, srgb(), info);
     if (!c) return nullptr;
     CGContextTranslateCTM(c, 0, h);  // top-left origin, y down, like Direct2D
@@ -321,7 +321,7 @@ void Gfx::endGlow(float radiusLogical, float strength) {
             vImageBoxConvolve_ARGB8888(&B, &A, nullptr, 0, 0, k, k, nullptr, kvImageEdgeExtend);
             vImageBoxConvolve_ARGB8888(&A, &B, nullptr, 0, 0, k, k, nullptr, kvImageEdgeExtend);
             CGContextRef bc = CGBitmapContextCreate(b, w_, h_, 8, src.rowBytes, srgb(),
-                                                    kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+                                                    (uint32_t)kCGBitmapByteOrder32Little | (uint32_t)kCGImageAlphaPremultipliedFirst);
             if (bc) {
                 blurred = CGBitmapContextCreateImage(bc);
                 CGContextRelease(bc);
@@ -381,7 +381,7 @@ void Gfx::drawPixels(const uint32_t* argb, uint32_t w, uint32_t h, float devX, f
     if (!ctx_ || !w || !h) return;
     CGDataProviderRef dp = CGDataProviderCreateWithData(nullptr, argb, (size_t)w * h * 4, nullptr);
     CGImageRef img = CGImageCreate(w, h, 8, 32, (size_t)w * 4, srgb(),
-                                   kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst, dp, nullptr, false,
+                                   (uint32_t)kCGBitmapByteOrder32Little | (uint32_t)kCGImageAlphaNoneSkipFirst, dp, nullptr, false,
                                    kCGRenderingIntentDefault);
     CGDataProviderRelease(dp);
     if (!img) return;
@@ -396,7 +396,7 @@ void Gfx::drawPixels(const uint32_t* argb, uint32_t w, uint32_t h, float devX, f
         if (!g_up || g_upW != w * k || g_upH != h * k) {
             if (g_up) CGContextRelease(g_up);
             g_up = CGBitmapContextCreate(nullptr, w * k, h * k, 8, 0, srgb(),
-                                         kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst);
+                                         (uint32_t)kCGBitmapByteOrder32Little | (uint32_t)kCGImageAlphaNoneSkipFirst);
             g_upW = w * k;
             g_upH = h * k;
         }
