@@ -30,6 +30,9 @@ public:
     float vu(int v) const override;
     void scope(int v, float* dst, int n) const override;
     int songs() const;
+    int subsongs() const override { return songs() > 0 ? songs() : 1; }
+    int subsong() const override;
+    bool selectSubsong(int i) override;  // loads the song again (TFMX measures each song while loading)
     int step() const;        // current track step, counted from the first one of the song
     int steps() const;       // number of track steps of the song
     double seconds() const override;

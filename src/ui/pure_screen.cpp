@@ -117,9 +117,9 @@ void PlayScreen::pureDraw(Gfx& g, Text& tx, const Theme& t, Engine& e) {
         label(c, pure::counterLabel(r), kLabels[r]);
         box(c, pure::counterValue(r));
         switch (r) {
-            case 0: std::snprintf(buf, sizeof buf, "%04d", viewOrder_); break;
+            case 0: std::snprintf(buf, sizeof buf, "%04d", tel.subsongs ? tel.subsong + 1 : viewOrder_); break;  // chip: sub-song
             case 1: std::snprintf(buf, sizeof buf, "%04d", s && !s->order.empty() ? s->order[std::min(viewOrder_, (int)s->order.size() - 1)] : 0); break;
-            case 2: std::snprintf(buf, sizeof buf, "%04d", s ? (int)s->order.size() : 0); break;
+            case 2: std::snprintf(buf, sizeof buf, "%04d", tel.subsongs ? (int)tel.subsongs : s ? (int)s->order.size() : 0); break;
             case 3: std::snprintf(buf, sizeof buf, smp && smp->finetune / 16 ? "%+d" : "%d", smp ? smp->finetune / 16 : 0); break;
             case 4: std::snprintf(buf, sizeof buf, "%04X", sample_ + 1); break;
             case 5: std::snprintf(buf, sizeof buf, "%04X", smp ? smp->volume : 0); break;
@@ -317,7 +317,7 @@ UiAction PlayScreen::pureMouse(float lx, float ly, bool right, Engine& e) {
     if (h >= pure::kPosLine && h < pure::kPosLine + pure::kPosLines) {
         const int d = h - pure::kPosLine - (pure::kPosLines / 2 - 1);
         const int to = viewOrder_ + d;
-        if (d && s && to >= 0 && to < (int)s->order.size()) counterStep(0, d, false, e);  // blank lines: nothing
+        if (d && s && !e.tfmx() && to >= 0 && to < (int)s->order.size()) counterStep(0, d, false, e);  // blank lines: nothing
         return UiAction::Redraw;
     }
     if (h == pure::kPosUp || h == pure::kPosDown) {

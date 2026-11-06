@@ -28,6 +28,7 @@ struct Telemetry {
     int numChannels;
     bool led;    // Amiga filter LED (Pure mode)
     bool drive;  // simulated floppy busy (Pure mode)
+    uint16_t subsong, subsongs;  // chip songs: the sub-song playing (from 0) and how many (0 without a chip song)
     ChannelTelemetry ch[32];
 };
 
@@ -80,6 +81,12 @@ public:
     bool loadGme(const uint8_t* data, size_t size, const char* name, bool play);
     bool tfmx() const { return tfmxOn_; }  // a playback-only chip song (TFMX, FC, Hippel) is loaded
     const char* tfmxFormat() const;
+    // Sub-songs of the chip song (thread safe). chipSubsongs() is 0 without a chip song. Selecting restarts
+    // the chip player on that sub-song (playing or stopped as before) and rebuilds the display song; false
+    // (nothing changes) for an index out of range or without a chip song.
+    int chipSubsongs() const;
+    int chipSubsong() const;
+    bool selectChipSubsong(int i);
 
     void lock();    // exclusive, for edits from the UI
     void unlock();

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 #include "core/song.h"
 #include "core/tfmx/PaulaVoice.h"
@@ -71,6 +72,8 @@ struct TfmxPlayer::Impl {
     uint32_t rate = 48000;
     double tickLeft = 0;  // output samples left in the current 50 Hz (or BPM) tick
     bool loaded = false;
+    int song = 0;
+    std::vector<uint8_t> mdat, smpl;  // the files as loaded: selecting another song loads them again
     float vu[kMaxVoices] = {};
     float scope[kMaxVoices][kScopeLen] = {};
     uint32_t scopePos = 0;
@@ -98,8 +101,32 @@ bool TfmxPlayer::load(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl,
     if (!dec.init(const_cast<uint8_t*>(mdat), (udword)mdatSize, song)) return false;
     dec.setLooping(true);
     impl_->loaded = true;
+    impl_->song = song >= 0 && song < (int)dec.getSongs() ? song : 0;  // the decoder starts song 0 otherwise
+    if (mdat != impl_->mdat.data()) {
+        impl_->mdat.assign(mdat, mdat + mdatSize);
+        if (smpl && smplSize) impl_->smpl.assign(smpl, smpl + smplSize);
+        else impl_->smpl.clear();
+    }
     restart();
     return true;
+}
+
+int TfmxPlayer::subsong() const { return impl_->loaded ? impl_->song : 0; }
+
+bool TfmxPlayer::selectSubsong(int i) {
+    if (!impl_->loaded || i < 0 || i >= subsongs()) return false;
+    // a fresh decoder: the song list it finds depends on the decoder's state, so it must start clean
+    std::unique_ptr<Impl> old(impl_.release());
+    impl_.reset(new Impl);
+    Impl& m = *impl_;
+    m.rate = old->rate;
+    m.mdat.swap(old->mdat);
+    m.smpl.swap(old->smpl);
+    if (load(m.mdat.data(), m.mdat.size(), m.smpl.empty() ? nullptr : m.smpl.data(), m.smpl.size(), i)) return true;
+    old->mdat.swap(m.mdat);  // the old decoder is untouched: it keeps playing
+    old->smpl.swap(m.smpl);
+    impl_ = static_cast<std::unique_ptr<Impl>&&>(old);
+    return false;
 }
 
 void TfmxPlayer::restart() {

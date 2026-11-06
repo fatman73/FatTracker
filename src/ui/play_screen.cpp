@@ -233,9 +233,11 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     if (panel_ == Panel::Setup) setupDraw(g, tx, t);
     if (topMain) {
     g.panel(L_.counters, t, Gfx::PanelState::Normal);
-    unsigned vals[10] = {(unsigned)viewOrder_,
+    // chip songs: POS is the sub-song (from 1) and LENGTH the number of sub-songs
+    const bool chip = tel.subsongs > 0;
+    unsigned vals[10] = {chip ? tel.subsong + 1u : (unsigned)viewOrder_,
                          (unsigned)pc.pattern,
-                         s ? (unsigned)s->order.size() : 0u,
+                         chip ? (unsigned)tel.subsongs : s ? (unsigned)s->order.size() : 0u,
                          0u,
                          (unsigned)sample_ + 1,
                          smp ? smp->volume : 0u,
@@ -406,10 +408,26 @@ void PlayScreen::solo(int ch, Engine& e) {
     for (int c = 0; c < n; ++c) e.setMute(c, alreadySolo ? false : c != ch);
 }
 
+void PlayScreen::chipSubsongStep(int dir, Engine& e) {
+    const int n = e.chipSubsongs();
+    if (n <= 0) return;
+    const int to = ((e.chipSubsong() + dir) % n + n) % n;  // wraps around like POS
+    if (n > 1 && !e.selectChipSubsong(to)) return;
+    viewRow_ = viewPattern_ = viewOrder_ = 0;  // the display song starts over
+    char m[32];
+    // Pure mode's status field shows 10 characters
+    std::snprintf(m, sizeof m, pure_ ? "SONG %d/%d" : "SUBSONG %d/%d", e.chipSubsong() + 1, n);
+    setStatus(m);
+}
+
 void PlayScreen::counterStep(int row, int dir, bool big, Engine& e) {
     const Song* s = e.song();
     if (!s) return;
     const bool stopped = !last_.playing;
+    if (e.tfmx() && (row == 0 || row == 2)) {  // chip songs: POS steps through the sub-songs, LENGTH is their count
+        if (row == 0) chipSubsongStep(dir, e);
+        return;
+    }
     switch (row) {
         case 0:  // POS
             if (!stopped || s->order.empty()) return;

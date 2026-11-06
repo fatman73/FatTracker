@@ -16,7 +16,7 @@ struct GmePlayer::Impl {
     uint32_t rate = 48000;
     int track = 0, voices = 4;
     double seconds = 0;
-    std::string title, format;
+    std::string title, trackTitle, format;
     std::vector<short> buf;
     float level = 0, vu[kMaxVoices] = {};
     float scope[kScopeLen] = {};
@@ -44,6 +44,20 @@ struct GmePlayer::Impl {
         const int n = gme_voice_count(emu);
         voices = n < 1 ? 4 : (n > kMaxVoices ? kMaxVoices : n);
         return true;
+    }
+    void readInfo() {  // title and length of the track
+        gme_info_t* info = nullptr;
+        title.clear();
+        trackTitle.clear();
+        seconds = 0;
+        if (!gme_track_info(emu, &info, track) && info) {
+            trackTitle = info->song ? info->song : "";
+            title = !trackTitle.empty() ? trackTitle : (info->game ? info->game : "");
+            const int ms = info->length > 0 ? info->length
+                         : (info->intro_length >= 0 && info->loop_length > 0 ? info->intro_length + info->loop_length : -1);
+            seconds = ms > 0 ? ms / 1000.0 : 0.0;
+            gme_free_info(info);
+        }
     }
 };
 
@@ -79,16 +93,7 @@ bool GmePlayer::load(const uint8_t* data, size_t size, int track) {
     data = m.file.data();             // (after the resize, which may move the buffer)
     m.track = track < 0 ? 0 : track;
     if (!m.open()) return false;
-    gme_info_t* info = nullptr;
-    m.title.clear();
-    m.seconds = 0;
-    if (!gme_track_info(m.emu, &info, m.track) && info) {
-        m.title = info->song && *info->song ? info->song : (info->game ? info->game : "");
-        const int ms = info->length > 0 ? info->length
-                     : (info->intro_length >= 0 && info->loop_length > 0 ? info->intro_length + info->loop_length : -1);
-        m.seconds = ms > 0 ? ms / 1000.0 : 0.0;
-        gme_free_info(info);
-    }
+    m.readInfo();
     const char* sys = gme_type_system(gme_type(m.emu));
     m.format = std::string(sys ? sys : "GME") + " (" + gme_identify_header(data) + ")";
     for (char& c : m.format) c = (char)toupper((unsigned char)c);
@@ -150,6 +155,27 @@ double GmePlayer::seconds() const { return impl_->seconds; }
 const char* GmePlayer::format() const { return impl_->emu ? impl_->format.c_str() : ""; }
 const char* GmePlayer::title() const { return impl_->title.c_str(); }
 int GmePlayer::tracks() const { return impl_->emu ? gme_track_count(impl_->emu) : 0; }
+
+int GmePlayer::subsongs() const {
+    const int n = tracks();
+    return n > 0 ? n : 1;
+}
+
+int GmePlayer::subsong() const { return impl_->emu ? impl_->track : 0; }
+
+bool GmePlayer::selectSubsong(int i) {
+    Impl& m = *impl_;
+    if (!m.emu || i < 0 || i >= tracks()) return false;
+    if (gme_start_track(m.emu, i)) {
+        gme_start_track(m.emu, m.track);  // (it started before)
+        return false;
+    }
+    m.track = i;
+    m.readInfo();
+    return true;
+}
+
+const char* GmePlayer::subsongTitle() const { return impl_->emu ? impl_->trackTitle.c_str() : ""; }
 
 bool GmePlayer::buildDisplay(Song& out) {
     if (!impl_->emu) return false;

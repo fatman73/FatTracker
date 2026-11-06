@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "core/hippel/HippelDecoder.h"
 #include "core/hippel/PaulaVoice.h"
@@ -71,6 +72,8 @@ struct HippelPlayer::Impl {
     uint32_t rate = 48000;
     double tickLeft = 0;
     bool loaded = false;
+    int song = 0;
+    std::vector<uint8_t> file;  // as loaded: selecting another song loads it again
     std::string format;
     float vu[kMaxVoices] = {};
     float scope[kMaxVoices][kScopeLen] = {};
@@ -96,8 +99,31 @@ bool HippelPlayer::load(const uint8_t* data, size_t size, int song) {
     dec.setLoopMode(true);
     impl_->format = dec.getFormatName();
     impl_->loaded = true;
+    impl_->song = song >= 0 && song < dec.getSongs() ? song : 0;  // the decoder starts song 0 otherwise
+    if (data != impl_->file.data()) impl_->file.assign(data, data + size);
     restart();
     return true;
+}
+
+int HippelPlayer::subsongs() const {
+    const int n = impl_->loaded ? impl_->dec.getSongs() : 0;
+    return n > 0 ? n : 1;
+}
+
+int HippelPlayer::subsong() const { return impl_->loaded ? impl_->song : 0; }
+
+bool HippelPlayer::selectSubsong(int i) {
+    if (!impl_->loaded || i < 0 || i >= subsongs()) return false;
+    // a fresh decoder (as on the first load): nothing of the old song's state carries over
+    std::unique_ptr<Impl> old(impl_.release());
+    impl_.reset(new Impl);
+    Impl& m = *impl_;
+    m.rate = old->rate;
+    m.file.swap(old->file);
+    if (load(m.file.data(), m.file.size(), i)) return true;
+    old->file.swap(m.file);  // the old decoder is untouched: it keeps playing
+    impl_ = static_cast<std::unique_ptr<Impl>&&>(old);
+    return false;
 }
 
 void HippelPlayer::restart() {

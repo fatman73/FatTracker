@@ -42,6 +42,7 @@ struct Dmu {
     struct Sub {
         uint8_t loop = 1, loopPos = 0, speed = 6, numSeq = 0;
         std::vector<std::array<uint8_t, 2>> seq;  // 4 per position: track, transpose
+        const char* name = "TINY";                // 12 characters at most
     } sub[8];
     std::vector<std::array<uint8_t, 16>> inst;
     std::vector<std::vector<uint8_t>> waves;  // 128 bytes each
@@ -62,7 +63,8 @@ struct Dmu {
         be32(f, (uint32_t)sampleData.size());
         for (const Sub& s : sub) {
             f.push_back(s.loop), f.push_back(s.loopPos), f.push_back(s.speed), f.push_back(s.numSeq);
-            for (int i = 0; i < 12; ++i) f.push_back(i < 4 ? "TINY"[i] : ' ');
+            const size_t len = std::strlen(s.name);
+            for (size_t i = 0; i < 12; ++i) f.push_back(i < len ? (uint8_t)s.name[i] : ' ');
         }
         for (const Sub& s : sub)
             for (const auto& q : s.seq) f.insert(f.end(), q.begin(), q.end());
@@ -270,6 +272,46 @@ TEST(mugician_broken_files) {
     }
     odd.push_back(d.build());
     for (const auto& v : odd) playOdd(v);
+}
+
+// Sub-songs: the playable ones in file order (Mugician 2 takes them in pairs), each with its own length and name.
+TEST(mugician_subsongs) {
+    for (int v2 = 0; v2 < 2; ++v2) {
+        Dmu d = tiny(v2 != 0);
+        d.sub[0].name = "FIRST";
+        // slot 2 (and 3 for the second sequence list of Mugician 2): two positions
+        for (int pos = 0; pos < 2; ++pos)
+            for (int c = 0; c < 4; ++c) d.sub[2].seq.push_back({(uint8_t)(c == 1 ? 1 : 0), 0});
+        d.sub[2].numSeq = 2;
+        d.sub[2].name = "SECOND SONG";
+        if (v2) {
+            for (int pos = 0; pos < 2; ++pos)
+                for (int c = 0; c < 4; ++c) d.sub[3].seq.push_back({0, 0});
+            d.sub[3].numSeq = 2;
+        }
+        const auto f = d.build();
+        auto p = AmigaSynthPlayer::open(f.data(), f.size());
+        CHECK(p != nullptr);
+        if (!p) continue;
+        p->setRate(48000);
+        CHECK_EQ(p->subsongs(), 2);
+        CHECK_EQ(p->subsong(), 0);
+        CHECK(std::strcmp(p->subsongTitle(), "FIRST") == 0);
+        CHECK(p->seconds() > 7 && p->seconds() < 8.5);
+        CHECK(p->selectSubsong(1));
+        CHECK_EQ(p->subsong(), 1);
+        CHECK(std::strcmp(p->subsongTitle(), "SECOND SONG") == 0);
+        CHECK(p->seconds() > 14 && p->seconds() < 17);  // two positions
+        float vu[8] = {};
+        CHECK(peakOf(*p, 0.5, vu) > 0.05f);
+        CHECK(vu[1] > 0.1f);  // the second sub-song plays track 1 on voice 2
+        CHECK(vu[0] < 0.01f);
+        CHECK(!p->selectSubsong(2));
+        CHECK(!p->selectSubsong(-1));
+        CHECK_EQ(p->subsong(), 1);
+        CHECK(p->selectSubsong(0));
+        CHECK(p->seconds() > 7 && p->seconds() < 8.5);
+    }
 }
 
 TEST(mugician_detect_is_strict) {

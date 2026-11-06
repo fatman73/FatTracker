@@ -1,7 +1,8 @@
 // Digital Mugician 1 / 2 (Reinier van Vliet) replayer, ported from NostalgicPlayer's
-// DigitalMugicianWorker.cs (Thomas Neumann, MIT licence) onto AmigaSynthPlayer. Plays the first playable
-// sub-song. Mugician 2 has 7 voices: 0-2 come from the sub-song's sequences, 3-6 from the next sub-song's
-// and are mixed into Paula channel 3 (AmigaSynthPlayer's voices_ = 7).
+// DigitalMugicianWorker.cs (Thomas Neumann, MIT licence) onto AmigaSynthPlayer. The sub-songs are the
+// playable ones (as NostalgicPlayer's subSongMapping), starting on the first. Mugician 2 has 7 voices: 0-2
+// come from the sub-song's sequences, 3-6 from the next sub-song's and are mixed into Paula channel 3
+// (AmigaSynthPlayer's voices_ = 7).
 // Index checks added where the C# code relied on exceptions: waveform, sample, arpeggio, track and
 // instrument numbers, wave effect lengths (loop lengths reach 510 bytes on 128 byte waveforms), effect
 // indexes, the period table, positions past the second sequence list in Mugician 2, and chTab (4 entries in
@@ -133,6 +134,7 @@ struct Layout {
     uint32_t seqLen[8] = {}, numInst = 0, numWaves = 0, numSamples = 0, samplesSize = 0;
     size_t seq[8] = {}, inst = 0, waves = 0, sampleInfo = 0, tracks = 0, sampleData = 0;
     int song = -1;  // the first playable sub-song
+    int songs[8] = {}, numSongs = 0;  // all playable sub-songs (Mugician 2: even ones, with the next as pair)
 };
 
 bool parseLayout(const uint8_t* d, size_t n, Layout& l) {
@@ -175,11 +177,14 @@ bool parseLayout(const uint8_t* d, size_t n, Layout& l) {
     if (l.arps && l.sampleData + (uint64_t)l.samplesSize + 256 > n) return false;
     // sub-songs that can be played: complete sequence lists with something in them
     const int step = l.v2 ? 2 : 1;
-    for (int i = 0; i < 8 && l.song < 0; i += step) {
+    for (int i = 0; i < 8; i += step) {
         if (l.seqLen[i] != d[76 + 16 * i + 3]) continue;
-        for (uint32_t j = 0; j < l.seqLen[i] * 4 && l.song < 0; ++j)
-            if (d[l.seq[i] + 2 * j] != 0 || d[l.seq[i] + 2 * j + 1] != 0) l.song = i;
+        bool playable = false;
+        for (uint32_t j = 0; j < l.seqLen[i] * 4 && !playable; ++j)
+            playable = d[l.seq[i] + 2 * j] != 0 || d[l.seq[i] + 2 * j + 1] != 0;
+        if (playable) l.songs[l.numSongs++] = i;
     }
+    l.song = l.numSongs ? l.songs[0] : -1;
     return l.song >= 0;
 }
 
@@ -190,13 +195,22 @@ public:
         if (!parseLayout(d, n, l)) return false;
         v2_ = l.v2;
         voices_ = v2_ ? 7 : 4;
-        const uint8_t* sub = d + 76 + 16 * l.song;
-        loopSong_ = sub[0] != 0;
-        loopPosition_ = sub[1];
-        songSpeed_ = sub[2];
-        songLength_ = sub[3];
-        seq1_.assign(d + l.seq[l.song], d + l.seq[l.song] + (size_t)l.seqLen[l.song] * 8);
-        if (v2_) seq2_.assign(d + l.seq[l.song + 1], d + l.seq[l.song + 1] + (size_t)l.seqLen[l.song + 1] * 8);
+        subs_.resize((size_t)l.numSongs);
+        for (int k = 0; k < l.numSongs; ++k) {
+            const int song = l.songs[k];
+            const uint8_t* sub = d + 76 + 16 * song;
+            SubSong& ss = subs_[(size_t)k];
+            ss.loop = sub[0] != 0;
+            ss.loopPosition = sub[1];
+            ss.speed = sub[2];
+            ss.length = sub[3];
+            for (int c = 0; c < 12; ++c) ss.name[c] = sub[4 + c] >= 32 && sub[4 + c] < 127 ? (char)sub[4 + c] : ' ';
+            for (int c = 11; c >= 0 && ss.name[c] == ' '; --c) ss.name[c] = 0;
+            ss.seq1.assign(d + l.seq[song], d + l.seq[song] + (size_t)l.seqLen[song] * 8);
+            if (v2_) ss.seq2.assign(d + l.seq[song + 1], d + l.seq[song + 1] + (size_t)l.seqLen[song + 1] * 8);
+        }
+        subsongs_ = l.numSongs;
+        subsong_ = 0;
         instBackup_.resize(l.numInst);
         for (uint32_t i = 0; i < l.numInst; ++i) {
             const uint8_t* p = d + l.inst + 16 * (size_t)i;
@@ -241,9 +255,17 @@ public:
         measure();
         return true;
     }
+    const char* subsongTitle() const override { return subs_.empty() ? "" : subs_[(size_t)subsong_].name; }
 
 protected:
     void initSound() override {
+        const SubSong& ss = subs_[(size_t)subsong_];
+        loopSong_ = ss.loop;
+        loopPosition_ = ss.loopPosition;
+        songSpeed_ = ss.speed;
+        songLength_ = ss.length;
+        seq1_ = &ss.seq1;
+        seq2_ = &ss.seq2;
         inst_ = instBackup_;                                         // same size: no reallocation
         std::copy(wavesBackup_.begin(), wavesBackup_.end(), waves_.begin());  // channels point into waves_
         initializeSound();
@@ -272,9 +294,17 @@ protected:
     }
 
 private:
+    struct SubSong {
+        bool loop = false;
+        uint8_t loopPosition = 0, speed = 0, length = 0;
+        char name[13] = {};
+        std::vector<uint8_t> seq1, seq2;  // [position * 4 + voice]: track, transpose
+    };
+    std::vector<SubSong> subs_;  // the playable sub-songs
     bool v2_ = false, loopSong_ = false;
     uint8_t loopPosition_ = 0, songSpeed_ = 0, songLength_ = 0;
-    std::vector<uint8_t> seq1_, seq2_;  // [position * 4 + voice]: track, transpose
+    const std::vector<uint8_t>* seq1_ = nullptr;  // of the sub-song playing
+    const std::vector<uint8_t>* seq2_ = nullptr;
     std::vector<Instrument> instBackup_, inst_;
     std::vector<Wave> wavesBackup_, waves_;
     std::vector<int8_t> sampleArea_;
@@ -318,7 +348,7 @@ private:
         Voice& vi = voice_[n];
         AmigaChannel& ch = ch_[n];
         if (newPattern_) {
-            const std::vector<uint8_t>& seq = !v2_ || n < 3 ? seq1_ : seq2_;
+            const std::vector<uint8_t>& seq = !v2_ || n < 3 ? *seq1_ : *seq2_;
             const size_t at = ((size_t)currentPosition_ * 4 + (size_t)(!v2_ || n < 3 ? n : n - 3)) * 2;
             vi.track = at + 1 < seq.size() ? seq[at] : 0;
             vi.transpose = at + 1 < seq.size() ? (int8_t)seq[at + 1] : 0;
