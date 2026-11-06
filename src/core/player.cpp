@@ -237,6 +237,9 @@ void Player::noteStart(int c) {
             int ii = cell.instr - 1;
             ch.instrument = ii < (int)s.instruments.size() ? (int16_t)ii : (int16_t)-1;
             int note = cell.note && cell.note != NOTE_OFF ? cell.note : ch.note;
+            // ProTracker songs given instruments (CONVERT SONG TO XM INSTRUMENTS): a sample number before the
+            // channel's first note still selects the sample, as it did without instruments
+            if (!ft2 && (note < 1 || note > 96)) note = 49;
             if (ch.instrument >= 0 && note >= 1 && note <= 96) {
                 uint16_t m = s.instruments[ch.instrument].sampleMap[note - 1];
                 ch.sample = m < s.samples.size() ? (int16_t)m : (int16_t)-1;
@@ -251,7 +254,7 @@ void Player::noteStart(int c) {
             ch.relNote = sm.relativeNote;
             if (ft2 && sm.hasPan) ch.pan = sm.pan;
         }
-        if (ft2) {
+        if (ft2 || useInstruments) {
             ch.keyOn = true;
             ch.fadeVol = 32768;
             ch.volEnvTick = ch.panEnvTick = 0;
@@ -305,7 +308,7 @@ void Player::noteStart(int c) {
     if (!(ch.tremWave & 4)) ch.tremPos = 0;
     ch.retrigCount = 0;
     ch.tremorPos = 0;
-    if (ft2) {
+    if (ft2 || useInstruments) {
         ch.keyOn = true;
         ch.fadeVol = 32768;
         ch.volEnvTick = ch.panEnvTick = 0;
@@ -320,7 +323,8 @@ void Player::updateOutputs(int c) {
     ch.envVol = 64;
     ch.envPan = 32;
     ch.avDelta = 0;
-    if (isFT2()) instrumentTick(c);
+    // envelopes, fadeout and autovibrato: FT2 songs, and ProTracker songs that were given instruments
+    if (isFT2() || (song_ && !song_->instruments.empty())) instrumentTick(c);
     int v = ch.volume + ch.volDelta;
     if (v < 0) v = 0;
     if (v > 64) v = 64;
