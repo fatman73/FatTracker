@@ -75,6 +75,7 @@ bool GmePlayer::detect(const uint8_t* d, size_t n) {
         gunzip(d, n, head, 64);
         return head.size() >= 16 && *gme_identify_header(head.data());
     }
+    if (std::memcmp(d, "ZXAY", 4) == 0 && std::memcmp(d + 4, "EMUL", 4) != 0) return false;  // ZXAYST11 etc.: not GME's
     const char* type = gme_identify_header(d);
     return type && *type;
 }
