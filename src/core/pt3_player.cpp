@@ -24,8 +24,8 @@
 //    pattern data is capped, the module is validated at load and the length dry run is capped;
 //  - the envelope period is Env_Base_hi * 256 + Env_Base_lo (the C# port reads a word at module offset
 //    Env_Base_lo, a porting slip; ayfly uses the two bytes as one word);
-//  - the "byte 0x62 is not a space" pattern renumbering is applied at every position change (as in ayfly),
-//    not only for the first position, and dropped when it would point outside the file;
+//  - the "byte 0x62 is not a space" pattern renumbering is applied to the first position at the start only,
+//    as PT3Play / ayfly do, and dropped when it would point outside the file;
 //  - TurboSound files (two modules for two AY chips, Vortex Tracker 2.5+) play the first module only;
 //  - register writes go to ayumi once per 50 Hz frame instead of to Bulba's AY emulator.
 #include "core/pt3_player.h"
@@ -153,8 +153,9 @@ struct Pt3Player::Impl {
             if (word((uint32_t)(table + c * 2)) >= mod.size()) return false;
         return true;
     }
-    void enterPosition(State& s, int pos) const {
-        const uint32_t table = (uint32_t)patternsPtr() + (uint32_t)patternIndex(pos, mirror) * 2;
+    // renumbered: the song start only (PT3Play / ayfly); every later position uses the plain numbers
+    void enterPosition(State& s, int pos, bool renumbered = false) const {
+        const uint32_t table = (uint32_t)patternsPtr() + (uint32_t)patternIndex(pos, renumbered && mirror) * 2;
         for (int c = 0; c < 3; ++c) s.ch[c].addr = word(table + (uint32_t)c * 2);
     }
 
@@ -439,7 +440,7 @@ struct Pt3Player::Impl {
         s = State{};
         s.delay = at(0x64);
         s.delayCounter = 1;
-        enterPosition(s, 0);
+        enterPosition(s, 0, true);
         Chan proto;
         setOrnament(proto, 0);
         setSample(proto, 1);
@@ -501,11 +502,8 @@ bool Pt3Player::load(const uint8_t* data, size_t size) {
             if (!m.positionOk(p, mir)) return false;
         return true;
     };
-    m.mirror = m.mod[0x62] != 0x20;
-    if (!allOk(m.mirror)) {
-        if (!m.mirror || !allOk(false)) return false;
-        m.mirror = false;
-    }
+    if (!allOk(false)) return false;  // every position must be valid with the plain numbers
+    m.mirror = m.mod[0x62] != 0x20 && m.positionOk(0, true);  // the renumbered start must be valid too
 
     auto field = [&](size_t from, size_t len) {
         std::string s;

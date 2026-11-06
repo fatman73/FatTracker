@@ -152,6 +152,27 @@ TEST(sidmon1_tiny_song_plays) { checkTinyPlays(tinySid1(), "SIDMON 1"); }
 
 TEST(sidmon2_tiny_song_plays) { checkTinyPlays(tinySid2(), "SIDMON 2"); }
 
+TEST(sidmon2_keeps_its_own_copy_of_the_file) {
+    // the loader's buffer is gone once the file is loaded: playback must not read it any more
+    auto render = [](AmigaSynthPlayer& p) {
+        std::vector<float> buf(4800 * 2), all;
+        for (int i = 0; i < 10; ++i) {
+            p.render(buf.data(), 4800, 0.45f);
+            all.insert(all.end(), buf.begin(), buf.end());
+        }
+        return all;
+    };
+    const auto f = tinySid2();
+    auto ref = AmigaSynthPlayer::open(f.data(), f.size());
+    std::vector<uint8_t> g = f;
+    auto p = AmigaSynthPlayer::open(g.data(), g.size());
+    CHECK(ref && p);
+    if (!ref || !p) return;
+    ref->setRate(48000), p->setRate(48000);
+    for (auto& b : g) b = 0x5A;  // the caller's buffer changes (or is freed)
+    CHECK(render(*ref) == render(*p));
+}
+
 TEST(sidmon_c64_sid_never_matches) {
     auto f = tinySid1();
     std::memcpy(f.data(), "PSID", 4);

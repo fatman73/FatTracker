@@ -100,8 +100,11 @@ bool g_pendingTfmx = false;
 std::vector<uint8_t> g_pendingMdat, g_pendingSmpl;
 char g_pendingName[21] = {};
 bool loadPending() { return g_pending || g_pendingTfmx; }
+// The playback-only player a file goes to; chosen once in loadTfmxPair (with trial loads), used by applyTfmx.
+enum class Chip { Tfmx, Sid, Pt3, Gme, Synth, Ay, Hippel };
+Chip g_pendingChip = Chip::Tfmx;
 bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
-               const std::wstring& mdatPath);
+               const std::wstring& mdatPath, Chip chip);
 void applyLoaded(std::unique_ptr<Song> song, const std::wstring& path, bool truncated);
 void finishPendingLoad();
 
@@ -167,26 +170,36 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
     const bool hippelName = named({L".fc", L".fc13", L".fc14", L".smod", L".hip", L".hipc", L".hip7", L".sog", L".mcmd", L".coso"});
     const bool hippelTag = data.size() >= 4 && (!std::memcmp(data.data(), "FC14", 4) || !std::memcmp(data.data(), "SMOD", 4) ||
                                                 !std::memcmp(data.data(), "COSO", 4) || !std::memcmp(data.data(), "MCMD", 4));
-    bool hippel = false;  // a one-file chip song (Hippel / FC, C64 SID, AY / YM, PT3) that really loads
+    // a one-file chip song that really loads; each format in turn, the first that loads wins
+    bool hippel = false;
+    Chip chip = Chip::Tfmx;
     if (!TfmxPlayer::detect(data.data(), data.size()) && mdatPath == path) {
-        if (SidPlayer::detect(data.data(), data.size())) {
+        const uint8_t* d = data.data();
+        const size_t n = data.size();
+        auto pick = [&](Chip c, bool loads) {
+            if (!hippel && loads) hippel = true, chip = c;
+        };
+        if (SidPlayer::detect(d, n)) {  // C64 PSID / RSID
             SidPlayer trial;
-            hippel = trial.load(data.data(), data.size());
-        } else if (Pt3Player::detect(data.data(), data.size())) {  // ZX Spectrum Pro Tracker 3 / Vortex Tracker II
-            Pt3Player trial;  // the "ProTracker 3." / "Vortex Tracker II" tag at the start, and it must load
-            hippel = trial.load(data.data(), data.size());
-        } else if (GmePlayer::detect(data.data(), data.size())) {  // SPC, VGM, SAP, AY, NSF, GBS, ...
-            GmePlayer trial;
-            hippel = trial.load(data.data(), data.size());
-        } else if (AmigaSynthPlayer::detect(data.data(), data.size())) {  // JamCracker, SidMon, SoundMon, Mugician, David Whittaker, ...
-            hippel = AmigaSynthPlayer::open(data.data(), data.size()) != nullptr;
-        } else if (AyPlayer::detect(data.data(), data.size())) {  // YM / VTX / PSG (LHA packed YM too)
-            AyPlayer trial;
-            hippel = trial.load(data.data(), data.size());
+            pick(Chip::Sid, trial.load(d, n));
         }
-        if (!hippel && (hippelName || hippelTag) && HippelPlayer::detect(data.data(), data.size())) {
+        if (!hippel && Pt3Player::detect(d, n)) {  // ZX Spectrum Pro Tracker 3 / Vortex Tracker II
+            Pt3Player trial;
+            pick(Chip::Pt3, trial.load(d, n));
+        }
+        if (!hippel && GmePlayer::detect(d, n)) {  // SPC, VGM, SAP, AY, NSF, GBS, ...
+            GmePlayer trial;
+            pick(Chip::Gme, trial.load(d, n));
+        }
+        if (!hippel && AmigaSynthPlayer::detect(d, n))  // JamCracker, Delta Music, SidMon, SoundMon, Mugician, Whittaker
+            pick(Chip::Synth, AmigaSynthPlayer::open(d, n) != nullptr);
+        if (!hippel && AyPlayer::detect(d, n)) {  // YM / VTX / PSG (LHA packed YM too)
+            AyPlayer trial;
+            pick(Chip::Ay, trial.load(d, n));
+        }
+        if (!hippel && (hippelName || hippelTag) && HippelPlayer::detect(d, n)) {  // FC / Jochen Hippel
             HippelPlayer trial;
-            hippel = trial.load(data.data(), data.size());
+            pick(Chip::Hippel, trial.load(d, n));
         }
     }
     if (!hippel && !TfmxPlayer::detect(data.data(), data.size())) return false;
@@ -206,6 +219,7 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
     const double wait = g_engine->floppyRead((uint32_t)(data.size() + smpl.size()));
     if (wait > 0.05) {
         g_pendingTfmx = true;
+        g_pendingChip = chip;
         g_pendingMdat = data;
         g_pendingSmpl = static_cast<std::vector<uint8_t>&&>(smpl);
         std::memcpy(g_pendingName, name, sizeof g_pendingName);
@@ -216,28 +230,24 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
         SetTimer(g_hwnd, kTimerFloppy, (UINT)(wait * 1000), nullptr);
         return true;
     }
-    applyTfmx(data, smpl, name, mdatPath);
+    applyTfmx(data, smpl, name, mdatPath, chip);
     return true;
 }
 
 bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
-               const std::wstring& mdatPath) {
-    const bool sid = smpl.empty() && SidPlayer::detect(mdat.data(), mdat.size());
-    AyPlayer ayTrial;
-    const bool ay = !sid && smpl.empty() && AyPlayer::detect(mdat.data(), mdat.size()) && ayTrial.load(mdat.data(), mdat.size());
-    Pt3Player pt3Trial;
-    const bool pt3 = !sid && !ay && smpl.empty() && Pt3Player::detect(mdat.data(), mdat.size()) &&
-                     pt3Trial.load(mdat.data(), mdat.size());
-    const bool synth = !sid && !ay && !pt3 && smpl.empty() && AmigaSynthPlayer::detect(mdat.data(), mdat.size());
-    const bool gme = !sid && !ay && !pt3 && !synth && smpl.empty() && GmePlayer::detect(mdat.data(), mdat.size());
-    const bool ok = sid    ? g_engine->loadSid(mdat.data(), mdat.size(), "", false)
-                    : pt3   ? g_engine->loadPt3(mdat.data(), mdat.size(), name, false)
-                    : gme   ? g_engine->loadGme(mdat.data(), mdat.size(), name, false)
-                    : synth ? g_engine->loadAmigaSynth(mdat.data(), mdat.size(), name, false)
-                    : ay ? g_engine->loadAy(mdat.data(), mdat.size(), name, false)
-                    : smpl.empty() && HippelPlayer::detect(mdat.data(), mdat.size())
-                        ? g_engine->loadHippel(mdat.data(), mdat.size(), name, false)
-                        : g_engine->loadTfmx(mdat.data(), mdat.size(), smpl.data(), smpl.size(), name, false);
+               const std::wstring& mdatPath, Chip chip) {
+    const uint8_t* d = mdat.data();
+    const size_t n = mdat.size();
+    bool ok = false;
+    switch (chip) {  // decided by loadTfmxPair's trial loads
+        case Chip::Sid: ok = g_engine->loadSid(d, n, "", false); break;
+        case Chip::Pt3: ok = g_engine->loadPt3(d, n, name, false); break;
+        case Chip::Gme: ok = g_engine->loadGme(d, n, name, false); break;
+        case Chip::Synth: ok = g_engine->loadAmigaSynth(d, n, name, false); break;
+        case Chip::Ay: ok = g_engine->loadAy(d, n, name, false); break;
+        case Chip::Hippel: ok = g_engine->loadHippel(d, n, name, false); break;
+        case Chip::Tfmx: ok = g_engine->loadTfmx(d, n, smpl.data(), smpl.size(), name, false); break;
+    }
     if (!ok) {
         g_screen.setStatus("CANNOT PLAY THIS FILE");
         return false;
@@ -340,7 +350,7 @@ void finishPendingLoad() {
     SetCursor(g_cursors.arrow());
     if (g_pendingTfmx) {
         g_pendingTfmx = false;
-        applyTfmx(g_pendingMdat, g_pendingSmpl, g_pendingName, g_pendingPath);
+        applyTfmx(g_pendingMdat, g_pendingSmpl, g_pendingName, g_pendingPath, g_pendingChip);
         g_pendingMdat.clear();
         g_pendingSmpl.clear();
     } else {

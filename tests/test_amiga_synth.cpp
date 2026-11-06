@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <string>
 #include <vector>
 
 #include "core/amiga_synth.h"
@@ -117,4 +119,34 @@ TEST(amiga_synth_real_modules_play) {
         ++n;
     }
     std::printf("  amiga synth: %d modules\n", n);
+}
+
+TEST(amiga_synth_players_keep_their_own_data) {
+    // every ported replayer must copy what it reads while playing: the loader's buffer goes away after load
+    const std::filesystem::path dir = std::filesystem::path(FT_SOURCE_DIR) / "modules";
+    if (!std::filesystem::exists(dir)) return;
+    std::map<std::string, int> perFormat;
+    for (const auto& e : std::filesystem::recursive_directory_iterator(dir)) {
+        if (!e.is_regular_file() || e.file_size() > (2u << 20)) continue;
+        std::ifstream in(e.path(), std::ios::binary);
+        std::vector<uint8_t> d((std::istreambuf_iterator<char>(in)), {});
+        if (!AmigaSynthPlayer::detect(d.data(), d.size())) continue;
+        auto ref = AmigaSynthPlayer::open(d.data(), d.size());
+        if (ref && ++perFormat[ref->format()] > 5) continue;  // a few of each format
+        std::vector<uint8_t> g = d;
+        auto p = AmigaSynthPlayer::open(g.data(), g.size());
+        if (!ref || !p) continue;
+        ref->setRate(22050), p->setRate(22050);
+        for (auto& b : g) b = 0x5A;
+        std::vector<float> a(2205 * 2), b(2205 * 2);
+        bool same = true;
+        for (int i = 0; i < 20 && same; ++i) {
+            ref->render(a.data(), 2205, 0.45f);
+            p->render(b.data(), 2205, 0.45f);
+            same = a == b;
+        }
+        if (!same) std::printf("  reads the caller's buffer: %s\n", e.path().filename().string().c_str());
+        CHECK(same);
+    }
+    for (const auto& f : perFormat) std::printf("  own data: %s (%d)\n", f.first.c_str(), f.second);
 }

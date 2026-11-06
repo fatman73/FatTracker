@@ -84,6 +84,8 @@ struct Block {
 class SidMon2 : public AmigaSynthPlayer {
 public:
     bool load(const uint8_t* d, size_t n) {
+        file_.assign(d, d + n);  // tracks are read from the file while playing: keep our own copy
+        d = file_.data();
         d_ = d;
         n_ = n;
         // song data (LoadSongData)
@@ -229,7 +231,8 @@ protected:
     }
 
 private:
-    const uint8_t* d_ = nullptr;
+    std::vector<uint8_t> file_;
+    const uint8_t* d_ = nullptr;  // = file_.data()
     size_t n_ = 0;
     int positions_ = 0;
     uint8_t startSpeed_ = 0;
