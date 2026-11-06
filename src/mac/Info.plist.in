@@ -15,6 +15,102 @@
     <key>NSHighResolutionCapable</key>       <true/>
     <key>NSPrincipalClass</key>              <string>NSApplication</string>
     <key>NSHumanReadableCopyright</key>      <string>Copyright 2026 fatman73. GNU GPL v2 or later.</string>
-    <key>NSMicrophoneUsageDescription</key>  <string>FatTracker records samples from the audio input.</string>
+    <key>NSMicrophoneUsageDescription</key>  <string>FatTracker records samples from the audio input (SAMPLER, SAMPLE).</string>
+    <key>CFBundleIconFile</key>              <string>FatTracker</string>
+    <key>LSApplicationCategoryType</key>     <string>public.app-category.music</string>
+    <!-- "Open With" for tracker modules and chip songs; Alternate: FatTracker never takes over a file type -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>      <string>Tracker module or chip song</string>
+            <key>CFBundleTypeRole</key>      <string>Editor</string>
+            <key>LSHandlerRank</key>         <string>Alternate</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>mod</string>
+                <string>xm</string>
+                <string>s3m</string>
+                <string>it</string>
+                <string>mtm</string>
+                <string>669</string>
+                <string>stk</string>
+                <string>med</string>
+                <string>mmd0</string>
+                <string>mmd1</string>
+                <string>mmd2</string>
+                <string>mmd3</string>
+                <string>dbm</string>
+                <string>digi</string>
+                <string>symmod</string>
+                <string>fc</string>
+                <string>fc13</string>
+                <string>fc14</string>
+                <string>smod</string>
+                <string>hip</string>
+                <string>hipc</string>
+                <string>hip7</string>
+                <string>sog</string>
+                <string>mcmd</string>
+                <string>coso</string>
+                <string>sid</string>
+                <string>psid</string>
+                <string>rsid</string>
+                <string>sndh</string>
+                <string>sc68</string>
+                <string>ymst</string>
+                <string>ahx</string>
+                <string>thx</string>
+                <string>hvl</string>
+                <string>ym</string>
+                <string>vtx</string>
+                <string>psg</string>
+                <string>jam</string>
+                <string>spc</string>
+                <string>vgm</string>
+                <string>vgz</string>
+                <string>gym</string>
+                <string>sap</string>
+                <string>ay</string>
+                <string>nsf</string>
+                <string>nsfe</string>
+                <string>gbs</string>
+                <string>hes</string>
+                <string>kss</string>
+                <string>dm</string>
+                <string>dm1</string>
+                <string>dm2</string>
+                <string>sid1</string>
+                <string>sid2</string>
+                <string>sd1</string>
+                <string>sd2</string>
+                <string>smn</string>
+                <string>bp</string>
+                <string>bp2</string>
+                <string>bp3</string>
+                <string>sndmon</string>
+                <string>dmu</string>
+                <string>dmu2</string>
+                <string>mug</string>
+                <string>mug2</string>
+                <string>pt3</string>
+                <string>pt2</string>
+                <string>stc</string>
+                <string>st11</string>
+                <string>st13</string>
+                <string>asc</string>
+                <string>sqt</string>
+                <string>dw</string>
+                <string>dwold</string>
+                <string>smus</string>
+                <string>sa</string>
+                <string>sonic</string>
+                <string>aon</string>
+                <string>aon4</string>
+                <string>aon8</string>
+                <string>mdat</string>
+                <string>tfx</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

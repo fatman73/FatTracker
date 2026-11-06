@@ -69,7 +69,12 @@ set(FT_MAC_APP_SOURCES src/mac/main_mac.mm src/mac/app_glue.cpp src/mac/keymap_m
     src/platform/os_posix.cpp src/app/chip_route.cpp src/app/shot.cpp src/app/app_logic.cpp src/app/document.cpp
     src/mac/capture_mac.mm src/mac/trash_mac.mm src/audio/engine.cpp)
 configure_file(src/mac/Info.plist.in ${CMAKE_BINARY_DIR}/Info.plist @ONLY)
-add_executable(FatTracker MACOSX_BUNDLE ${FT_UI_SOURCES} ${FT_MAC_APP_SOURCES})
+# bundle resources: icon (tools/make_icon_mac.swift), licence and credits (GPL: the sources are on GitHub),
+# the drive-sounds README (the user's own WAVs go to Application Support/FatTracker/sounds)
+set(FT_MAC_RESOURCES res/FatTracker.icns LICENSE CREDITS.txt)
+set_source_files_properties(${FT_MAC_RESOURCES} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+set_source_files_properties(sounds/README.txt PROPERTIES MACOSX_PACKAGE_LOCATION Resources/sounds)
+add_executable(FatTracker MACOSX_BUNDLE ${FT_UI_SOURCES} ${FT_MAC_APP_SOURCES} ${FT_MAC_RESOURCES} sounds/README.txt)
 set_target_properties(FatTracker PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${CMAKE_BINARY_DIR}/Info.plist)
 target_include_directories(FatTracker PRIVATE src)
 target_compile_options(FatTracker PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
