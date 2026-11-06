@@ -13,7 +13,10 @@ struct SidPlayer::Impl {
     cRSID_C64instance* c64 = nullptr;
     std::vector<uint8_t> file;  // cRSID keeps a pointer to the header: the data stays here
     cRSID_SIDheader* header = nullptr;
-    uint32_t rate = 48000;
+    static constexpr uint32_t kEmuRate = 44100;  // cRSID keeps rates in 16 bits and tunes its filter for 44.1 kHz
+    uint32_t rate = 48000;                      // device rate: render() resamples to it
+    double phase = 1.0;
+    float prev = 0, cur = 0;
     int subtune = 0;
     int voices = 3;
     char format[32] = "C64 SID";
@@ -30,7 +33,9 @@ struct SidPlayer::Impl {
     }
     bool start() {  // (re)build the C64 at the current rate and init the tune
         release();
-        c64 = cRSID_init((unsigned short)rate, 0);
+        c64 = cRSID_init((unsigned short)kEmuRate, 0);
+        phase = 1.0;
+        prev = cur = 0;
         if (!c64) return false;
         header = cRSID_processSIDfile(c64, file.data(), (int)file.size());
         if (!header) return false;
@@ -82,12 +87,7 @@ void SidPlayer::restart() {
     if (impl_->c64) impl_->start();
 }
 
-void SidPlayer::setRate(uint32_t hz) {
-    hz = hz ? hz : 48000;
-    if (hz == impl_->rate) return;
-    impl_->rate = hz;
-    if (impl_->c64) impl_->start();
-}
+void SidPlayer::setRate(uint32_t hz) { impl_->rate = hz ? hz : 48000; }  // the emulation itself stays at 44.1 kHz
 
 void SidPlayer::clearMeters() {
     std::memset(impl_->vu, 0, sizeof impl_->vu);
@@ -98,8 +98,15 @@ void SidPlayer::render(float* out, uint32_t frames, float gain) {
     std::memset(out, 0, sizeof(float) * 2 * frames);
     Impl& m = *impl_;
     if (!m.c64) return;
+    const double step = (double)Impl::kEmuRate / m.rate;
     for (uint32_t f = 0; f < frames; ++f) {
-        const float s = cRSID_generateSample(m.c64) / 32768.f;
+        while (m.phase >= 1.0) {  // linear interpolation between emulator samples
+            m.prev = m.cur;
+            m.cur = cRSID_generateSample(m.c64) / 32768.f;
+            m.phase -= 1.0;
+        }
+        const float s = m.prev + (m.cur - m.prev) * (float)m.phase;
+        m.phase += step;
         out[2 * f] = out[2 * f + 1] = s * gain * 1.6f;
         m.scope[(m.scopePos + f) & (kScopeLen - 1)] = s * 2.f;
     }

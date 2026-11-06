@@ -121,3 +121,22 @@ TEST(sid_real_tunes_play) {
     }
     std::printf("  c64 sid: %d tunes\n", n);
 }
+
+TEST(sid_pitch_does_not_depend_on_the_device_rate) {
+    // cRSID keeps its rate in 16 bits: 96 kHz must not wrap into a slow, low tune
+    const auto f = tinyPsid();
+    auto crossings = [&](uint32_t rate) {
+        SidPlayer p;
+        p.setRate(rate);
+        p.load(f.data(), f.size());
+        std::vector<float> buf((size_t)rate * 2);
+        p.render(buf.data(), rate, 0.45f);  // one second
+        int n = 0;
+        for (uint32_t i = 1; i < rate; ++i)
+            if (buf[2 * (i - 1)] < 0 && buf[2 * i] >= 0) ++n;
+        return n;
+    };
+    const int at48 = crossings(48000), at96 = crossings(96000);
+    CHECK(at48 > 50);
+    CHECK_NEAR((double)at96, (double)at48, at48 * 0.05 + 2);
+}

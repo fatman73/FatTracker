@@ -7,7 +7,10 @@
 
 #include "core/floppy.h"
 #include "core/song.h"
+#include "core/amiga_synth.h"
 #include "core/ay_player.h"
+#include "core/pt3_player.h"
+#include "core/gme_player.h"
 #include "core/hippel_player.h"
 #include "core/sid_player.h"
 #include "core/tfmx_player.h"
@@ -159,6 +162,32 @@ bool Engine::loadSid(const uint8_t* data, size_t size, const char* name, bool pl
 
 bool Engine::loadAy(const uint8_t* data, size_t size, const char* name, bool play) {
     AyPlayer* p = new AyPlayer;
+    p->setRate(mixer_->rate());
+    if (!p->load(data, size)) {
+        delete p;
+        return false;
+    }
+    return installChip(p, *p->title() ? p->title() : name, play);
+}
+
+bool Engine::loadPt3(const uint8_t* data, size_t size, const char* name, bool play) {
+    Pt3Player* p = new Pt3Player;
+    p->setRate(mixer_->rate());
+    if (!p->load(data, size)) {
+        delete p;
+        return false;
+    }
+    return installChip(p, *p->title() ? p->title() : name, play);
+}
+
+bool Engine::loadAmigaSynth(const uint8_t* data, size_t size, const char* name, bool play) {
+    std::unique_ptr<AmigaSynthPlayer> p = AmigaSynthPlayer::open(data, size);
+    if (!p) return false;
+    return installChip(p.release(), name, play);
+}
+
+bool Engine::loadGme(const uint8_t* data, size_t size, const char* name, bool play) {
+    GmePlayer* p = new GmePlayer;
     p->setRate(mixer_->rate());
     if (!p->load(data, size)) {
         delete p;
