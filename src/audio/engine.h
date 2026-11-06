@@ -7,6 +7,7 @@
 #include "audio/audio_out.h"
 #include "core/amiga_synth.h"
 #include "core/song.h"
+#include "platform/lock.h"
 
 class Mixer;
 class Player;
@@ -140,7 +141,7 @@ private:
     void songEdited();
     void resetPlayer();  // stops playback and drops every voice (lock held)
 
-    void* srw_;  // SRWLOCK storage (pointer-sized)
+    mutable EngineLock lock_;  // shared by the audio thread (render) and the UI
     std::unique_ptr<Song> song_;
     Mixer* mixer_;
     Player* player_;
@@ -152,8 +153,10 @@ private:
     int pure_ = 0;
     float driveGain_ = 0.7f;
     AudioOut audio_;
+#ifdef _WIN32
     DeviceWatcher watcher_;
     IMMDeviceEnumerator* watchEnum_ = nullptr;  // keeps the watcher registered
+#endif
     bool audioWanted_ = false;
     bool reopenRequested_ = false;
     uint32_t openCount_ = 0;

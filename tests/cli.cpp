@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 
+#include "compat.h"  // fopen_s outside Windows
 #include "core/render.h"
 #include "formats/formats.h"
 #include "formats/wav.h"

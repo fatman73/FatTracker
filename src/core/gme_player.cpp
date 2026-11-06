@@ -10,13 +10,22 @@
 #include "core/inflate.h"
 #include "core/song.h"
 
+#if defined(_MSC_VER)
 #pragma warning(push, 1)  // Game_Music_Emu's own headers (built with /W1)
+#elif defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+#endif
 #include "core/gme/Effects_Buffer.h"
 #include "core/gme/Music_Emu.h"
 #include "core/gme/Spc_Emu.h"
 #include "core/gme/Vgm_Emu.h"
 #include "core/gme/Voice_Tap_Buffer.h"
+#if defined(_MSC_VER)
 #pragma warning(pop)
+#elif defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 namespace {
 // The emulators built on Classic_Emu (Blip_Buffer voices): their voices can be given buffers of their own.

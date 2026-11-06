@@ -101,6 +101,18 @@ bool isPlainFileName(const std::string& name) {
 }
 
 namespace {
+// Names equal ignoring ASCII case (what _wcsicmp does in the "C" locale), on every platform.
+bool equalNoCase(const std::wstring& a, const std::wstring& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        wchar_t ca = a[i], cb = b[i];
+        if (ca >= L'A' && ca <= L'Z') ca += 32;
+        if (cb >= L'A' && cb <= L'Z') cb += 32;
+        if (ca != cb) return false;
+    }
+    return true;
+}
+
 // The regular file in `dir` whose name is `want` (exactly, else ignoring case), read when it is at most `maxBytes`.
 bool readFromFolder(const std::filesystem::path& dir, const std::wstring& want, size_t maxBytes, std::vector<uint8_t>& out) {
     std::error_code ec;
@@ -111,7 +123,7 @@ bool readFromFolder(const std::filesystem::path& dir, const std::wstring& want, 
     for (int guard = 0; it != std::filesystem::directory_iterator() && guard < 100000; ++guard) {
         const std::wstring name = it->path().filename().wstring();
         const bool same = name == want;
-        if ((same || _wcsicmp(name.c_str(), want.c_str()) == 0) && it->is_regular_file(ec) && !ec) {
+        if ((same || equalNoCase(name, want)) && it->is_regular_file(ec) && !ec) {
             if (same || found.empty()) found = it->path();
             exact = exact || same;
             if (exact) break;

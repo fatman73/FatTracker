@@ -191,6 +191,7 @@ int ft_sndh_int_ack(int int_level);
 #ifndef M68K_TRAP_HAS_CALLBACK
 #define M68K_TRAP_HAS_CALLBACK  	M68K_OPT_SPECIFY_HANDLER
 #define M68K_TRAP_CALLBACK(trap)	ft_sndh_trap(trap)  /* FatTracker: minimal TOS (GEMDOS / BIOS / XBIOS) */
+int ft_sndh_trap(int trap);  /* FatTracker: declared like ft_sndh_int_ack (C99 has no implicit declarations) */
 #endif
 
 /* If ON, CPU will call the set fc callback on every memory access to

@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstdio>
 
+#include "compat.h"  // MSVC CRT shims outside Windows
+
 namespace ftest {
 using Fn = void (*)();
 struct Reg {

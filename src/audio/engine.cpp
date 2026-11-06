@@ -1,7 +1,9 @@
 #include "audio/engine.h"
 
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#endif
 
 #include <cstring>
 
@@ -21,19 +23,17 @@
 #include "core/mixer.h"
 #include "core/player.h"
 
-static_assert(sizeof(SRWLOCK) == sizeof(void*), "SRWLOCK storage");
-#define SRW reinterpret_cast<PSRWLOCK>(const_cast<void**>(&srw_))
-
-Engine::Engine() : srw_(nullptr), mixer_(new Mixer(48000)), player_(new Player(*mixer_)), floppy_(new Floppy), tfmx_(new TfmxPlayer) {
-    InitializeSRWLock(SRW);
+Engine::Engine() : mixer_(new Mixer(48000)), player_(new Player(*mixer_)), floppy_(new Floppy), tfmx_(new TfmxPlayer) {
     tel_.rate = 48000;
 }
 
 Engine::~Engine() {
+#ifdef _WIN32
     if (watchEnum_) {
         watchEnum_->UnregisterEndpointNotificationCallback(&watcher_);
         watchEnum_->Release();
     }
+#endif
     audio_.close();
     delete player_;
     delete mixer_;
@@ -43,6 +43,7 @@ Engine::~Engine() {
 
 bool Engine::startAudio() {
     audioWanted_ = true;
+#ifdef _WIN32
     if (!watchEnum_ &&
         SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
                                    __uuidof(IMMDeviceEnumerator), (void**)&watchEnum_)) &&
@@ -50,6 +51,7 @@ bool Engine::startAudio() {
         watchEnum_->Release();
         watchEnum_ = nullptr;
     }
+#endif
     const bool ok = audio_.open(&Engine::audioCallback, this);
     if (ok) ++openCount_;
     return ok;
@@ -57,7 +59,11 @@ bool Engine::startAudio() {
 
 void Engine::pollAudio() {
     if (!audioWanted_) return;
+#ifdef _WIN32
     const bool changed = watcher_.takeChange() || reopenRequested_;
+#else
+    const bool changed = audio_.takeDeviceChange() || reopenRequested_;  // the device watch lives in AudioOut
+#endif
     reopenRequested_ = false;
     if (changed || !audio_.isOpen() || audio_.lost()) {
         audio_.close();
@@ -73,17 +79,17 @@ const char* Engine::audioStatus() const {
 void Engine::audioCallback(void* user, float* out, uint32_t frames, uint32_t rate) {
     Engine* e = static_cast<Engine*>(user);
     if (e->mixer_->rate() != rate) {
-        AcquireSRWLockExclusive(reinterpret_cast<PSRWLOCK>(&e->srw_));
+        e->lock_.lock();
         e->mixer_->setRate(rate);
         e->floppy_->setRate(rate);
         e->tfmx_->setRate(rate);
-        ReleaseSRWLockExclusive(reinterpret_cast<PSRWLOCK>(&e->srw_));
+        e->lock_.unlock();
     }
     e->render(out, frames);
 }
 
-void Engine::lock() { AcquireSRWLockExclusive(SRW); }
-void Engine::unlock() { ReleaseSRWLockExclusive(SRW); }
+void Engine::lock() { lock_.lock(); }
+void Engine::unlock() { lock_.unlock(); }
 
 void Engine::setSong(std::unique_ptr<Song> s) {
     lock();
@@ -274,16 +280,16 @@ bool Engine::installChip(ChipPlayer* p, const char* name, bool play) {
 const char* Engine::tfmxFormat() const { return tfmxOn_ ? tfmx_->format() : ""; }
 
 int Engine::chipSubsongs() const {
-    AcquireSRWLockShared(SRW);
+    lock_.lockShared();
     const int n = tfmxOn_ ? tfmx_->subsongs() : 0;
-    ReleaseSRWLockShared(SRW);
+    lock_.unlockShared();
     return n;
 }
 
 int Engine::chipSubsong() const {
-    AcquireSRWLockShared(SRW);
+    lock_.lockShared();
     const int i = tfmxOn_ ? tfmx_->subsong() : 0;
-    ReleaseSRWLockShared(SRW);
+    lock_.unlockShared();
     return i;
 }
 
@@ -464,7 +470,7 @@ void Engine::snapshot(Telemetry& out) const {
     for (;;) {
         uint32_t s1 = seq_.load(std::memory_order_acquire);
         if (s1 & 1) {
-            YieldProcessor();
+            cpuRelax();
             continue;
         }
         std::memcpy(&out, (const void*)&tel_, sizeof out);
@@ -474,8 +480,8 @@ void Engine::snapshot(Telemetry& out) const {
 }
 
 void Engine::scope(int ch, float* dst, int n) const {
-    AcquireSRWLockShared(SRW);
+    lock_.lockShared();
     if (tfmxOn_) tfmx_->scope(ch, dst, n);
     else mixer_->scope(ch, dst, n);
-    ReleaseSRWLockShared(SRW);
+    lock_.unlockShared();
 }
