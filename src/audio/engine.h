@@ -11,6 +11,7 @@ class Mixer;
 class Player;
 class Floppy;
 class TfmxPlayer;
+class ChipPlayer;
 struct Sample;
 
 struct ChannelTelemetry {
@@ -65,7 +66,9 @@ public:
     // TFMX (Huelsbeck) songs have their own player; the Song becomes an empty placeholder.
     bool loadTfmx(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl, size_t smplSize, const char* name,
                   bool play);  // play = start at once (else PLAY starts it)
-    bool tfmx() const { return tfmxOn_; }
+    // Future Composer / Jochen Hippel: one file, playback only like TFMX
+    bool loadHippel(const uint8_t* data, size_t size, const char* name, bool play);
+    bool tfmx() const { return tfmxOn_; }  // a playback-only chip song (TFMX, FC, Hippel) is loaded
     const char* tfmxFormat() const;
 
     void lock();    // exclusive, for edits from the UI
@@ -110,7 +113,8 @@ private:
     Mixer* mixer_;
     Player* player_;
     Floppy* floppy_;
-    TfmxPlayer* tfmx_;
+    ChipPlayer* tfmx_;  // the playback-only player (TFMX, Hippel)
+    bool installChip(ChipPlayer* p, const char* name, bool play);
     bool tfmxOn_ = false, tfmxPlaying_ = false;
     int pure_ = 0;
     float driveGain_ = 0.7f;

@@ -14,7 +14,10 @@ file(GLOB FT_CORE_SOURCES CONFIGURE_DEPENDS src/core/*.cpp src/formats/*.cpp)
 # TFMX decoder adapted from libtfmxaudiodecoder (GPL v2+), see src/core/tfmx/README.txt
 file(GLOB FT_TFMX_SOURCES CONFIGURE_DEPENDS src/core/tfmx/*.cpp)
 set_source_files_properties(${FT_TFMX_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
-add_library(ftcore STATIC ${FT_CORE_SOURCES} ${FT_TFMX_SOURCES})
+# Jochen Hippel / Future Composer decoder from libtfmxaudiodecoder (GPL v2+), see src/core/hippel/README.txt
+file(GLOB FT_HIPPEL_SOURCES CONFIGURE_DEPENDS src/core/hippel/*.cpp)
+set_source_files_properties(${FT_HIPPEL_SOURCES} PROPERTIES COMPILE_OPTIONS "/W1")
+add_library(ftcore STATIC ${FT_CORE_SOURCES} ${FT_TFMX_SOURCES} ${FT_HIPPEL_SOURCES})
 target_include_directories(ftcore PUBLIC src)
 
 # Windows-specific modules shared by the app and the test runner

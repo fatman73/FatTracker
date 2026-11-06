@@ -7,6 +7,7 @@
 
 #include "core/floppy.h"
 #include "core/song.h"
+#include "core/hippel_player.h"
 #include "core/tfmx_player.h"
 #include "core/mixer.h"
 #include "core/player.h"
@@ -132,8 +133,21 @@ bool Engine::loadTfmx(const uint8_t* mdat, size_t mdatSize, const uint8_t* smpl,
         delete p;
         return false;
     }
+    return installChip(p, name, play);
+}
+
+bool Engine::loadHippel(const uint8_t* data, size_t size, const char* name, bool play) {
+    HippelPlayer* p = new HippelPlayer;
+    if (!p->load(data, size)) {
+        delete p;
+        return false;
+    }
+    return installChip(p, name, play);
+}
+
+bool Engine::installChip(ChipPlayer* p, const char* name, bool play) {
     auto song = std::make_unique<Song>(makeEmptySong(4));
-    p->buildDisplay(*song);  // the TFMX tracks as patterns for the screen (playback only)
+    p->buildDisplay(*song);  // what the pattern view shows (playback only)
     for (int i = 0; i < 20 && name && name[i]; ++i) song->name[i] = name[i];
     setSong(static_cast<std::unique_ptr<Song>&&>(song));
     lock();
@@ -279,13 +293,13 @@ void Engine::publish() {
         // the display song has one 64-row pattern per 64 ticks, in order
         const int tick = tfmx_->tick();
         const int pats = song_ && !song_->patterns.empty() ? (int)song_->patterns.size() : 1;
-        int pat = tick / TfmxPlayer::kDisplayRows;
+        int pat = tick / ChipPlayer::kDisplayRows;
         if (pat >= pats) pat = pats - 1;
         tel_.order = tel_.pattern = (uint16_t)pat;
-        tel_.row = (uint16_t)(tick / TfmxPlayer::kDisplayRows >= pats ? TfmxPlayer::kDisplayRows - 1 : tick % TfmxPlayer::kDisplayRows);
+        tel_.row = (uint16_t)(tick / ChipPlayer::kDisplayRows >= pats ? ChipPlayer::kDisplayRows - 1 : tick % ChipPlayer::kDisplayRows);
     }
     for (int c = 0; c < 32; ++c) {
-        tel_.ch[c].vu = tfmxOn_ ? (c < TfmxPlayer::kMaxVoices ? tfmx_->vu(c) : 0.f) : mixer_->vu(c);
+        tel_.ch[c].vu = tfmxOn_ ? (c < ChipPlayer::kMaxVoices ? tfmx_->vu(c) : 0.f) : mixer_->vu(c);
         tel_.ch[c].active = mixer_->active(c);
         tel_.ch[c].muted = player_->channel(c).muted;
     }

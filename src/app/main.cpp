@@ -11,6 +11,7 @@
 #include "formats/formats.h"
 #include "audio/capture.h"
 #include "core/sample_edit.h"
+#include "core/hippel_player.h"
 #include "core/tfmx_player.h"
 #include "formats/sample_io.h"
 #include "ui/cursor.h"
@@ -147,13 +148,16 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
     else if (hasSuffix(L".smpl")) mdatPath = swapExt(path, 5, L".mdat");
     else if (hasSuffix(L".sam")) mdatPath = swapExt(path, 4, L".tfx");
     if (mdatPath != path && readFileW(mdatPath.c_str(), data)) return false;
-    if (!TfmxPlayer::detect(data.data(), data.size())) return false;
+    // Future Composer / Jochen Hippel: one file with song and samples, played like TFMX
+    const bool hippel = !TfmxPlayer::detect(data.data(), data.size()) && mdatPath == path &&
+                        HippelPlayer::detect(data.data(), data.size());
+    if (!hippel && !TfmxPlayer::detect(data.data(), data.size())) return false;
     const std::wstring mfile = mdatPath.substr(slash == std::wstring::npos ? 0 : slash + 1);
     if (!_wcsnicmp(mfile.c_str(), L"mdat.", 5)) smplPath = dir + L"smpl." + mfile.substr(5);
     else if (mfile.size() > 5 && !_wcsicmp(mfile.c_str() + mfile.size() - 5, L".mdat")) smplPath = swapExt(mdatPath, 5, L".smpl");
     else if (mfile.size() > 4 && !_wcsicmp(mfile.c_str() + mfile.size() - 4, L".tfx")) smplPath = swapExt(mdatPath, 4, L".sam");
     std::vector<uint8_t> smpl;
-    if (smplPath.empty() || readFileW(smplPath.c_str(), smpl)) {
+    if (!hippel && (smplPath.empty() || readFileW(smplPath.c_str(), smpl))) {
         g_screen.setStatus("TFMX: SMPL FILE NOT FOUND NEXT TO MDAT");
         return true;
     }
@@ -180,8 +184,11 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
 
 bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
                const std::wstring& mdatPath) {
-    if (!g_engine->loadTfmx(mdat.data(), mdat.size(), smpl.data(), smpl.size(), name, false)) {
-        g_screen.setStatus("TFMX: CANNOT PLAY THIS FILE");
+    const bool ok = smpl.empty() && HippelPlayer::detect(mdat.data(), mdat.size())
+                        ? g_engine->loadHippel(mdat.data(), mdat.size(), name, false)
+                        : g_engine->loadTfmx(mdat.data(), mdat.size(), smpl.data(), smpl.size(), name, false);
+    if (!ok) {
+        g_screen.setStatus("CANNOT PLAY THIS FILE");
         return false;
     }
     g_screen.songChanged();
@@ -400,7 +407,7 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;*.sog;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;
