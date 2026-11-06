@@ -20,6 +20,7 @@
 #include "core/pt3_player.h"
 #include "core/sid_player.h"
 #include "core/sndh_player.h"
+#include "core/sc68_player.h"
 #include "core/tfmx_player.h"
 #include "formats/sample_io.h"
 #include "ui/cursor.h"
@@ -104,7 +105,7 @@ std::vector<uint8_t> g_pendingMdat, g_pendingSmpl;
 char g_pendingName[21] = {};
 bool loadPending() { return g_pending || g_pendingTfmx; }
 // The playback-only player a file goes to; chosen once in loadTfmxPair (with trial loads), used by applyTfmx.
-enum class Chip { Tfmx, Sid, Pt3, Gme, Synth, SynthFiles, Ay, Hippel, Sndh };  // SynthFiles: with companion files
+enum class Chip { Tfmx, Sid, Pt3, Gme, Synth, SynthFiles, Ay, Hippel, Sndh, Sc68 };  // SynthFiles: with companion files
 Chip g_pendingChip = Chip::Tfmx;
 bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smpl, const char* name,
                const std::wstring& mdatPath, Chip chip);
@@ -145,6 +146,24 @@ void loadFloppySounds() {
 AmigaFileResolver songFolderFiles(const std::wstring& songPath) {
     const size_t slash = songPath.find_last_of(L"\\/");
     return folderFileResolver(slash == std::wstring::npos ? L"." : songPath.substr(0, slash + 1));
+}
+
+// External replays of SC68 / YMST tunes: plain file names (no paths) in the song's folder, its Replay subfolder
+// or the Replay folder next to the exe.
+AmigaFileResolver replayFiles(const std::wstring& songPath) {
+    const size_t slash = songPath.find_last_of(L"\\/");
+    const std::wstring dir = slash == std::wstring::npos ? L".\\" : songPath.substr(0, slash + 1);
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    const std::wstring exeDir = std::wstring(exe).substr(0, std::wstring(exe).find_last_of(L'\\') + 1);
+    const AmigaFileResolver in[3] = {folderFileResolver(dir), folderFileResolver(dir + L"Replay"),
+                                     folderFileResolver(exeDir + L"Replay")};
+    return [in](const std::string& name, std::vector<uint8_t>& out) {
+        if (!isPlainFileName(name)) return false;
+        for (const AmigaFileResolver& r : in)
+            if (r(name, out)) return true;
+        return false;
+    };
 }
 
 // TFMX songs are two files: mdat.<name> (song) and smpl.<name> (samples), or .mdat/.smpl, .tfx/.sam.
@@ -196,6 +215,19 @@ bool loadTfmxPair(const std::wstring& path, std::vector<uint8_t>& data) {
         if (!hippel && SndhPlayer::detect(d, n)) {  // Atari ST SNDH (its 68000 player; ICE! packed too)
             SndhPlayer trial;
             pick(Chip::Sndh, trial.load(d, n));
+        }
+        if (!hippel && (Sc68Player::detect(d, n) || Sc68Player::detectYmst(d, n))) {  // Atari ST SC68 / YMST
+            Sc68Player trial;
+            std::string err;
+            if (!trial.load(d, n, replayFiles(path), -1, &err)) {  // e.g. its external replay is missing
+                static char msg[100];
+                std::snprintf(msg, sizeof msg, "%s", err.c_str());
+                for (char* c = msg; *c; ++c) *c = (unsigned char)*c < 127 ? (char)toupper((unsigned char)*c) : '_';
+                g_screen.setStatus(msg);
+                g_engine->floppyDir();
+                return true;
+            }
+            pick(Chip::Sc68, true);
         }
         if (!hippel && Pt3Player::detect(d, n)) {  // ZX Spectrum Pro Tracker 3 / Vortex Tracker II
             Pt3Player trial;
@@ -273,6 +305,7 @@ bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smp
         case Chip::SynthFiles: ok = g_engine->loadAmigaSynth(d, n, songFolderFiles(mdatPath), name, false); break;
         case Chip::Ay: ok = g_engine->loadAy(d, n, name, false); break;
         case Chip::Sndh: ok = g_engine->loadSndh(d, n, name, false); break;
+        case Chip::Sc68: ok = g_engine->loadSc68(d, n, replayFiles(mdatPath), name, false); break;
         case Chip::Hippel: ok = g_engine->loadHippel(d, n, name, false); break;
         case Chip::Tfmx: ok = g_engine->loadTfmx(d, n, smpl.data(), smpl.size(), name, false); break;
     }
@@ -498,7 +531,7 @@ void openFileDialog(HWND hwnd) {
         wchar_t file[MAX_PATH] = {};
         OPENFILENAMEW ofn = {sizeof ofn};
         ofn.hwndOwner = hwnd;
-        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.sndh;sndh.*;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.dw;*.dwold;dw.*;dwold.*;*.smus;smus.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
+        ofn.lpstrFilter = L"Modules\0*.mod;*.xm;*.s3m;*.it;*.mtm;*.669;*.fc;*.fc13;*.fc14;*.smod;fc.*;smod.*;*.hip;*.hipc;*.hip7;hip.*;hipc.*;hip7.*;*.sog;sog.*;*.mcmd;mcmd.*;*.coso;coso.*;*.sid;*.psid;*.rsid;*.sndh;sndh.*;*.sc68;*.ymst;*.ym;*.vtx;*.psg;*.jam;jam.*;*.spc;*.vgm;*.vgz;*.gym;*.sap;*.ay;*.nsf;*.nsfe;*.gbs;*.hes;*.kss;*.dm;*.dm1;*.dm2;dm.*;dm1.*;dm2.*;*.sid1;*.sid2;*.sd1;*.sd2;*.smn;sid.*;sid1.*;sid2.*;smn.*;*.bp;*.bp2;*.bp3;*.sndmon;bp.*;bp2.*;bp3.*;sndmon.*;*.dmu;*.dmu2;*.mug;*.mug2;dmu.*;dmu2.*;mug.*;mug2.*;*.pt3;pt3.*;*.dw;*.dwold;dw.*;dwold.*;*.smus;smus.*;*.stk;mod.*;*.mmd0;*.mmd1;*.mmd2;*.mmd3;*.med;*.dbm;*.digi;*.symmod;mdat.*;*.mdat;*.tfx\0"
                           L"All files (*.*)\0*.*\0";
         ofn.lpstrFile = file;
         ofn.nMaxFile = MAX_PATH;

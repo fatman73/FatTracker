@@ -117,7 +117,6 @@ bool Sc68Player::load(const uint8_t* data, size_t size, const StFileResolver& fi
     std::string err;
     replay_.clear();
     bool ok = false;
-    if (getenv("FT_TDD_RED")) return false;  // TDD-RED-TEMP
     if (detectYmst(data, size)) {
         ymst_ = true;
         ok = loadYmst(data, size, files, sub, err);
@@ -276,8 +275,8 @@ bool Sc68Player::loadSc68(const uint8_t* data, size_t size, const StFileResolver
             if (skipped.empty()) skipped = "SC68: LOAD ADDRESS OUT OF RANGE";
             continue;
         }
-        Bytes& data = datas[t.data];
-        if (!data) data = std::make_shared<const std::vector<uint8_t>>(t.data, t.data + t.size);
+        Bytes& blob = datas[t.data];
+        if (!blob) blob = std::make_shared<const std::vector<uint8_t>>(t.data, t.data + t.size);
         // init stub: D0, D1 (1 = STF), D2 = data size, A0 = data, then the replay's init (it returns to the caller)
         Code c;
         c.op(0x203C, t.d0), c.op(0x223C, (flags & 2) ? 0 : 1), c.op(0x243C, t.size), c.op(0x41F9, dataAt);
@@ -285,7 +284,7 @@ bool Sc68Player::loadSc68(const uint8_t* data, size_t size, const StFileResolver
         StSong s;
         s.blocks.push_back({kStub, std::make_shared<const std::vector<uint8_t>>(std::move(c.b))});
         if (rep) s.blocks.push_back({at, rep});
-        s.blocks.push_back({dataAt, data});
+        s.blocks.push_back({dataAt, blob});
         s.init = kStub;
         s.play = at + 8;
         s.d0 = t.d0;
