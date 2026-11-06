@@ -54,29 +54,29 @@ std::vector<std::string> soundDirs() {
             std::string([res stringByAppendingPathComponent:@"sounds"].fileSystemRepresentation) + "/"};
 }
 
-// The Amiga pointer (src/ui/cursor_art.cpp) at 32 points, with 1x and 2x pixels (main.cpp builds it per DPI)
+// The Amiga pointer (src/ui/cursor_art.cpp) at 32 points, with 1x and 2x pixels (main.cpp builds it per DPI).
+// The premultiplied 0xAARRGGBB words go through a CGImage (32-bit little-endian, alpha first: the layout gfx_mac
+// draws with); an NSBitmapImageRep filled directly in that layout gave an unusable cursor image.
 NSCursor* amigaCursor(bool busy) {
     NSImage* img = [[NSImage alloc] initWithSize:NSMakeSize(32, 32)];
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     for (int scale = 1; scale <= 2; ++scale) {
         const int px = 32 * scale;
         std::vector<uint32_t> argb((size_t)px * px);
-        renderAmigaCursor(argb.data(), px, busy);  // premultiplied 0xAARRGGBB
-        NSBitmapImageRep* rep = [[NSBitmapImageRep alloc]
-            initWithBitmapDataPlanes:nullptr
-                          pixelsWide:px
-                          pixelsHigh:px
-                       bitsPerSample:8
-                     samplesPerPixel:4
-                            hasAlpha:YES
-                            isPlanar:NO
-                      colorSpaceName:NSDeviceRGBColorSpace
-                        bitmapFormat:NSBitmapFormatThirtyTwoBitLittleEndian | NSBitmapFormatAlphaFirst
-                         bytesPerRow:px * 4
-                        bitsPerPixel:32];
-        std::memcpy(rep.bitmapData, argb.data(), argb.size() * 4);  // little-endian ARGB words = BGRA bytes
+        renderAmigaCursor(argb.data(), px, busy);
+        CGContextRef ctx = CGBitmapContextCreate(argb.data(), px, px, 8, px * 4, cs,
+                                                 (uint32_t)kCGBitmapByteOrder32Little |
+                                                     (uint32_t)kCGImageAlphaPremultipliedFirst);
+        if (!ctx) continue;
+        CGImageRef cg = CGBitmapContextCreateImage(ctx);
+        CGContextRelease(ctx);
+        if (!cg) continue;
+        NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:cg];
+        CGImageRelease(cg);
         rep.size = NSMakeSize(32, 32);
         [img addRepresentation:rep];
     }
+    CGColorSpaceRelease(cs);
     int hx = 0, hy = 0;
     amigaCursorHotspot(32, hx, hy);
     return [[NSCursor alloc] initWithImage:img hotSpot:NSMakePoint(hx, hy)];
@@ -578,6 +578,18 @@ NSCursor* currentCursor() {
             [self key:0x06 chars:@"z" flags:cmd];
         },
         ^{ [self shot:@"1_keys.png"]; },
+        ^{  // the Amiga pointer the view sets (its 2x pixels)
+            NSImage* cur = currentCursor().image;
+            NSBitmapImageRep* best = nil;
+            for (NSImageRep* r in cur.representations)
+                if ([r isKindOfClass:NSBitmapImageRep.class] && (!best || r.pixelsWide > best.pixelsWide))
+                    best = (NSBitmapImageRep*)r;
+            NSString* path = [self.inputTestDir stringByAppendingPathComponent:@"cursor.png"];
+            const BOOL ok = [[best representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path
+                                                                                                     atomically:YES];
+            printf("%s %s (%ldx%ld px, hotspot %.0f,%.0f)\n", ok ? "saved" : "FAILED", path.UTF8String,
+                   (long)best.pixelsWide, (long)best.pixelsHigh, currentCursor().hotSpot.x, currentCursor().hotSpot.y);
+        },
         ^{  // click DISK OP., type a name ("ab" is added to the file name field), Shift+letter
             [self clickLogical:NSMakePoint(884, 150) right:NO flags:0];
             [self key:0x00 chars:@"a" flags:0];
