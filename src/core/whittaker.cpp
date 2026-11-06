@@ -7,7 +7,9 @@
 // C# code throws there), every count, offset and index is checked (the C# code relied on exceptions), sample
 // frequency 0 is refused, position lists / tracks / arpeggios / envelopes have size limits, a channel whose
 // tracks hold no note or wait (or an empty position list, where the C# code hangs) gives up for that tick,
-// notes outside the period table are clamped, and the square waveform's sample is restored on restart.
+// one replay call reads at most 64 KB of track bytes per channel, command thresholds at or below $80 (the
+// end of track byte) are refused, notes outside the period table are clamped, and the square waveform's
+// sample is restored on restart.
 // Not ported: NostalgicPlayer's module information lines and sample list (display only), and the sound
 // effect command of Emlyn Hughes International Soccer (NostalgicPlayer skips it too).
 #include <algorithm>
@@ -39,6 +41,7 @@ constexpr int kSearch = 16384;              // the part of the file the replay r
 constexpr size_t kMaxSongs = 256;           // sub-songs read at most
 constexpr size_t kMaxPositions = 4096;      // entries in one position list (a list that never ends is refused)
 constexpr size_t kMaxList = 0x10000;        // bytes in one track / arpeggio / envelope
+constexpr int kMaxBytesPerRow = 0x10000;     // track bytes one channel reads in one replay call
 constexpr size_t kMaxTrackBytes = 16u << 20;  // all tracks together
 
 enum Effect : uint8_t {
@@ -318,6 +321,11 @@ bool extractPlay(const Search& b, Probe& p) {
         }
     }
     if (!p.oldPlayer && p.newSampleCmd == 0) return false;
+    // $80 is "end of track": a threshold at or below it would make it a sample / envelope / arpeggio command,
+    // and then no track could end
+    if ((!p.oldPlayer && p.newSampleCmd <= 0x80) || (p.enableEnvelopes && p.newEnvelopeCmd <= 0x80) ||
+        (p.enableArpeggio && p.newArpeggioCmd <= 0x80))
+        return false;
 
     // effects, from the command jump table
     int64_t jumpTableOffset;
@@ -784,12 +792,18 @@ private:
         }
     }
 
-    // The next track byte; past the end of the track (the C# code throws) it reads as "end of track".
-    uint8_t nextByte(ChannelInfo& c) {
+    // The next track byte, or -1 for no track (Tables.EmptyTrack) and past the end of the track (the C# code
+    // throws): both end the track.
+    int nextTrackByte(ChannelInfo& c) {
         const int at = c.trackDataPosition++;
-        if (c.track < 0) return 0x80;  // Tables.EmptyTrack
+        if (c.track < 0) return -1;
         const std::vector<uint8_t>& t = tracks_[(size_t)c.track].bytes;
-        return at >= 0 && (size_t)at < t.size() ? t[(size_t)at] : 0x80;
+        return at >= 0 && (size_t)at < t.size() ? t[(size_t)at] : -1;
+    }
+    // An effect's parameter byte ($80 past the end of the track, which then ends at the next read).
+    uint8_t nextByte(ChannelInfo& c) {
+        const int b = nextTrackByte(c);
+        return b < 0 ? 0x80 : (uint8_t)b;
     }
 
     void playSample(AmigaChannel& ch, const Sample& sm) {
@@ -806,14 +820,20 @@ private:
         AmigaChannel& ch = ch_[i];
         c.slideEnabled = false;
         trackSwitches_ = 0;
+        int bytesRead = 0;
         for (;;) {
-            uint8_t trackByte = nextByte(c);
+            // tracks without a note (or no tracks at all): give up for this tick, go on in the next row
+            if (trackSwitches_ > (int)c.positionList->tracks.size() + 1 || ++bytesRead > kMaxBytesPerRow) break;
+            const int b = nextTrackByte(c);
+            if (b < 0) {  // no track, or past its end
+                handleEndOfTrackEffect(i);
+                continue;
+            }
+            uint8_t trackByte = (uint8_t)b;
             if (trackByte & 0x80) {
                 const int r = doTrackCommand(i, trackByte);
                 if (r == 2) return;  // the module stopped and restarted: the channel is new
                 if (r == 1) break;
-                // tracks without a note or a wait (or no tracks at all): give up for this tick
-                if (trackSwitches_ > (int)c.positionList->tracks.size() + 1) break;
                 continue;
             }
             // play the note

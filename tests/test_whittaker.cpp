@@ -224,6 +224,56 @@ TEST(whittaker_broken_files) {
     playsAnyway(g);
 }
 
+// The command thresholds come from the file's cmp.b operands. One at or below $80 would make "end of track"
+// (and the empty track of a channel without tracks) a sample command: no track could end, and a channel
+// without tracks read forever in one tick. Such a file is refused, quickly.
+TEST(whittaker_low_command_threshold_does_not_hang) {
+    for (int threshold : {0x80, 0x00, 0x7F}) {
+        auto g = tinyDw();
+        g[0xA3] = (uint8_t)threshold;  // cmp.b #threshold,d0: the first sample command
+        put16(g, kPosList0, 0x8000);    // no tracks in any position list
+        put16(g, kPosList1, 0x8000);
+        const auto t0 = std::chrono::steady_clock::now();
+        auto p = AmigaSynthPlayer::open(g.data(), g.size());
+        if (p) {
+            p->setRate(48000);
+            peakOf(*p, 0.3);
+        }
+        const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        CHECK(p == nullptr);
+        CHECK(took < 1.0);
+    }
+    auto g = tinyDw();
+    g[0xA3] = 0x81;  // just above: still a David Whittaker module
+    CHECK(AmigaSynthPlayer::open(g.data(), g.size()) != nullptr);
+}
+
+// A long position list of one long track full of waits and without a note: one replay call must not read
+// all of it (about 120 million track bytes), so loading (which measures the song) stays quick.
+TEST(whittaker_noteless_tracks_bounded_per_tick) {
+    auto g = tinyDw();
+    constexpr size_t kBigTrack = 0x900, kWaits = 30000, kBigList = 0x8100, kPositions = 4000;
+    g.resize(kBigTrack, 0);
+    g.push_back(0xC0);  // sample 0
+    for (size_t i = 0; i < kWaits; ++i) g.push_back(0xE0);  // wait one row, again and again
+    g.push_back(0x80);  // end of track
+    g.resize(kBigList, 0);
+    for (size_t i = 0; i < kPositions; ++i) put16(g, kBigList + 2 * i, (int)kBigTrack);
+    put16(g, kBigList + 2 * kPositions, 0);
+    put16(g, kSubSongs + 2, (int)kBigList);  // channel 0 plays the big list
+    put16(g, kSubSongs + 4, (int)kPosList0);  // channel 1 plays the note (the lowest list stays at its place)
+    const auto t0 = std::chrono::steady_clock::now();
+    auto p = AmigaSynthPlayer::open(g.data(), g.size());
+    CHECK(p != nullptr);
+    if (p) {
+        p->setRate(48000);
+        peakOf(*p, 1.0);
+    }
+    const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    std::printf("  noteless tracks: %.2f s (song %.1f s)\n", took, p ? p->seconds() : 0.0);
+    CHECK(took < 5.0);
+}
+
 TEST(whittaker_real_modules_play) {
     const std::filesystem::path dir = modulesDir() / "David Whittaker" / "David Whittaker";
     if (!std::filesystem::exists(dir)) {
