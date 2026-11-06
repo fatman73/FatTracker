@@ -253,8 +253,10 @@ bool applyTfmx(const std::vector<uint8_t>& mdat, const std::vector<uint8_t>& smp
         return false;
     }
     g_screen.songChanged();
-    static char msg[64];
-    wsprintfA(msg, "%s - PLAYBACK ONLY", g_engine->tfmxFormat());
+    static char msg[128];
+    const int songs = g_engine->chipSubsongs();  // more than one: POS steps through them
+    if (songs > 1) wsprintfA(msg, "%s - %d SONGS (POS) - PLAYBACK ONLY", g_engine->tfmxFormat(), songs);
+    else wsprintfA(msg, "%s - PLAYBACK ONLY", g_engine->tfmxFormat());
     g_screen.setStatus(msg);
     g_path.clear();  // nothing to save over
     g_screen.setCurrentPath(mdatPath);
