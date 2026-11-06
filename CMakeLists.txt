@@ -82,5 +82,13 @@ target_include_directories(FatTracker PRIVATE src)
 if(EXISTS ${CMAKE_SOURCE_DIR}/res/app.manifest)
   target_link_options(FatTracker PRIVATE /MANIFEST:NO)
 endif()
+# ftapptest: the shared app logic (src/app/app_logic.cpp) with the real screen and a fake window shell
+file(GLOB FT_APPTEST_SOURCES CONFIGURE_DEPENDS tests/app/*.cpp)
+add_executable(ftapptest ${FT_APPTEST_SOURCES} tests/test_main.cpp tests/cli.cpp src/app/app_logic.cpp
+               src/app/chip_route.cpp src/app/document.cpp ${FT_UI_SOURCES} ${FT_AUDIO_SOURCES} src/platform/os_win.cpp)
+target_link_libraries(ftapptest PRIVATE ftcore d2d1 dwrite d3d11 dxgi dxguid ole32 avrt uuid shell32 comdlg32 windowscodecs)
+target_include_directories(ftapptest PRIVATE src tests)
+target_compile_definitions(ftapptest PRIVATE FT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
 add_custom_command(TARGET FatTracker POST_BUILD
   COMMAND ${CMAKE_COMMAND} -DFILE=$<TARGET_FILE:FatTracker> -P ${CMAKE_SOURCE_DIR}/cmake/sizecheck.cmake)
