@@ -127,6 +127,8 @@ public:
         publish();
         unlock();
     }
+    // Song play from `order`. After STOP at that same order it resumes exactly there (tempo, effect memory);
+    // elsewhere the song is fast-forwarded silently to `order` first. A chip song resumes after STOP.
     void play(uint16_t order);
     void render(float* out, uint32_t frames);
     void snapshot(Telemetry& out) const;
@@ -146,6 +148,7 @@ private:
     ChipPlayer* tfmx_;  // the playback-only player (TFMX, Hippel)
     bool installChip(ChipPlayer* p, const char* name, bool play);
     bool tfmxOn_ = false, tfmxPlaying_ = false;
+    bool chipPaused_ = false;  // STOP paused the chip song: PLAY resumes it (a new song or sub-song clears it)
     int pure_ = 0;
     float driveGain_ = 0.7f;
     AudioOut audio_;

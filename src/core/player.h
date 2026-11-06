@@ -62,8 +62,16 @@ public:
     explicit Player(Mixer& m);
     void setSong(const Song* s);
     void play(uint16_t order = 0, uint16_t row = 0);
+    // Song play from `order` like OpenMPT / Schism: the song runs silently from its start until it enters
+    // `order` (capped), so speed, BPM, global volume and effect memory are what they would be there.
+    void playFrom(uint16_t order);
+    // Continues exactly where stop() left song play when `order` is still that position (true), with the
+    // tempo and effect memory intact; false (nothing changes) after a song change, pattern play or F00.
+    bool resume(uint16_t order);
+    // Pattern play keeps the speed and BPM in effect (the song's initial ones until something played).
     void playPattern(uint16_t pattern, uint16_t row = 0);
     void stop();
+    uint8_t globalVolume() const { return globalVol_; }
     bool playing() const { return playing_; }
     void render(float* outStereo, uint32_t frames);
     void tick();
@@ -86,6 +94,7 @@ public:
 private:
     // player.cpp
     void start(uint16_t order, uint16_t row, bool patternMode, uint16_t pattern);
+    void initialTempo();  // speed, BPM and global volume from the song
     void processRow();
     void noteStart(int c);
     void keyOff(int c);
@@ -122,6 +131,8 @@ private:
     ChannelState ch_[kMaxChannels];
     bool playing_ = false;
     bool patternMode_ = false;
+    bool resumable_ = false;                  // stop() paused song play (see resume)
+    uint8_t seenSpeed_ = 0, seenBpm_ = 0;     // the song's initial tempo as last seen (songEdited)
     uint16_t order_ = 0, pattern_ = 0, row_ = 0;
     uint8_t tick_ = 0, speed_ = 6, bpm_ = 125, globalVol_ = 64;
     uint8_t patDelay_ = 0;
