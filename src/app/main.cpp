@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "app/app_logic.h"
+#include "app/window_rect.h"
+#include "platform/os.h"
 #include "audio/capture.h"
 #include "audio/engine.h"
 #include "ui/cursor.h"
@@ -33,6 +35,28 @@ bool g_dirty = true;
 bool g_fullscreen = false;
 WINDOWPLACEMENT g_placement = {sizeof(WINDOWPLACEMENT)};
 constexpr UINT_PTR kTimerAudio = 1, kTimerClock = 2, kTimerFloppy = 3;
+
+// Window position kept across runs ([Window] in FatTracker.ini): the normal (not maximized, not fullscreen)
+// rectangle in screen pixels, plus whether it was maximized or fullscreen.
+RECT g_normalRect = {};
+bool g_maximized = false;
+
+void rememberPlacement(HWND hwnd) {
+    if (g_fullscreen || IsIconic(hwnd)) return;
+    g_maximized = IsZoomed(hwnd) != 0;
+    if (!g_maximized) GetWindowRect(hwnd, &g_normalRect);
+}
+
+void saveWindowPlacement(const std::wstring& ini) {
+    if (g_normalRect.right <= g_normalRect.left || g_normalRect.bottom <= g_normalRect.top) return;
+    const wchar_t* s = L"Window";
+    osIniWrite(ini.c_str(), s, L"X", std::to_wstring(g_normalRect.left));
+    osIniWrite(ini.c_str(), s, L"Y", std::to_wstring(g_normalRect.top));
+    osIniWrite(ini.c_str(), s, L"Width", std::to_wstring(g_normalRect.right - g_normalRect.left));
+    osIniWrite(ini.c_str(), s, L"Height", std::to_wstring(g_normalRect.bottom - g_normalRect.top));
+    osIniWrite(ini.c_str(), s, L"Maximized", g_maximized ? L"1" : L"0");
+    osIniWrite(ini.c_str(), s, L"Fullscreen", g_fullscreen ? L"1" : L"0");
+}
 
 void toggleFullscreen(HWND hwnd) {
     DWORD style = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
@@ -137,8 +161,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_SIZE:
             g_gfx.resize(LOWORD(lp), HIWORD(lp));
+            rememberPlacement(hwnd);
             g_dirty = true;
             return 0;
+        case WM_MOVE:
+            rememberPlacement(hwnd);
+            break;
         case WM_SETCURSOR:
             if (LOWORD(lp) == HTCLIENT) {
                 SetCursor(g_busy ? g_cursors.busy() : g_cursors.arrow());
@@ -256,6 +284,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_DESTROY:
             g_capture.stop();
             g_screen.saveSettings(iniPath().c_str());
+            saveWindowPlacement(iniPath());
             PostQuitMessage(0);
             return 0;
     }
@@ -422,9 +451,26 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
     const int maxW = wa.right - wa.left, maxH = wa.bottom - wa.top;
     const int ww = std::min((int)(r.right - r.left), maxW), wh = std::min((int)(r.bottom - r.top), maxH);
+    WinRect place = {wa.left + (maxW - ww) / 2, wa.top + (maxH - wh) / 2, 0, 0};
+    place.right = place.left + ww;
+    place.bottom = place.top + wh;
+    // the window where it was last time, whole on the monitor nearest to that place
+    const std::wstring ini = iniPath();
+    const int savedW = osIniInt(ini.c_str(), L"Window", L"Width", 0), savedH = osIniInt(ini.c_str(), L"Window", L"Height", 0);
+    if (savedW > 0 && savedH > 0) {
+        const int sx = osIniInt(ini.c_str(), L"Window", L"X", 0), sy = osIniInt(ini.c_str(), L"Window", L"Y", 0);
+        const RECT saved = {sx, sy, sx + savedW, sy + savedH};
+        MONITORINFO mi = {sizeof mi};
+        if (GetMonitorInfoW(MonitorFromRect(&saved, MONITOR_DEFAULTTONEAREST), &mi))
+            place = fitWindowRect({sx, sy, sx + savedW, sy + savedH},
+                                  {mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom}, 640, 400);
+    }
+    const bool startMaximized = osIniInt(ini.c_str(), L"Window", L"Maximized", 0) != 0;
+    const bool startFullscreen = osIniInt(ini.c_str(), L"Window", L"Fullscreen", 0) != 0;
     HWND hwnd = CreateWindowExW(WS_EX_ACCEPTFILES, wc.lpszClassName, L"FatTracker", WS_OVERLAPPEDWINDOW,
-                                wa.left + (maxW - ww) / 2, wa.top + (maxH - wh) / 2, ww, wh, nullptr, nullptr,
-                                inst, nullptr);
+                                place.left, place.top, place.right - place.left, place.bottom - place.top, nullptr,
+                                nullptr, inst, nullptr);
+    if (hwnd) GetWindowRect(hwnd, &g_normalRect);
     g_hwnd = hwnd;
     if (hwnd) g_cursors.build(GetDpiForWindow(hwnd));
     if (!hwnd || !g_gfx.init(hwnd)) {
@@ -445,7 +491,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
         if (argv && argc >= 2 && app::loadModuleFile(argv[1]) && !app::loadPending()) g_engine->play();
         if (argv) LocalFree(argv);
     }
-    ShowWindow(hwnd, show);
+    ShowWindow(hwnd, startMaximized && (show == SW_SHOWNORMAL || show == SW_SHOWDEFAULT) ? SW_SHOWMAXIMIZED : show);
+    if (startFullscreen) toggleFullscreen(hwnd);
 
     MSG m;
     for (;;) {

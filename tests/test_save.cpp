@@ -10,7 +10,7 @@ Song richSong() {
     Song s = makeEmptySong(32);
     s.quirks = Quirks::FT2;
     s.freqMode = FreqMode::Linear;
-    std::strcpy(s.name, "roundtrip");
+    std::snprintf(s.name, sizeof s.name, "%s", "roundtrip");
     s.initialSpeed = 5;
     s.initialBpm = 140;
     s.patterns.push_back(makePattern(32, 32));
@@ -20,7 +20,7 @@ Song richSong() {
     s.patterns[0].at(63, 31) = {NOTE_OFF, 0, 0x64, 20, 3};
     s.patterns[1].at(5, 7) = {96, 2, 0, 0xF, 0x7D};
     Sample a;
-    std::strcpy(a.name, "eight");
+    std::snprintf(a.name, sizeof a.name, "%s", "eight");
     a.length = 6;
     a.data8 = {0, 10, -10, 127, -128, 5};
     a.loop = LoopType::Forward;
@@ -31,7 +31,7 @@ Song richSong() {
     a.relativeNote = 3;
     a.pan = 0x30;
     Sample b;
-    std::strcpy(b.name, "sixteen");
+    std::snprintf(b.name, sizeof b.name, "%s", "sixteen");
     b.is16 = true;
     b.length = 5;
     b.data16 = {0, 1000, -1000, 32767, -32768};
