@@ -1,6 +1,8 @@
 # FatTracker
 
-A ProTracker-style music tracker for Windows (C++20, Win32, Direct2D, WASAPI). It has two faces:
+A ProTracker-style music tracker for Windows (C++20, Win32, Direct2D, WASAPI) and macOS (Apple Silicon and
+Intel; Cocoa, Core Graphics, Core Audio). Both systems build from the same sources, pass the same tests and
+render the same songs bit for bit. It has two faces:
 
 - **Modern mode** – a vector UI in the ProTracker 2.3 layout that scales smoothly to any window
   size, with up to 32 channels, 16-bit samples, XM instruments and selectable themes.
@@ -8,7 +10,8 @@ A ProTracker-style music tracker for Windows (C++20, Win32, Direct2D, WASAPI). I
   window, with the A500 or A1200 Paula output filters (and the "LED" filter) and floppy drive sounds.
   Both modes share the same song and editing state; switch in SETUP or with EXIT PURE.
 
-FatTracker builds to a single, statically linked `FatTracker.exe` – no installer.
+On Windows FatTracker builds to a single, statically linked `FatTracker.exe` – no installer. On macOS it is
+`FatTracker.app`, shipped as a signed and notarized `.dmg`.
 
 ![Modern mode](docs/images/modern-mode.png)
 
@@ -102,7 +105,25 @@ Targets:
 - `ftrender` – offline render of any song (modules and chip formats) to WAV, no audio device:
   `build\Release\ftrender.exe in.sid out.wav [--seconds S] [--subsong N] [--float]`
 
+- `ftapptest` – tests of the shared app logic (open, save, export, DISK OP., the unsaved-changes question,
+  the Pure mode floppy wait) with the real screen and a fake window shell
+
 CMake collects the sources with globs; run the configure step again after adding files.
+
+### macOS
+
+Requirements: Xcode command line tools and CMake 3.28 or newer (for example from Homebrew).
+
+```sh
+cmake -S . -B build-mac -DCMAKE_BUILD_TYPE=Release
+cmake --build build-mac
+```
+
+This gives `build-mac/FatTracker.app`, plus `fttest`, `ftapptest`, `ftrender` and `ftplay` (plays a song through
+Core Audio). On the Mac, Command works as Ctrl. Keys a MacBook lacks have their own shortcuts, listed in HELP.
+
+`tools/package_mac.sh [notary-profile]` builds the release `.dmg`. It signs the app with a Developer ID and,
+given a `notarytool` keychain profile, notarizes and staples both the app and the `.dmg`.
 
 ## Running the tests
 
