@@ -81,3 +81,15 @@ target_compile_options(FatTracker PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-ar
 target_link_libraries(FatTracker PRIVATE ftcore objc "-framework AppKit" "-framework QuartzCore" "-framework AVFoundation"
     "-framework CoreGraphics" "-framework CoreText" "-framework ImageIO" "-framework Accelerate"
     "-framework AudioToolbox" "-framework CoreAudio")
+
+# ftapptest: the shared app logic (src/app/app_logic.cpp) with the real screen on Core Graphics / Core Text and
+# the fake window shell of tests/app (no audio device, no window). DISK OP. DELETE moves its test file to the Trash.
+file(GLOB FT_APPTEST_SOURCES CONFIGURE_DEPENDS tests/app/*.cpp)
+add_executable(ftapptest ${FT_APPTEST_SOURCES} tests/test_main.cpp tests/cli.cpp src/app/app_logic.cpp
+    src/app/chip_route.cpp src/app/document.cpp ${FT_UI_SOURCES} src/audio/engine.cpp src/mac/audio_out_null.cpp
+    src/mac/capture_mac.mm src/mac/gfx_mac.cpp src/mac/text_mac.mm src/mac/trash_mac.mm src/platform/os_posix.cpp)
+target_link_libraries(ftapptest PRIVATE ftcore objc "-framework AppKit" "-framework CoreGraphics" "-framework CoreText"
+    "-framework ImageIO" "-framework Accelerate" "-framework AVFoundation")
+target_include_directories(ftapptest PRIVATE src tests)
+target_compile_definitions(ftapptest PRIVATE FT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_options(ftapptest PRIVATE $<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>)
