@@ -65,6 +65,11 @@ target_link_libraries(fttest PRIVATE ftcore ole32 avrt uuid)
 target_include_directories(fttest PRIVATE src tests)
 target_compile_definitions(fttest PRIVATE FT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
+# ftrender: offline render of any song (modules and chip formats) through the Engine, no audio device opened
+add_executable(ftrender tools/ftrender.cpp src/app/chip_route.cpp ${FT_AUDIO_SOURCES})
+target_link_libraries(ftrender PRIVATE ftcore ole32 avrt uuid)
+target_include_directories(ftrender PRIVATE src)
+
 file(GLOB FT_UI_SOURCES CONFIGURE_DEPENDS src/ui/*.cpp)
 file(GLOB FT_APP_SOURCES CONFIGURE_DEPENDS src/app/*.cpp)
 set(FT_RES_SOURCES)

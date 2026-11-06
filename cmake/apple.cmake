@@ -47,3 +47,8 @@ add_executable(fttest ${FT_TEST_SOURCES} src/audio/engine.cpp src/mac/audio_out_
 target_link_libraries(fttest PRIVATE ftcore)
 target_include_directories(fttest PRIVATE src tests)
 target_compile_definitions(fttest PRIVATE FT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+# ftrender: offline render of any song (modules and chip formats) through the Engine, no audio device
+add_executable(ftrender tools/ftrender.cpp src/app/chip_route.cpp src/audio/engine.cpp src/mac/audio_out_null.cpp)
+target_link_libraries(ftrender PRIVATE ftcore)
+target_include_directories(ftrender PRIVATE src)
