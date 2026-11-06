@@ -1,0 +1,82 @@
+FatTracker - credits and licences
+==================================
+
+FatTracker is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 2 of the License, or (at your
+option) any later version. It comes WITHOUT ANY WARRANTY. See LICENSE for the full text.
+
+FatTracker includes or is based on the following free software. Many thanks to their authors.
+The licence texts are kept next to the code in the folders named below.
+
+
+Playback of chip music and other formats
+----------------------------------------
+
+TFMX decoder (Chris Huelsbeck's TFMX)                                    src/core/tfmx
+  libtfmxaudiodecoder by Michael Schwendt                                GNU GPL v2 or later
+  https://github.com/mschwendt/libtfmxaudiodecoder
+
+Future Composer 1.0-1.4 and Jochen Hippel formats (TFMX, COSO, MCMD)      src/core/hippel
+  libtfmxaudiodecoder by Michael Schwendt                                GNU GPL v2 or later
+
+C64 SID emulation (6502, SID, CIA, VIC)                                  src/core/crsid
+  cRSID by Mihaly "Hermit" Horvath (copy from DOjS by SuperIlu)          "Do what you want, mention the author"
+  https://csdb.dk/scener/?id=8261
+
+AY-3-8910 / YM2149 emulation                                             src/core/ayumi
+  ayumi by Peter Sovietov                                                MIT
+  https://github.com/true-grue/ayumi
+
+SNES SPC, Sega Mega Drive / Master System VGM, NES NSF, Game Boy GBS,    src/core/gme
+Atari 8-bit SAP, ZX Spectrum / Amstrad AY, PC Engine HES, MSX KSS
+  Game_Music_Emu by Shay Green (blargg) and the libgme authors           GNU LGPL 2.1 or later
+  https://github.com/libgme/game-music-emu
+  - Nuked OPN2 (YM2612) by Alexey Khokholov (Nuke.YKT)                   GNU LGPL 2.1 or later
+  - emu2413 (YM2413) by Mitsutaka Okazaki                                MIT
+
+Amiga replayers: JamCracker, Delta Music 1.0 / 2.0, SidMon 1.0 / 2.0,    src/core/*.cpp
+SoundMon V.2 / V.3, Digital Mugician 1 / 2, David Whittaker, IFF SMUS,
+Sonic Arranger, Art Of Noise
+  ported from NostalgicPlayer by Thomas Neumann                          MIT (src/core/NostalgicPlayer_LICENSE.txt)
+  https://github.com/neumatho/NostalgicPlayer
+  (the original replayers were written by the authors of those music programs)
+
+AHX and HivelyTracker                                                    src/core/hvl
+  HivelyTracker replayer by Pete Gordon (Xeron)                          BSD 3-clause
+  https://github.com/pete-gordon/hivelytracker
+  (AHX by Dexter / Abyss)
+
+Motorola 68000 emulation (Atari ST SNDH / SC68 / YMST)                   src/core/m68k
+  Musashi by Karl Stenerud                                               MIT
+  https://github.com/kstenerud/Musashi
+
+ZX Spectrum Pro Tracker 3 / Vortex Tracker II                            src/core/pt3_player.cpp
+  PT3Play by Sergey Bulba; C# port PT3PlayBlazor by Ben Baker            MIT (port), with code from ayfly
+  https://github.com/benbaker76/PT3PlayBlazor
+
+ZX Spectrum Sound Tracker, ST Song Compiler, Pro Tracker 2,              src/core/zx_tracker_replayers.cpp
+ASC Sound Master, SQ-Tracker
+  players from Sergey Bulba's Ay_Emul, as ported in ayfly                GNU GPL v2 or later
+  https://github.com/l29ah/ayfly
+  format checks modelled on ZXTune by Vitamin (no code copied)          (ZXTune: GNU LGPL v3)
+
+
+Module loaders
+--------------
+
+S3M, IT (incl. IT214 / IT215 sample decompression), MTM, 669, OctaMED, DigiBooster, Symphonie
+  structures and effect conversion follow OpenMPT (OpenMPT Devs;        BSD 3-clause
+  the Symphonie loader by Devin Acker)
+  https://openmpt.org
+
+Own code written in the style of known algorithms: the LH5 (LHA) unpacker, the deflate / gzip decoder
+(after puff by Mark Adler, zlib), the ICE 2.4 depacker. The Paula / Amiga mixer, the ProTracker-style editor,
+the Pure mode screen, the fonts, the demo effects and everything else are FatTracker's own code.
+
+
+Not part of FatTracker
+----------------------
+
+The music in the modules folder (test tunes from the High Voltage SID Collection, Modland, the SNDH archive
+and other archives) belongs to its composers. It is not distributed with FatTracker. The same goes for the
+sc68 replay routines in modules/AtariST/Replay (sc68 by Benjamin Gerard, GNU GPL).
