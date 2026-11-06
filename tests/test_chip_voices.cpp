@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cwctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -272,12 +273,20 @@ int gmeMixDiffers(const std::vector<uint8_t>& d) {
     return bad;
 }
 
+// The first such file by name, case-insensitive: the order NTFS lists a folder in, so every system checks the
+// same file (APFS lists in no particular order).
 std::filesystem::path firstFile(const char* sub, const char* ext) {
     const auto dir = modulesDir() / sub;
     if (!std::filesystem::exists(dir)) return {};
-    for (const auto& e : std::filesystem::directory_iterator(dir))
-        if (e.is_regular_file() && e.path().extension() == ext) return e.path();
-    return {};
+    std::filesystem::path best;
+    std::wstring bestKey;
+    for (const auto& e : std::filesystem::directory_iterator(dir)) {
+        if (!e.is_regular_file() || e.path().extension() != ext) continue;
+        std::wstring key = e.path().filename().wstring();
+        for (wchar_t& c : key) c = (wchar_t)std::towupper(c);
+        if (best.empty() || key < bestKey) best = e.path(), bestKey = key;
+    }
+    return best;
 }
 
 // A real file loaded into a fresh player (null when the file is not there).

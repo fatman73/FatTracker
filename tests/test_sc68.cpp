@@ -19,7 +19,9 @@
 namespace {
 namespace fs = std::filesystem;
 
-const fs::path kModules = "C:/development/FatTracker/modules";
+// the Windows checkout's modules when they exist (worktrees have none), else <source>/modules
+const fs::path kModules = fs::exists("C:/development/FatTracker/modules") ? fs::path("C:/development/FatTracker/modules")
+                                                                          : fs::path(FT_SOURCE_DIR) / "modules";
 const fs::path kWarhawk = kModules / "Warhawk";
 const fs::path kSt = kModules / "AtariST";
 

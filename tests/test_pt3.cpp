@@ -183,7 +183,9 @@ TEST(pt3_broken_modules_refused_or_safe) {
 }
 
 TEST(pt3_real_files_play) {
-    const std::filesystem::path dir = "C:\\development\\FatTracker\\modules\\Spectrum";
+    std::filesystem::path dir = "C:\\development\\FatTracker\\modules\\Spectrum";
+    std::error_code ec0;
+    if (!std::filesystem::exists(dir, ec0)) dir = std::filesystem::path(FT_SOURCE_DIR) / "modules" / "Spectrum";
     std::error_code ec;
     if (!std::filesystem::exists(dir, ec)) {
         std::printf("SKIP pt3_real_files_play (no modules\\Spectrum folder)\n");

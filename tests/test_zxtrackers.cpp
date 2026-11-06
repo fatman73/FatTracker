@@ -234,7 +234,10 @@ Kind kindByName(const std::filesystem::path& p) {
     return Kind::None;
 }
 
-const char* const kModules = "C:\\development\\FatTracker\\modules";
+// the Windows checkout's modules when they exist (worktrees have none), else <source>/modules
+const std::filesystem::path kModules = std::filesystem::exists("C:\\development\\FatTracker\\modules")
+                                           ? std::filesystem::path("C:\\development\\FatTracker\\modules")
+                                           : std::filesystem::path(FT_SOURCE_DIR) / "modules";
 }  // namespace
 
 TEST(zx_stc_tiny_module_plays_channel_a) { checkTiny(tinyStc(), Kind::Stc, "TINY TUNE"); }
