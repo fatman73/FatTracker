@@ -18,6 +18,7 @@
 #include "ui/play_screen.h"
 
 #include <commdlg.h>
+#include <shlobj.h>
 #include <shellapi.h>
 #include <windowsx.h>
 
@@ -88,17 +89,34 @@ bool drawFrame() {
     return true;
 }
 
-std::wstring iniPath() {
-    wchar_t buf[MAX_PATH];
-    GetModuleFileNameW(nullptr, buf, MAX_PATH);
-    std::wstring p = buf;
-    return p.substr(0, p.find_last_of(L'\\') + 1) + L"FatTracker.ini";
-}
-
 std::wstring exeDir() {
     wchar_t exe[MAX_PATH];
     GetModuleFileNameW(nullptr, exe, MAX_PATH);
     return std::wstring(exe).substr(0, std::wstring(exe).find_last_of(L'\\') + 1);
+}
+
+// The user's FatTracker folder, %APPDATA%\FatTracker\ (settings, sounds\, Replay\): the program itself lives in
+// Program Files, which is not writable. Falls back to the program's folder when there is no AppData.
+std::wstring dataDir() {
+    static const std::wstring dir = [] {
+        PWSTR roaming = nullptr;
+        std::wstring d;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &roaming)) && roaming)
+            d = std::wstring(roaming) + L"\\FatTracker\\";
+        CoTaskMemFree(roaming);
+        if (d.empty() || (!CreateDirectoryW(d.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS))
+            return exeDir();
+        return d;
+    }();
+    return dir;
+}
+
+std::wstring iniPath() {
+    const std::wstring ini = dataDir() + L"FatTracker.ini";
+    // settings of an older run kept next to the program move over once
+    if (GetFileAttributesW(ini.c_str()) == INVALID_FILE_ATTRIBUTES)
+        CopyFileW((exeDir() + L"FatTracker.ini").c_str(), ini.c_str(), TRUE);
+    return ini;
 }
 
 // The window system for the shared app logic (src/app/app_logic.cpp): the Win32 calls main.cpp made itself before.
@@ -428,7 +446,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     g_engine->setSong(std::make_unique<Song>(makeEmptySong(4)));
     g_text.init();
     g_font.setText(&g_text);
-    app::init(*g_engine, g_screen, g_capture, g_shell, exeDir() + L"Replay");
+    app::init(*g_engine, g_screen, g_capture, g_shell, dataDir() + L"Replay");
     if (int shot = screenshotMode(); shot >= 0) return shot;
 
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -478,7 +496,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
         return 1;
     }
     if (!g_engine->startAudio()) g_screen.setStatus(g_engine->audioStatus());
-    app::loadFloppySounds({exeDir() + L"sounds\\", L"sounds\\"});
+    app::loadFloppySounds({dataDir() + L"sounds\\", exeDir() + L"sounds\\"});
     g_screen.loadSettings(iniPath().c_str(), *g_engine);
     g_engine->setSong(std::make_unique<Song>(makeEmptySong(g_screen.defaultChannels())));
     g_screen.songChanged();
