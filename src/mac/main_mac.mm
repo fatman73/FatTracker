@@ -8,12 +8,15 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <unistd.h>
 #include <string>
 #include <vector>
 
 #include "mac/app_glue.h"
+#include "app/window_rect.h"
 #include "mac/keymap_mac.h"
+#include "platform/os.h"
 #include "platform/vk.h"
 #include "ui/cursor_art.h"
 
@@ -365,6 +368,9 @@ NSCursor* currentCursor() {
 @property(strong) NSTimer* floppyTimer;
 @property(strong) FTSaveType* saveType;
 @property BOOL closeConfirmed;  // the unsaved-changes question was answered: close / quit for real
+@property NSRect normalFrame;   // the window's frame when neither zoomed nor full screen (saved in [Window])
+@property BOOL wasZoomed;       // zoomed (Windows: maximized) when last seen
+@property BOOL inFullScreen;
 @end
 
 @implementation FTAppDelegate
@@ -463,9 +469,84 @@ NSCursor* currentCursor() {
     appSetHost(h);
 }
 
+// ---- the window comes back where it was (main.cpp: [Window] X, Y, Width, Height, Maximized, Fullscreen).
+// The rectangle is the whole window frame in points, top-left origin on the primary screen (y down, like the
+// Windows screen pixels), so the shared fitWindowRect works on it.
+
+static CGFloat primaryTop() { return NSScreen.screens.count ? NSMaxY(NSScreen.screens[0].frame) : 0; }
+static WinRect toTopLeft(NSRect r) {
+    const CGFloat top = primaryTop() - NSMaxY(r);
+    return {(int)std::lround(r.origin.x), (int)std::lround(top), (int)std::lround(NSMaxX(r)),
+            (int)std::lround(top + r.size.height)};
+}
+static NSRect fromTopLeft(const WinRect& w) {
+    return NSMakeRect(w.left, primaryTop() - w.bottom, w.right - w.left, w.bottom - w.top);
+}
+
+- (void)rememberPlacement {
+    if (self.inFullScreen || self.window.miniaturized) return;
+    self.wasZoomed = self.window.zoomed;
+    if (!self.wasZoomed) self.normalFrame = self.window.frame;
+}
+- (void)windowDidMove:(NSNotification*)n {
+    [self rememberPlacement];
+}
+- (void)windowDidResize:(NSNotification*)n {
+    [self rememberPlacement];
+}
+- (void)windowWillEnterFullScreen:(NSNotification*)n {
+    [self rememberPlacement];
+    self.inFullScreen = YES;
+}
+- (void)windowDidExitFullScreen:(NSNotification*)n {
+    self.inFullScreen = NO;
+    [self rememberPlacement];
+}
+
+- (void)saveWindowPlacement:(NSString*)iniFile {
+    const NSRect f = self.normalFrame;
+    if (f.size.width <= 0 || f.size.height <= 0) return;
+    const std::wstring ini = std::filesystem::path(iniFile.fileSystemRepresentation).wstring();
+    const WinRect w = toTopLeft(f);
+    const wchar_t* s = L"Window";
+    osIniWrite(ini.c_str(), s, L"X", std::to_wstring(w.left));
+    osIniWrite(ini.c_str(), s, L"Y", std::to_wstring(w.top));
+    osIniWrite(ini.c_str(), s, L"Width", std::to_wstring(w.right - w.left));
+    osIniWrite(ini.c_str(), s, L"Height", std::to_wstring(w.bottom - w.top));
+    osIniWrite(ini.c_str(), s, L"Maximized", self.wasZoomed ? L"1" : L"0");
+    osIniWrite(ini.c_str(), s, L"Fullscreen", self.inFullScreen ? L"1" : L"0");
+}
+
+// The saved frame, whole on the screen it overlaps most (else the nearest one); NO when nothing is saved.
+- (BOOL)savedFrame:(NSRect*)out ini:(NSString*)iniFile {
+    const std::wstring ini = std::filesystem::path(iniFile.fileSystemRepresentation).wstring();
+    const int w = osIniInt(ini.c_str(), L"Window", L"Width", 0), h = osIniInt(ini.c_str(), L"Window", L"Height", 0);
+    if (w <= 0 || h <= 0 || !NSScreen.screens.count) return NO;
+    const int x = osIniInt(ini.c_str(), L"Window", L"X", 0), y = osIniInt(ini.c_str(), L"Window", L"Y", 0);
+    const NSRect saved = fromTopLeft({x, y, x + w, y + h});
+    NSScreen* best = nil;
+    CGFloat bestArea = -1, bestDist = 1e18;
+    for (NSScreen* scr in NSScreen.screens) {
+        const NSRect in = NSIntersectionRect(saved, scr.visibleFrame);
+        const CGFloat area = in.size.width * in.size.height;
+        const CGFloat dx = NSMidX(saved) - NSMidX(scr.visibleFrame), dy = NSMidY(saved) - NSMidY(scr.visibleFrame);
+        const CGFloat dist = dx * dx + dy * dy;
+        if (area > bestArea || (area == bestArea && dist < bestDist)) best = scr, bestArea = area, bestDist = dist;
+    }
+    *out = fromTopLeft(fitWindowRect(toTopLeft(saved), toTopLeft(best.visibleFrame), 640, 400));
+    return YES;
+}
+
 - (void)applicationDidFinishLaunching:(NSNotification*)n {
     [self buildMenu];
     [self installHost];
+    NSArray<NSString*>* args = NSProcessInfo.processInfo.arguments;
+    if (args.count >= 3 && [args[1] isEqualToString:@"--input-test"]) {
+        self.inputTestDir = args[2];
+        chdir(self.inputTestDir.fileSystemRepresentation);  // DISK OP. browses (and saves into) the test folder
+    }
+    // the input test runs without the user's settings file and silently
+    NSString* ini = self.inputTestDir ? [self.inputTestDir stringByAppendingPathComponent:@"input-test.ini"] : iniPath();
     NSScreen* scr = NSScreen.mainScreen;
     const NSRect vis = scr ? scr.visibleFrame : NSMakeRect(0, 0, 1600, 900);
     const CGFloat px = scr ? scr.frame.size.width * scr.backingScaleFactor : 1600;
@@ -489,16 +570,15 @@ NSCursor* currentCursor() {
     self.window.contentMinSize = NSMakeSize(640, 360);
     self.view = [[FTView alloc] initWithFrame:NSMakeRect(0, 0, content.size.width, content.size.height)];
     self.window.contentView = self.view;
-    [self.window center];
+    NSRect savedFrame;
+    const BOOL haveSaved = [self savedFrame:&savedFrame ini:ini];
+    if (haveSaved) [self.window setFrame:savedFrame display:NO];  // where it was last time
+    else [self.window center];
+    self.normalFrame = self.window.frame;
     [self.view syncSize];
-
-    NSArray<NSString*>* args = NSProcessInfo.processInfo.arguments;
-    if (args.count >= 3 && [args[1] isEqualToString:@"--input-test"]) {
-        self.inputTestDir = args[2];
-        chdir(self.inputTestDir.fileSystemRepresentation);  // DISK OP. browses (and saves into) the test folder
-    }
-    // the input test runs without the user's settings file and silently
-    NSString* ini = self.inputTestDir ? [self.inputTestDir stringByAppendingPathComponent:@"input-test.ini"] : iniPath();
+    const std::wstring iniW = std::filesystem::path(ini.fileSystemRepresentation).wstring();
+    const bool startZoomed = haveSaved && osIniInt(iniW.c_str(), L"Window", L"Maximized", 0) != 0;
+    const bool startFullScreen = haveSaved && osIniInt(iniW.c_str(), L"Window", L"Fullscreen", 0) != 0;
     appWindowReady(ini.fileSystemRepresentation, replayDir().fileSystemRepresentation, soundDirs(), !self.inputTestDir);
     // FatTracker <module> from the command line, or files opened from the Finder before launch finished
     if (args.count >= 2 && ![args[1] hasPrefix:@"-"]) appOpenFile(args[1].fileSystemRepresentation, true);
@@ -508,6 +588,11 @@ NSCursor* currentCursor() {
     [self.window makeKeyAndOrderFront:nil];
     [self.window makeFirstResponder:self.view];
     [NSApp activateIgnoringOtherApps:YES];
+    if (startZoomed && !self.window.zoomed) {
+        [self.window zoom:nil];
+        self.wasZoomed = YES;
+    }
+    if (startFullScreen) [self.window toggleFullScreen:nil];
     appSetDirty();
     if (self.inputTestDir) [self runInputTest];
 }
@@ -573,6 +658,11 @@ NSCursor* currentCursor() {
 
 - (void)runInputTest {
     const NSEventModifierFlags cmd = NSEventModifierFlagCommand, ctl = NSEventModifierFlagControl;
+    {
+        const WinRect w = toTopLeft(self.window.frame);
+        printf("window at %d,%d %dx%d (zoomed %d, full screen %d)\n", w.left, w.top, w.right - w.left, w.bottom - w.top,
+               (int)self.window.zoomed, (int)self.inFullScreen);
+    }
     NSArray* steps = @[
         ^{  // edit mode, three piano keys (Z S X = C D C#... of the base octave), Cmd+Z undoes the last one
             [self key:0x31 chars:@" " flags:0];
@@ -719,6 +809,7 @@ NSCursor* currentCursor() {
 - (void)applicationWillTerminate:(NSNotification*)n {
     [self.view stop];
     NSString* ini = self.inputTestDir ? [self.inputTestDir stringByAppendingPathComponent:@"input-test.ini"] : iniPath();
+    [self saveWindowPlacement:ini];
     appQuit(ini.fileSystemRepresentation);
 }
 @end
