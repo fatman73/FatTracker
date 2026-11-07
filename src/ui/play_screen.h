@@ -73,6 +73,10 @@ public:
     void clampView(const Song& s);
     void applyMetronome(Engine& e);
     bool animating() const { return animating_; }
+    // Since the last draw only the demo in the logo box moves (not playing, VU meters still): a renderer may
+    // redraw just logoBox() for the next frame when nothing else changed meanwhile.
+    bool onlyLogoMoves() const { return onlyLogo_; }
+    RectF logoBox() const { return L_.logo; }
     void songChanged();
     void setViewMode(int m);  // 4, 8, 16, 32 columns or 0 = as many as the song has channels
     int viewCount(int numChannels) const;
@@ -146,6 +150,7 @@ private:
     int hover_ = -1;
     char status_[64] = "DROP A MODULE HERE OR CLICK DISK OP.";
     bool animating_ = false;
+    bool onlyLogo_ = false;
     Telemetry last_{};
     PatternView pattern_;
     Font* font_ = nullptr;

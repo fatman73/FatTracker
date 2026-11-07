@@ -8,6 +8,7 @@
 #include <vector>
 
 typedef struct CGImage* CGImageRef;
+typedef struct CGColorSpace* CGColorSpaceRef;
 
 // AppKit services the app logic asks for (paths are UTF-8). Dialog callbacks are not called on cancel.
 struct MacHost {
@@ -34,7 +35,11 @@ void appSetDirty();
 bool appFrameDue();                                // something changed, or the screen animates
 bool appDrawFrame();                               // draws the frame (false: nothing could be drawn)
 void appResize(uint32_t pixelW, uint32_t pixelH);
+void appSetColorSpace(CGColorSpaceRef space);    // the window's: frames need no conversion on the way to the screen
 CGImageRef appCopyFrame();                         // the last frame (caller releases it)
+// After a logo-only frame: the redrawn part in bitmap pixels and a copy of it (else false / nullptr)
+bool appFramePartial(int* x, int* y, int* w, int* h);
+CGImageRef appCopyPartialFrame();
 void appQuit(const char* iniPath);
 
 // input; positions in device pixels from the view's top-left corner (like the Win32 client coordinates).
@@ -53,4 +58,7 @@ void appConfirmClose(std::function<void()> then);
 bool appHasUnsavedChanges();
 bool appBusy();                                // the busy cursor is shown
 float appScale();                              // device pixels per logical unit (1920x1080 layout)
+// --input-test: a logo-only frame against a full frame at the same demo time; differing pixels (-1: not possible)
+int appCheckPartialFrame();
+void appSetDemoTime(double seconds);  // --input-test: the logo demo at a fixed time (-1: the clock again)
 bool appSavePng(const char* utf8Path);         // draws the current frame and saves it (--input-test)

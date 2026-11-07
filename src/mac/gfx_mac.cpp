@@ -49,10 +49,10 @@ CGPathRef roundedPath(CGRect r, float radius) {
 }
 
 // The two contexts the frame needs: 32-bit, little-endian (BGRA in memory like DXGI_FORMAT_B8G8R8A8).
-CGContextRef makeContext(uint32_t w, uint32_t h, bool alpha) {
+CGContextRef makeContext(uint32_t w, uint32_t h, bool alpha, CGColorSpaceRef space) {
     const uint32_t info = (uint32_t)kCGBitmapByteOrder32Little |
                           (uint32_t)(alpha ? kCGImageAlphaPremultipliedFirst : kCGImageAlphaNoneSkipFirst);
-    CGContextRef c = CGBitmapContextCreate(nullptr, w, h, 8, 0, srgb(), info);
+    CGContextRef c = CGBitmapContextCreate(nullptr, w, h, 8, 0, space ? space : srgb(), info);
     if (!c) return nullptr;
     CGContextTranslateCTM(c, 0, h);  // top-left origin, y down, like Direct2D
     CGContextScaleCTM(c, 1, -1);
@@ -94,7 +94,17 @@ CGContextRef g_up = nullptr;
 uint32_t g_upW = 0, g_upH = 0;
 }  // namespace
 
-Gfx::~Gfx() { release(); }
+Gfx::~Gfx() {
+    release();
+    if (space_) CGColorSpaceRelease(space_);
+}
+
+void Gfx::setColorSpace(CGColorSpaceRef space) {
+    if (space == space_ || (space && space_ && CFEqual(space, space_))) return;
+    if (space_) CGColorSpaceRelease(space_);
+    space_ = space ? CGColorSpaceRetain(space) : nullptr;
+    if (main_) initOffscreen(w_, h_);  // the bitmaps again, in the new space (the next frame redraws all)
+}
 
 void Gfx::release() {
     if (ctx_ && main_ && ctx_ != main_) ctx_ = main_;
@@ -103,6 +113,8 @@ void Gfx::release() {
     std::free(glowTmp_);
     main_ = ctx_ = glowCtx_ = nullptr;
     glowTmp_ = nullptr;
+    glowTmpBytes_ = 0;
+    clearX0_ = clearY0_ = clearX1_ = clearY1_ = 0;
 }
 
 bool Gfx::initOffscreen(uint32_t w, uint32_t h) {
@@ -112,8 +124,9 @@ bool Gfx::initOffscreen(uint32_t w, uint32_t h) {
     vp_ = computeViewport(w, h);
     ++generation_;
     if (!w || !h) return false;
-    main_ = makeContext(w, h, false);
-    glowCtx_ = makeContext(w, h, true);
+    main_ = makeContext(w, h, false, space_);
+    glowCtx_ = makeContext(w, h, true, space_);
+    clearX0_ = clearY0_ = 0, clearX1_ = (int)w, clearY1_ = (int)h;  // the first glow starts from a cleared layer
     ctx_ = main_;
     return main_ && glowCtx_;
 }
@@ -130,11 +143,32 @@ void Gfx::applyTransform() {
 
 bool Gfx::beginFrame(const Color& clear) {
     if (!main_ || w_ == 0 || h_ == 0 || vp_.scale <= 0) return false;
+    partial_ = false;
     ctx_ = main_;
     layers_ = 0;
     CGContextSaveGState(ctx_);  // the frame's base state; endFrame restores it
     setFill(ctx_, {clear.r, clear.g, clear.b, 1.f});
     CGContextFillRect(ctx_, CGRectMake(0, 0, w_, h_));
+    applyTransform();
+    return true;
+}
+
+bool Gfx::beginFrameIn(const Color& clear, RectF r) {
+    if (!main_ || w_ == 0 || h_ == 0 || vp_.scale <= 0) return false;
+    ctx_ = main_;
+    layers_ = 0;
+    CGContextSaveGState(ctx_);
+    // the part to redraw in bitmap pixels, whole pixels so its edge pixels come out as in a full frame
+    const float x0 = std::floor(vp_.offX + r.x * vp_.scale), y0 = std::floor(vp_.offY + r.y * vp_.scale);
+    const float x1 = std::ceil(vp_.offX + (r.x + r.w) * vp_.scale), y1 = std::ceil(vp_.offY + (r.y + r.h) * vp_.scale);
+    const float cx0 = std::max(0.f, x0), cy0 = std::max(0.f, y0);
+    const float cx1 = std::min((float)w_, x1), cy1 = std::min((float)h_, y1);
+    const CGRect part = CGRectMake(cx0, cy0, std::max(0.f, cx1 - cx0), std::max(0.f, cy1 - cy0));  // top-left origin
+    partial_ = true;
+    partX_ = (int)cx0, partY_ = (int)cy0, partW_ = (int)part.size.width, partH_ = (int)part.size.height;
+    CGContextClipToRect(ctx_, part);
+    setFill(ctx_, {clear.r, clear.g, clear.b, 1.f});
+    CGContextFillRect(ctx_, part);
     applyTransform();
     return true;
 }
@@ -151,6 +185,24 @@ void Gfx::endFrame() {
 }
 
 CGImageRef Gfx::copyImage() { return main_ ? CGBitmapContextCreateImage(main_) : nullptr; }
+
+bool Gfx::partialRect(int& x, int& y, int& w, int& h) const {
+    if (!partial_ || partW_ <= 0 || partH_ <= 0) return false;
+    x = partX_, y = partY_, w = partW_, h = partH_;
+    return true;
+}
+
+CGImageRef Gfx::copyPartialImage() {
+    if (!main_ || !partial_ || partW_ <= 0 || partH_ <= 0) return nullptr;
+    const size_t row = CGBitmapContextGetBytesPerRow(main_);
+    uint8_t* at = (uint8_t*)CGBitmapContextGetData(main_) + (size_t)partY_ * row + (size_t)partX_ * 4;
+    CGContextRef c = CGBitmapContextCreate(at, partW_, partH_, 8, row, space_ ? space_ : srgb(),
+                                           (uint32_t)kCGBitmapByteOrder32Little | (uint32_t)kCGImageAlphaNoneSkipFirst);
+    if (!c) return nullptr;
+    CGImageRef img = CGBitmapContextCreateImage(c);  // a copy of just these pixels
+    CGContextRelease(c);
+    return img;
+}
 
 bool Gfx::savePng(const wchar_t* path) {
     CGImageRef img = copyImage();
@@ -171,12 +223,29 @@ bool Gfx::savePng(const wchar_t* path) {
     return ok;
 }
 
+void Gfx::noteGlow(float x, float y, float w, float h, float pad) {
+    if (!glowCtx_ || ctx_ != glowCtx_) return;
+    // user space -> device space (y up from the bottom) -> bitmap rows (top-left), plus antialiasing
+    const CGRect d = CGRectApplyAffineTransform(CGRectMake(x - pad, y - pad, w + 2 * pad, h + 2 * pad), CGContextGetCTM(ctx_));
+    const int x0 = (int)std::floor(CGRectGetMinX(d)) - 2, x1 = (int)std::ceil(CGRectGetMaxX(d)) + 2;
+    const int y0 = (int)h_ - (int)std::ceil(CGRectGetMaxY(d)) - 2, y1 = (int)h_ - (int)std::floor(CGRectGetMinY(d)) + 2;
+    if (glowX1_ <= glowX0_) {
+        glowX0_ = x0, glowY0_ = y0, glowX1_ = x1, glowY1_ = y1;
+    } else {
+        glowX0_ = std::min(glowX0_, x0), glowY0_ = std::min(glowY0_, y0);
+        glowX1_ = std::max(glowX1_, x1), glowY1_ = std::max(glowY1_, y1);
+    }
+}
+
 void Gfx::fillRect(RectF r, Color c) {
+    noteGlow(r.x, r.y, r.w, r.h, 0);
     setFill(ctx_, c);
     CGContextFillRect(ctx_, cgr(r));
 }
 
 void Gfx::fillPath(void* path, Color c) {
+    const CGRect b = CGPathGetBoundingBox((CGPathRef)path);
+    noteGlow(b.origin.x, b.origin.y, b.size.width, b.size.height, 0);
     setFill(ctx_, c);
     CGContextAddPath(ctx_, (CGPathRef)path);
     CGContextFillPath(ctx_);
@@ -190,6 +259,7 @@ void Gfx::fillRoundRect(RectF r, float radius, Color c) {
 }
 
 void Gfx::strokeRect(RectF r, Color c, float width) {
+    noteGlow(r.x, r.y, r.w, r.h, width);
     const float h = width * 0.5f;
     setStroke(ctx_, c, width);
     CGContextStrokeRect(ctx_, CGRectMake(r.x + h, r.y + h, r.w - width, r.h - width));
@@ -205,6 +275,7 @@ void Gfx::fillGradientH(RectF r, Color left, Color right) { fillGradient(r, 0.f,
 
 void Gfx::fillGradient(RectF r, float radius, Color c0, Color c1, bool horizontal) {
     if (r.w <= 0 || r.h <= 0) return;
+    noteGlow(r.x, r.y, r.w, r.h, 0);
     CGGradientRef g = gradient(c0, c1);
     if (!g) return;
     CGContextSaveGState(ctx_);
@@ -223,6 +294,7 @@ void Gfx::fillGradient(RectF r, float radius, Color c0, Color c1, bool horizonta
 }
 
 void Gfx::line(float x0, float y0, float x1, float y1, Color c, float width) {
+    noteGlow(std::min(x0, x1), std::min(y0, y1), std::fabs(x1 - x0), std::fabs(y1 - y0), width);
     setStroke(ctx_, c, width);
     CGContextBeginPath(ctx_);
     CGContextMoveToPoint(ctx_, x0, y0);
@@ -232,6 +304,14 @@ void Gfx::line(float x0, float y0, float x1, float y1, Color c, float width) {
 
 void Gfx::polyline(const float* xy, int points, Color c, float width) {
     if (points < 2) return;
+    if (ctx_ == glowCtx_) {
+        float x0 = xy[0], y0 = xy[1], x1 = x0, y1 = y0;
+        for (int i = 1; i < points; ++i) {
+            x0 = std::min(x0, xy[i * 2]), x1 = std::max(x1, xy[i * 2]);
+            y0 = std::min(y0, xy[i * 2 + 1]), y1 = std::max(y1, xy[i * 2 + 1]);
+        }
+        noteGlow(x0, y0, x1 - x0, y1 - y0, width);
+    }
     setStroke(ctx_, c, width);
     CGContextBeginPath(ctx_);
     CGContextMoveToPoint(ctx_, xy[0], xy[1]);
@@ -290,63 +370,101 @@ void Gfx::panel(RectF r, const Theme& t, PanelState s) {
 
 void Gfx::beginGlow() {
     if (!glowCtx_ || ctx_ != main_) return;
-    // the glow layer gets the same transform and clip-free state; it starts transparent
+    // the glow layer gets the same transform and clip-free state; it starts transparent (only the part the last
+    // glow drew is cleared: the rest is still transparent)
     CGContextSaveGState(glowCtx_);
-    CGContextConcatCTM(glowCtx_, CGAffineTransformInvert(CGContextGetCTM(glowCtx_)));
-    CGContextClearRect(glowCtx_, CGRectMake(0, 0, w_, h_));
+    CGContextConcatCTM(glowCtx_, CGAffineTransformInvert(CGContextGetCTM(glowCtx_)));  // device space, y up
+    if (clearX1_ > clearX0_ && clearY1_ > clearY0_)
+        CGContextClearRect(glowCtx_, CGRectMake(clearX0_, (CGFloat)h_ - clearY1_, clearX1_ - clearX0_, clearY1_ - clearY0_));
+    clearX0_ = clearY0_ = clearX1_ = clearY1_ = 0;
     CGContextConcatCTM(glowCtx_, CGContextGetCTM(main_));
+    glowX0_ = glowY0_ = glowX1_ = glowY1_ = 0;
+    glowAll_ = false;
     ctx_ = glowCtx_;
 }
 
+// The glow: the layer blurred (a Gaussian from three box blurs) added onto the frame, then the sharp layer on
+// top. Only the part of the layer that was drawn on is worked on - that part plus twice the blur's reach, so the
+// blurred pixels are exactly those of blurring the whole layer (the layer is transparent everywhere else).
 void Gfx::endGlow(float radiusLogical, float strength) {
     if (ctx_ != glowCtx_) return;
     CGContextRestoreGState(glowCtx_);
     ctx_ = main_;
     CGContextFlush(glowCtx_);
-    CGImageRef sharp = CGBitmapContextCreateImage(glowCtx_);
-    CGImageRef blurred = nullptr;
     const float sigma = radiusLogical * vp_.scale;
-    if (strength > 0 && sigma > 0.5f) {
-        // Gaussian by three box blurs (vImage), on a copy of the layer
-        vImage_Buffer src = {CGBitmapContextGetData(glowCtx_), h_, w_, CGBitmapContextGetBytesPerRow(glowCtx_)};
-        const size_t bytes = src.rowBytes * h_;
-        void* a = std::malloc(bytes);
-        void* b = std::malloc(bytes);
-        if (a && b) {
-            vImage_Buffer A = {a, h_, w_, src.rowBytes}, B = {b, h_, w_, src.rowBytes};
-            std::memcpy(a, src.data, bytes);
-            uint32_t k = (uint32_t)std::lround(std::sqrt(12.f * sigma * sigma / 3.f + 1.f));
-            if (!(k & 1)) ++k;
+    const bool blur = strength > 0 && sigma > 0.5f;
+    uint32_t k = 1;
+    if (blur) {
+        k = (uint32_t)std::lround(std::sqrt(12.f * sigma * sigma / 3.f + 1.f));
+        if (!(k & 1)) ++k;
+    }
+    const int reach = 3 * (int)(k / 2);  // how far three box blurs spread a pixel
+    int x0, y0, x1, y1;
+    if (glowAll_) {
+        x0 = 0, y0 = 0, x1 = (int)w_, y1 = (int)h_;
+    } else {
+        if (glowX1_ <= glowX0_ || glowY1_ <= glowY0_) return;  // nothing glows
+        const int m = 2 * reach + 2;
+        x0 = std::max(0, glowX0_ - m), y0 = std::max(0, glowY0_ - m);
+        x1 = std::min((int)w_, glowX1_ + m), y1 = std::min((int)h_, glowY1_ + m);
+    }
+    clearX0_ = x0, clearY0_ = y0, clearX1_ = x1, clearY1_ = y1;
+    if (x1 <= x0 || y1 <= y0) return;
+    {  // a partial frame that does not reach the glow: nothing to blur or composite
+        CGContextSaveGState(main_);
+        CGContextConcatCTM(main_, CGAffineTransformInvert(CGContextGetCTM(main_)));
+        const CGRect clip = CGContextGetClipBoundingBox(main_);
+        CGContextRestoreGState(main_);
+        if (!CGRectIntersectsRect(clip, CGRectMake(x0, (CGFloat)h_ - y1, x1 - x0, y1 - y0))) return;
+    }
+    const size_t rw = (size_t)(x1 - x0), rh = (size_t)(y1 - y0), rowBytes = rw * 4;
+    const size_t layerRow = CGBitmapContextGetBytesPerRow(glowCtx_);
+    uint8_t* const region = (uint8_t*)CGBitmapContextGetData(glowCtx_) + (size_t)y0 * layerRow + (size_t)x0 * 4;
+    const uint32_t info = (uint32_t)kCGBitmapByteOrder32Little | (uint32_t)kCGImageAlphaPremultipliedFirst;
+    auto imageOf = [&](void* data, size_t row) -> CGImageRef {
+        CGContextRef c = CGBitmapContextCreate(data, rw, rh, 8, row, space_ ? space_ : srgb(), info);
+        if (!c) return nullptr;
+        CGImageRef img = CGBitmapContextCreateImage(c);  // a copy of the pixels
+        CGContextRelease(c);
+        return img;
+    };
+    CGImageRef blurred = nullptr;
+    if (blur) {
+        const size_t bytes = rowBytes * rh;
+        if (bytes > glowTmpBytes_) {
+            std::free(glowTmp_);
+            glowTmp_ = std::malloc(bytes * 2);
+            glowTmpBytes_ = glowTmp_ ? bytes : 0;
+        }
+        if (glowTmp_) {
+            uint8_t* a = (uint8_t*)glowTmp_;
+            uint8_t* b = a + glowTmpBytes_;
+            for (size_t y = 0; y < rh; ++y) std::memcpy(a + y * rowBytes, region + y * layerRow, rowBytes);
+            vImage_Buffer A = {a, rh, rw, rowBytes}, B = {b, rh, rw, rowBytes};
             vImageBoxConvolve_ARGB8888(&A, &B, nullptr, 0, 0, k, k, nullptr, kvImageEdgeExtend);
             vImageBoxConvolve_ARGB8888(&B, &A, nullptr, 0, 0, k, k, nullptr, kvImageEdgeExtend);
             vImageBoxConvolve_ARGB8888(&A, &B, nullptr, 0, 0, k, k, nullptr, kvImageEdgeExtend);
-            CGContextRef bc = CGBitmapContextCreate(b, w_, h_, 8, src.rowBytes, srgb(),
-                                                    (uint32_t)kCGBitmapByteOrder32Little | (uint32_t)kCGImageAlphaPremultipliedFirst);
-            if (bc) {
-                blurred = CGBitmapContextCreateImage(bc);
-                CGContextRelease(bc);
-            }
+            blurred = imageOf(b, rowBytes);
         }
-        std::free(a);
-        std::free(b);
     }
+    CGImageRef sharp = imageOf(region, layerRow);
     CGContextSaveGState(main_);
     CGContextConcatCTM(main_, CGAffineTransformInvert(CGContextGetCTM(main_)));  // device space, bottom-left
-    const CGRect all = CGRectMake(0, 0, w_, h_);
+    const CGRect where = CGRectMake(x0, (CGFloat)h_ - y1, rw, rh);
     if (blurred) {
         CGContextSaveGState(main_);
         CGContextSetBlendMode(main_, kCGBlendModePlusLighter);
         CGContextSetAlpha(main_, std::min(strength, 1.f));
-        CGContextDrawImage(main_, all, blurred);
+        CGContextDrawImage(main_, where, blurred);
         if (strength > 1.f) {  // the Windows color matrix scales past 1: add the rest
             CGContextSetAlpha(main_, std::min(strength - 1.f, 1.f));
-            CGContextDrawImage(main_, all, blurred);
+            CGContextDrawImage(main_, where, blurred);
         }
         CGContextRestoreGState(main_);
         CGImageRelease(blurred);
     }
     if (sharp) {
-        CGContextDrawImage(main_, all, sharp);
+        CGContextDrawImage(main_, where, sharp);
         CGImageRelease(sharp);
     }
     CGContextRestoreGState(main_);
@@ -379,6 +497,7 @@ void Gfx::popLayer() {
 
 void Gfx::drawPixels(const uint32_t* argb, uint32_t w, uint32_t h, float devX, float devY, float devW, float devH) {
     if (!ctx_ || !w || !h) return;
+    if (ctx_ == glowCtx_) glowAll_ = true;  // device coordinates: not tracked
     CGDataProviderRef dp = CGDataProviderCreateWithData(nullptr, argb, (size_t)w * h * 4, nullptr);
     CGImageRef img = CGImageCreate(w, h, 8, 32, (size_t)w * 4, srgb(),
                                    (uint32_t)kCGBitmapByteOrder32Little | (uint32_t)kCGImageAlphaNoneSkipFirst, dp, nullptr, false,
@@ -393,9 +512,10 @@ void Gfx::drawPixels(const uint32_t* argb, uint32_t w, uint32_t h, float devX, f
     CGImageRef draw = img;
     CGImageRef up = nullptr;
     if (!exact) {
-        if (!g_up || g_upW != w * k || g_upH != h * k) {
+        CGColorSpaceRef upSpace = space_ ? space_ : srgb();  // the frame's space: the small source gets converted
+        if (!g_up || g_upW != w * k || g_upH != h * k || !CFEqual(CGBitmapContextGetColorSpace(g_up), upSpace)) {
             if (g_up) CGContextRelease(g_up);
-            g_up = CGBitmapContextCreate(nullptr, w * k, h * k, 8, 0, srgb(),
+            g_up = CGBitmapContextCreate(nullptr, w * k, h * k, 8, 0, upSpace,
                                          (uint32_t)kCGBitmapByteOrder32Little | (uint32_t)kCGImageAlphaNoneSkipFirst);
             g_upW = w * k;
             g_upH = h * k;

@@ -109,6 +109,7 @@ NSCursor* currentCursor() {
     CGFloat _wheelAcc;       // trackpad scrolling, in points, until a notch is full
     NSUInteger _prevFlags;   // modifier flags of the last flagsChanged (which modifier went down or up)
     BOOL _ctrlClick;         // the left button went down with Control: a right click (no mouse-up for it)
+    CALayer* _part;          // a logo-only frame: just the redrawn pixels, over the last full frame
 }
 
 - (instancetype)initWithFrame:(NSRect)r {
@@ -117,6 +118,12 @@ NSCursor* currentCursor() {
         self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
         self.layer.contentsGravity = kCAGravityResize;
         self.layer.magnificationFilter = kCAFilterNearest;
+        _part = [CALayer layer];
+        _part.hidden = YES;
+        _part.magnificationFilter = kCAFilterNearest;
+        _part.actions = @{@"contents" : [NSNull null], @"position" : [NSNull null], @"bounds" : [NSNull null],
+                          @"hidden" : [NSNull null]};
+        [self.layer addSublayer:_part];
         __weak FTView* weakSelf = self;
         // frame pacing: ~60 Hz; a frame is drawn only when something changed or the screen animates
         _frameTimer = [NSTimer timerWithTimeInterval:1.0 / 60.0
@@ -153,7 +160,9 @@ NSCursor* currentCursor() {
     const NSSize b = self.bounds.size;
     const uint32_t w = (uint32_t)std::lround(b.width * s), h = (uint32_t)std::lround(b.height * s);
     self.layer.contentsScale = s;
+    _part.contentsScale = s;
     if (!w || !h) return;
+    if (self.window.colorSpace.CGColorSpace) appSetColorSpace(self.window.colorSpace.CGColorSpace);
     appResize(w, h);
     if (self.window && appDrawFrame()) [self updateLayer];
 }
@@ -170,7 +179,23 @@ NSCursor* currentCursor() {
 
 - (void)tick {
     if (!appFrameDue()) return;
-    if (appDrawFrame()) [self setNeedsDisplay:YES];
+    if (!appDrawFrame()) return;
+    int x, y, w, h;
+    if (!appFramePartial(&x, &y, &w, &h)) {
+        [self setNeedsDisplay:YES];  // a full frame: updateLayer
+        return;
+    }
+    // only the logo moved: hand the window server that small part, not the whole frame
+    CGImageRef img = appCopyPartialFrame();
+    if (!img) return;
+    const CGFloat s = self.layer.contentsScale > 0 ? self.layer.contentsScale : 1;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    _part.frame = CGRectMake(x / s, y / s, w / s, h / s);  // the view is flipped: top-left origin
+    _part.contents = (__bridge id)img;
+    _part.hidden = NO;
+    [CATransaction commit];
+    CGImageRelease(img);
 }
 
 // the Amiga pointer over the view (busy while the simulated floppy reads)
@@ -332,8 +357,54 @@ NSCursor* currentCursor() {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     self.layer.contents = (__bridge id)img;
+    _part.hidden = YES;  // the full frame has the logo too
+    _part.contents = nil;
     [CATransaction commit];
     CGImageRelease(img);
+}
+
+// --input-test: after a full frame and then a logo-only frame (the small layer), what the layers show must be
+// the frame's pixels. Returns the differing pixels (-1: no logo-only frame happened).
+- (long)checkLayerTree {
+    appSetDemoTime(1.0);
+    appSetDirty();
+    [self tick];
+    [self updateLayer];  // the full frame on the layer now (demo at 1 s)
+    appSetDemoTime(2.0);
+    [self tick];         // a logo-only frame (demo at 2 s), if only the logo moves
+    appSetDemoTime(-1);
+    if (_part.hidden) return -1;
+    CGImageRef want = appCopyFrame();
+    const size_t w = CGImageGetWidth(want), h = CGImageGetHeight(want);
+    CGColorSpaceRef cs = CGImageGetColorSpace(want);
+    CGContextRef c = CGBitmapContextCreate(nullptr, w, h, 8, w * 4, cs,
+                                           (uint32_t)kCGBitmapByteOrder32Little | (uint32_t)kCGImageAlphaPremultipliedFirst);
+    const CGFloat s = self.layer.contentsScale;
+    CGContextScaleCTM(c, s, s);
+    if (self.layer.geometryFlipped) {  // layer space is y-down: render it upright in the bitmap
+        CGContextTranslateCTM(c, 0, self.bounds.size.height);
+        CGContextScaleCTM(c, 1, -1);
+    }
+    [self.layer renderInContext:c];
+    CGImageRef got = CGBitmapContextCreateImage(c);
+    CGContextRelease(c);
+    CFDataRef a = CGDataProviderCopyData(CGImageGetDataProvider(want));
+    CFDataRef b = CGDataProviderCopyData(CGImageGetDataProvider(got));
+    const uint8_t* pa = CFDataGetBytePtr(a);
+    const uint8_t* pb = CFDataGetBytePtr(b);
+    const size_t ra = CGImageGetBytesPerRow(want), rb = CGImageGetBytesPerRow(got);
+    long diff = 0;
+    for (size_t y = 0; y < h; ++y)
+        for (size_t x = 0; x < w; ++x) {
+            const uint8_t* qa = pa + y * ra + x * 4;
+            const uint8_t* qb = pb + y * rb + x * 4;
+            diff += std::abs(qa[0] - qb[0]) > 2 || std::abs(qa[1] - qb[1]) > 2 || std::abs(qa[2] - qb[2]) > 2;
+        }
+    CFRelease(a);
+    CFRelease(b);
+    CGImageRelease(want);
+    CGImageRelease(got);
+    return diff;
 }
 
 - (void)stop {
@@ -490,6 +561,13 @@ static NSRect fromTopLeft(const WinRect& w) {
 }
 - (void)windowDidMove:(NSNotification*)n {
     [self rememberPlacement];
+}
+// another display (or its color profile changed): the frames follow its color space
+- (void)windowDidChangeScreen:(NSNotification*)n {
+    [self.view syncSize];
+}
+- (void)windowDidChangeScreenProfile:(NSNotification*)n {
+    [self.view syncSize];
 }
 - (void)windowDidResize:(NSNotification*)n {
     [self rememberPlacement];
@@ -657,6 +735,7 @@ static NSRect fromTopLeft(const WinRect& w) {
 }
 
 - (void)runInputTest {
+    setvbuf(stdout, nullptr, _IOLBF, 0);  // lines reach a log file as they are printed
     const NSEventModifierFlags cmd = NSEventModifierFlagCommand, ctl = NSEventModifierFlagControl;
     {
         const WinRect w = toTopLeft(self.window.frame);
@@ -756,6 +835,46 @@ static NSRect fromTopLeft(const WinRect& w) {
                        centre, (w == (long)px.width && h == (long)px.height && (centre & 0xFFFFFF)) ? "" : "  BAD");
             }
             [self.window setFrame:start display:YES];
+        },
+        ^{  // a frame that redraws only the logo box must equal a full frame
+            const int d = appCheckPartialFrame();
+            printf("logo-only frame vs full frame: %s\n", d == 0 ? "identical" : d < 0 ? "NOT TESTED" : "DIFFERENT");
+            const long t = [self.view checkLayerTree];
+            printf("window layers after a logo-only frame vs the frame: %s (%ld px)\n",
+                   t == 0 ? "identical" : t < 0 ? "NOT TESTED" : "DIFFERENT", t);
+        },
+        ^{  // frame cost: full frames for FT_BENCH seconds at the window's size (FT_BENCH=1 only - it blocks the main thread)
+            if (!getenv("FT_BENCH")) return;
+            const NSSize px = [self.view convertSizeToBacking:self.view.bounds.size];
+            const double t0 = NSProcessInfo.processInfo.systemUptime;
+            int frames = 0;
+            while (NSProcessInfo.processInfo.systemUptime - t0 < std::max(1.0, atof(getenv("FT_BENCH")))) {
+                appSetDirty();
+                appDrawFrame();
+                CGImageRelease(appCopyFrame());
+                ++frames;
+            }
+            const double ms = (NSProcessInfo.processInfo.systemUptime - t0) * 1000.0 / frames;
+            printf("bench %.0fx%.0f px: %d frames, %.2f ms per frame (%.0f%% of one core at 60 Hz)\n", px.width,
+                   px.height, frames, ms, ms * 60.0 / 10.0);
+            // idle: only the logo demo moves, so each frame redraws the logo box
+            appSetDirty();
+            appDrawFrame();
+            const double t1 = NSProcessInfo.processInfo.systemUptime;
+            int idle = 0;
+            while (NSProcessInfo.processInfo.systemUptime - t1 < 1.0) {
+                appDrawFrame();
+                CGImageRelease(appCopyFrame());
+                ++idle;
+            }
+            const double ims = (NSProcessInfo.processInfo.systemUptime - t1) * 1000.0 / idle;
+            printf("bench idle (logo only): %.2f ms per frame (%.0f%% of one core at 60 Hz)\n", ims, ims * 6.0);
+            // and then stay up FT_IDLE seconds with the real timers (the CPU use can be read from outside)
+            if (const char* idleFor = getenv("FT_IDLE")) {
+                const double until = NSProcessInfo.processInfo.systemUptime + atof(idleFor);
+                while (NSProcessInfo.processInfo.systemUptime < until)
+                    [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+            }
         },
         ^{ [NSApp terminate:nil]; },
     ];

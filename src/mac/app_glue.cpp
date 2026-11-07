@@ -1,5 +1,7 @@
 #include "mac/app_glue.h"
 
+#include <CoreGraphics/CoreGraphics.h>
+
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -26,7 +28,7 @@ MacHost g_host;
 bool g_dirty = true;
 bool g_busy = false;
 
-std::wstring wide(const char* utf8) { return std::filesystem::path(utf8).wstring(); }
+std::wstring toWide(const char* utf8) { return std::filesystem::path(utf8).wstring(); }
 std::string utf8(const std::wstring& w) { return std::filesystem::path(w).string(); }
 
 // AppShell for the shared app logic: AppKit through MacHost (empty during --shot: no window)
@@ -48,7 +50,7 @@ struct MacShell : AppShell {
     void openDialog(const std::wstring& startDir, std::function<void(const std::wstring&)> done) override {
         if (!g_host.openDialog) return;
         g_host.openDialog(utf8(startDir).c_str(), [done](const char* path) {
-            done(wide(path));
+            done(toWide(path));
             g_dirty = true;
         });
     }
@@ -58,7 +60,7 @@ struct MacShell : AppShell {
         const std::filesystem::path p(suggested);
         g_host.saveDialog(p.has_parent_path() ? p.parent_path().string().c_str() : "", p.filename().string().c_str(),
                           filter, [done](const char* path, int f) {
-                              done(wide(path), f == 2 ? SaveKind::Mod : f == 3 ? SaveKind::Wav : SaveKind::Xm);
+                              done(toWide(path), f == 2 ? SaveKind::Mod : f == 3 ? SaveKind::Wav : SaveKind::Xm);
                               g_dirty = true;
                           });
     }
@@ -92,12 +94,12 @@ int appMainStart(int argc, char** argv) {
 void appSetHost(const MacHost& host) { g_host = host; }
 
 void appWindowReady(const char* iniPath, const char* replayDir, const std::vector<std::string>& soundDirs, bool audio) {
-    app::init(*g_engine, g_screen, *g_capture, g_shell, wide(replayDir));
+    app::init(*g_engine, g_screen, *g_capture, g_shell, toWide(replayDir));
     if (audio && !g_engine->startAudio()) g_screen.setStatus(g_engine->audioStatus());
     std::vector<std::wstring> dirs;
-    for (const std::string& d : soundDirs) dirs.push_back(wide(d.c_str()));
+    for (const std::string& d : soundDirs) dirs.push_back(toWide(d.c_str()));
     app::loadFloppySounds(dirs);
-    g_screen.loadSettings(wide(iniPath).c_str(), *g_engine);
+    g_screen.loadSettings(toWide(iniPath).c_str(), *g_engine);
     g_engine->setSong(std::make_unique<Song>(makeEmptySong(g_screen.defaultChannels())));
     g_screen.songChanged();
     app::updateTitle();
@@ -105,7 +107,7 @@ void appWindowReady(const char* iniPath, const char* replayDir, const std::vecto
 }
 
 bool appOpenFile(const char* utf8Path, bool play) {
-    const std::wstring path = wide(utf8Path);
+    const std::wstring path = toWide(utf8Path);
     app::confirmDiscard([path, play]() {  // a file opened from the Finder while a song has unsaved changes
         if (app::loadModuleFile(path) && play && !app::loadPending()) g_engine->play();
     });
@@ -127,9 +129,12 @@ void appSetDirty() { g_dirty = true; }
 bool appFrameDue() { return g_dirty || g_screen.animating(); }
 
 bool appDrawFrame() {
+    // nothing changed and only the logo demo moves: redraw just the logo box (the CPU draws every pixel here,
+    // a full frame 60 times a second costs most of a core)
+    const bool partial = !g_dirty && g_screen.onlyLogoMoves();
     g_dirty = false;
     const Theme& t = currentTheme();
-    if (!g_gfx.beginFrame(t.background)) return false;
+    if (!(partial ? g_gfx.beginFrameIn(t.background, g_screen.logoBox()) : g_gfx.beginFrame(t.background))) return false;
     g_screen.draw(g_gfx, g_text, g_font, t, *g_engine);
     g_gfx.endFrame();
     return true;
@@ -142,9 +147,18 @@ void appResize(uint32_t w, uint32_t h) {
 
 CGImageRef appCopyFrame() { return g_gfx.copyImage(); }
 
+bool appFramePartial(int* x, int* y, int* w, int* h) { return g_gfx.partialRect(*x, *y, *w, *h); }
+
+CGImageRef appCopyPartialFrame() { return g_gfx.copyPartialImage(); }
+
+void appSetColorSpace(CGColorSpaceRef space) {
+    g_gfx.setColorSpace(space);
+    g_dirty = true;
+}
+
 void appQuit(const char* iniPath) {
     g_capture->stop();
-    g_screen.saveSettings(wide(iniPath).c_str());
+    g_screen.saveSettings(toWide(iniPath).c_str());
     g_engine->stop();
     delete g_capture;
     g_capture = nullptr;
@@ -198,7 +212,7 @@ bool appWheel(float px, float py, int delta) {
 }
 
 void appDropFile(const char* utf8Path) {
-    app::loadAnyFile(wide(utf8Path));
+    app::loadAnyFile(toWide(utf8Path));
     g_dirty = true;
 }
 
@@ -219,7 +233,41 @@ bool appBusy() { return g_busy; }
 
 float appScale() { return g_gfx.viewport().scale; }
 
+void appSetDemoTime(double seconds) { g_screen.setDemoTime(seconds); }
+
+int appCheckPartialFrame() {
+    g_engine->stop();
+    auto frameAt = [](double demoSeconds, bool full) {
+        g_screen.setDemoTime(demoSeconds);
+        if (full) g_dirty = true;
+        appDrawFrame();
+        return g_gfx.copyImage();
+    };
+    frameAt(1.25, true);
+    CGImageRef ref = frameAt(2.5, true);  // a full frame at 2.5 s
+    frameAt(1.25, true);
+    const bool partialPossible = g_screen.onlyLogoMoves();
+    CGImageRef part = frameAt(2.5, false);  // the logo box redrawn alone, from 1.25 s to 2.5 s
+    g_screen.setDemoTime(-1);
+    g_dirty = true;
+    int diff = -1;
+    if (ref && part && partialPossible) {
+        CFDataRef a = CGDataProviderCopyData(CGImageGetDataProvider(ref));
+        CFDataRef b = CGDataProviderCopyData(CGImageGetDataProvider(part));
+        const uint32_t* pa = (const uint32_t*)CFDataGetBytePtr(a);
+        const uint32_t* pb = (const uint32_t*)CFDataGetBytePtr(b);
+        const size_t n = (size_t)CFDataGetLength(a) / 4;
+        diff = 0;
+        for (size_t i = 0; i < n; ++i) diff += (pa[i] & 0xFFFFFF) != (pb[i] & 0xFFFFFF);
+        CFRelease(a);
+        CFRelease(b);
+    }
+    if (ref) CGImageRelease(ref);
+    if (part) CGImageRelease(part);
+    return diff;
+}
+
 bool appSavePng(const char* utf8Path) {
     appDrawFrame();
-    return g_gfx.savePng(wide(utf8Path).c_str());
+    return g_gfx.savePng(toWide(utf8Path).c_str());
 }

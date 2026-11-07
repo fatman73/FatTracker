@@ -220,6 +220,7 @@ void PlayScreen::drawDialog(Gfx& g, Text& tx, const Theme& t) {
 
 void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     font_ = &f;
+    onlyLogo_ = false;
     L_ = layout(g.viewport());
     Ui u{g, tx, t};
     Telemetry tel;
@@ -416,6 +417,7 @@ void PlayScreen::draw(Gfx& g, Text& tx, Font& f, const Theme& t, Engine& e) {
     bool anyVu = false;
     for (int c = 0; c < 32; ++c) anyVu = anyVu || tel.ch[c].vu > 0.002f;
     animating_ = tel.playing || anyVu || topMain;  // the demo in the logo box moves
+    onlyLogo_ = !tel.playing && !anyVu && topMain && !pure_;
 }
 
 void PlayScreen::toggleMute(int ch, Engine& e) { e.setMute(ch, !last_.ch[ch].muted); }
